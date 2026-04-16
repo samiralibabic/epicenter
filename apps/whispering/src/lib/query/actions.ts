@@ -625,7 +625,22 @@ export const actions = {
 			return Ok(undefined);
 		},
 		onError: (error) => {
-			notify.error(error);
+			if (error.name === 'WhisperingError') {
+				notify.error(error);
+				return;
+			}
+			const description =
+				typeof error === 'object' &&
+				error !== null &&
+				'message' in error &&
+				typeof error.message === 'string'
+					? error.message
+					: 'The transformation could not be completed.';
+			notify.error({
+				title: '⚠️ Transformation failed',
+				description,
+				action: { type: 'more-details', error },
+			});
 		},
 	}),
 };
