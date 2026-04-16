@@ -8,6 +8,7 @@ import { services } from '$lib/services';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
 import { settings } from '$lib/state/settings.svelte';
+import { transformationSteps } from '$lib/state/transformation-steps.svelte';
 import { transformations } from '$lib/state/transformations.svelte';
 import { vadRecorder } from '$lib/state/vad-recorder.svelte';
 import * as transformClipboardWindow from '$routes/transform-clipboard/transformClipboardWindow.tauri';
@@ -578,6 +579,8 @@ export const actions = {
 				});
 			}
 
+			const steps = transformationSteps.getByTransformationId(transformation.id);
+
 			// Read clipboard text
 			const { data: clipboardText, error: readClipboardError } =
 				await text.readFromClipboard.fetch();
@@ -608,6 +611,7 @@ export const actions = {
 				await transformer.transformInput({
 					input: clipboardText,
 					transformation,
+					steps,
 				});
 
 			if (transformError) {
@@ -625,7 +629,22 @@ export const actions = {
 			return Ok(undefined);
 		},
 		onError: (error) => {
-			notify.error(error);
+			if (error.name === 'WhisperingError') {
+				notify.error(error);
+				return;
+			}
+			const description =
+				typeof error === 'object' &&
+				error !== null &&
+				'message' in error &&
+				typeof error.message === 'string'
+					? error.message
+					: 'The transformation could not be completed.';
+			notify.error({
+				title: '⚠️ Transformation failed',
+				description,
+				action: { type: 'more-details', error },
+			});
 		},
 	}),
 };

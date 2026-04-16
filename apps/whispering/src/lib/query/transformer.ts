@@ -215,47 +215,62 @@ async function handleStep({
 	input: string;
 	step: TransformationStep;
 }): Promise<Result<string, string>> {
-	switch (step.type) {
-		case 'find_replace': {
-			const { findText, replaceText, useRegex } = step;
+	try {
+		switch (step.type) {
+			case 'find_replace': {
+				const { findText, replaceText, useRegex } = step;
 
-			if (useRegex) {
-				try {
-					const regex = new RegExp(findText, 'g');
-					return Ok(input.replace(regex, replaceText));
-				} catch (error) {
-					return Err(`Invalid regex pattern: ${extractErrorMessage(error)}`);
+				if (useRegex) {
+					try {
+						const regex = new RegExp(findText, 'g');
+						return Ok(input.replace(regex, replaceText));
+					} catch (error) {
+						return Err(`Invalid regex pattern: ${extractErrorMessage(error)}`);
+					}
 				}
+
+				return Ok(input.replaceAll(findText, replaceText));
 			}
 
-			return Ok(input.replaceAll(findText, replaceText));
-		}
+			case 'prompt_transform': {
+				const { inferenceProvider, systemPromptTemplate, userPromptTemplate } =
+					step;
+				const systemPrompt = interpolateTemplate(
+					asTemplateString(systemPromptTemplate),
+					{ input },
+				);
+				const userPrompt = interpolateTemplate(
+					asTemplateString(userPromptTemplate),
+					{ input },
+				);
 
-		case 'prompt_transform': {
-			const { inferenceProvider, systemPromptTemplate, userPromptTemplate } =
-				step;
-			const systemPrompt = interpolateTemplate(
-				asTemplateString(systemPromptTemplate),
-				{ input },
-			);
-			const userPrompt = interpolateTemplate(
-				asTemplateString(userPromptTemplate),
-				{ input },
-			);
+				// Handle Custom separately—it has per-step baseUrl logic.
+				if (inferenceProvider === 'Custom') {
+					const model = step.customModel?.trim();
+					const stepBaseUrl = step.customBaseUrl?.trim();
+					const defaultBaseUrl = deviceConfig
+						.get('completion.custom.baseUrl')
+						?.trim();
+					const baseUrl = stepBaseUrl || defaultBaseUrl || '';
 
-			// Handle Custom separately—it has per-step baseUrl logic.
-			if (inferenceProvider === 'Custom') {
-				const model = step.customModel?.trim();
-				const stepBaseUrl = step.customBaseUrl?.trim();
-				const defaultBaseUrl = deviceConfig
-					.get('completion.custom.baseUrl')
-					?.trim();
-				const baseUrl = stepBaseUrl || defaultBaseUrl || '';
+					const { data, error } = await services.completions.custom.complete({
+						apiKey: deviceConfig.get('apiKeys.custom'),
+						model,
+						baseUrl,
+						systemPrompt,
+						userPrompt,
+					});
+					if (error) return Err(error.message);
+					return Ok(data);
+				}
 
-				const { data, error } = await services.completions.custom.complete({
-					apiKey: deviceConfig.get('apiKeys.custom'),
-					model,
-					baseUrl,
+				// Standard providers all share the same call signature.
+				const config = STANDARD_PROVIDER_CONFIG[inferenceProvider];
+				if (!config) return Err(`Unsupported provider: ${inferenceProvider}`);
+
+				const { data, error } = await config.service.complete({
+					apiKey: deviceConfig.get(config.apiKeyPath),
+					model: step[config.modelKey] as string,
 					systemPrompt,
 					userPrompt,
 				});
@@ -263,22 +278,11 @@ async function handleStep({
 				return Ok(data);
 			}
 
-			// Standard providers all share the same call signature.
-			const config = STANDARD_PROVIDER_CONFIG[inferenceProvider];
-			if (!config) return Err(`Unsupported provider: ${inferenceProvider}`);
-
-			const { data, error } = await config.service.complete({
-				apiKey: deviceConfig.get(config.apiKeyPath),
-				model: step[config.modelKey] as string,
-				systemPrompt,
-				userPrompt,
-			});
-			if (error) return Err(error.message);
-			return Ok(data);
+			default:
+				return Err(`Unsupported step type: ${step.type}`);
 		}
-
-		default:
-			return Err(`Unsupported step type: ${step.type}`);
+	} catch (error) {
+		return Err(extractErrorMessage(error));
 	}
 }
 
