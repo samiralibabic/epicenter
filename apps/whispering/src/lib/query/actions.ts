@@ -52,6 +52,15 @@ let manualRecordingStartTime: number | null = null;
  */
 let isRecordingOperationBusy = false;
 
+/**
+ * Flag to queue a stop request that arrives during recording startup.
+ *
+ * When push-to-talk is tapped quickly, the release event (stop) can arrive before
+ * the start operation completes. Rather than dropping the stop, we queue it
+ * and consume it after startup finishes.
+ */
+let pendingManualStop = false;
+
 // Internal mutations for manual recording
 const startManualRecording = defineMutation({
 	mutationKey: ['commands', 'startManualRecording'] as const,
@@ -61,6 +70,19 @@ const startManualRecording = defineMutation({
 			console.info('Recording operation already in progress, ignoring start');
 			return Ok(undefined);
 		}
+
+		// Check if already recording to avoid repeated start attempts
+		const { data: recorderState, error: getRecorderStateError } =
+			await recorder.getRecorderState.fetch();
+		if (getRecorderStateError) {
+			notify.error(getRecorderStateError);
+			return Ok(undefined);
+		}
+		if (recorderState === 'RECORDING') {
+			console.info('Already recording, ignoring start');
+			return Ok(undefined);
+		}
+
 		isRecordingOperationBusy = true;
 
 		settings.set('recording.mode', 'manual');
@@ -75,10 +97,9 @@ const startManualRecording = defineMutation({
 		const { data: deviceAcquisitionOutcome, error: startRecordingError } =
 			await recorder.startRecording({ toastId });
 
-		// Release mutex after the actual start operation completes
-		isRecordingOperationBusy = false;
-
 		if (startRecordingError) {
+			isRecordingOperationBusy = false;
+			pendingManualStop = false;
 			notify.error({ id: toastId, ...startRecordingError });
 			return Ok(undefined);
 		}
@@ -130,10 +151,21 @@ const startManualRecording = defineMutation({
 				}
 			}
 		}
+
 		// Track start time for duration calculation
 		manualRecordingStartTime = Date.now();
 		console.info('Recording started');
 		sound.playSoundIfEnabled('manual-start');
+
+		// Release mutex first, then check for queued stop
+		isRecordingOperationBusy = false;
+
+		// If a stop was queued during startup, consume it now
+		if (pendingManualStop) {
+			pendingManualStop = false;
+			return await stopManualRecording(undefined);
+		}
+
 		return Ok(undefined);
 	},
 });
@@ -141,11 +173,13 @@ const startManualRecording = defineMutation({
 const stopManualRecording = defineMutation({
 	mutationKey: ['commands', 'stopManualRecording'] as const,
 	mutationFn: async () => {
-		// Prevent concurrent recording operations
+		// Queue stop if another recording operation is in progress
 		if (isRecordingOperationBusy) {
-			console.info('Recording operation already in progress, ignoring stop');
+			pendingManualStop = true;
+			console.info('Recording operation in progress, queuing stop');
 			return Ok(undefined);
 		}
+
 		isRecordingOperationBusy = true;
 
 		const toastId = nanoid();
@@ -162,6 +196,7 @@ const stopManualRecording = defineMutation({
 		// Release mutex after the actual stop operation completes
 		// This allows new recordings to start while pipeline runs
 		isRecordingOperationBusy = false;
+		pendingManualStop = false;
 
 		if (stopRecordingError) {
 			notify.error({ id: toastId, ...stopRecordingError });
@@ -369,6 +404,7 @@ export const actions = {
 				return Ok(undefined);
 			}
 			isRecordingOperationBusy = true;
+			pendingManualStop = false;
 
 			const toastId = nanoid();
 			notify.loading({
