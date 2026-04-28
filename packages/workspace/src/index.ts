@@ -127,11 +127,6 @@ export {
 } from './document/attach-indexed-db.js';
 
 export {
-	attachSqlite,
-	type SqliteAttachment,
-} from './document/attach-sqlite.js';
-
-export {
 	attachBroadcastChannel,
 	BC_ORIGIN,
 	type BroadcastChannelAttachment,

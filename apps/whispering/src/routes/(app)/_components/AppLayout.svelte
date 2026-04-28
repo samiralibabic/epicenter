@@ -14,6 +14,7 @@
 		VAD_STATE_TO_ICON,
 	} from '$lib/constants/audio';
 	import { migrationDialog } from '$lib/migration/migration-dialog.svelte';
+	import { importTransformationsFromMarkdown } from '$lib/migration/import-transformations-from-markdown';
 	import { migrateOldSettings } from '$lib/migration/migrate-settings';
 	import { rpc } from '$lib/query';
 	import { services } from '$lib/services';
@@ -84,6 +85,7 @@
 	async function registerOnboardingWhenSettingsReady() {
 		await whispering.whenReady;
 		await migrateOldSettings();
+		await importTransformationsFromMarkdown();
 		registerOnboarding();
 	}
 

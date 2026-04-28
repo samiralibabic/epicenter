@@ -41,16 +41,13 @@ export function fromTable<TRow extends BaseRow>(
 	// Granular updates — only touch changed rows
 	const unobserve = table.observe((changedIds) => {
 		for (const id of changedIds) {
-			const result = table.get(id);
-			switch (result.status) {
-				case 'valid':
-					map.set(id, result.row);
-					break;
-				case 'not_found':
-				case 'invalid':
-					map.delete(id);
-					break;
+			const { data: row, error } = table.get(id);
+			if (error || row === null) {
+				map.delete(id);
+				continue;
 			}
+
+			map.set(id, row);
 		}
 	});
 
