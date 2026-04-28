@@ -14,11 +14,13 @@
 		VAD_STATE_TO_ICON,
 	} from '$lib/constants/audio';
 	import { migrationDialog } from '$lib/migration/migration-dialog.svelte';
+	import { migrateOldSettings } from '$lib/migration/migrate-settings';
 	import { rpc } from '$lib/query';
 	import { services } from '$lib/services';
 	import { recordings } from '$lib/state/recordings.svelte';
 	import { settings } from '$lib/state/settings.svelte';
 	import { vadRecorder } from '$lib/state/vad-recorder.svelte';
+	import { whispering } from '$lib/whispering/client';
 	import { syncWindowAlwaysOnTopWithRecorderState } from '../_layout-utils/alwaysOnTop.svelte';
 	import {
 		checkCompressionRecommendation,
@@ -51,7 +53,7 @@
 		window.goto = goto;
 		syncLocalShortcutsWithSettings();
 		resetLocalShortcutsToDefaultIfDuplicates();
-		registerOnboarding();
+		void registerOnboardingWhenSettingsReady();
 		cleanupAccessibilityPermission = registerAccessibilityPermission();
 		cleanupMicrophonePermission = registerMicrophonePermission();
 
@@ -78,6 +80,12 @@
 		cleanupAccessibilityPermission?.();
 		cleanupMicrophonePermission?.();
 	});
+
+	async function registerOnboardingWhenSettingsReady() {
+		await whispering.whenReady;
+		await migrateOldSettings();
+		registerOnboarding();
+	}
 
 	if (window.__TAURI_INTERNALS__) {
 		syncWindowAlwaysOnTopWithRecorderState();
