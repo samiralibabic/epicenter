@@ -4,6 +4,28 @@ import { customFetch } from '$lib/services/http';
 import type { CompletionService } from './types';
 import { CompletionError } from './types';
 
+function extractResponseText(content: unknown): string | null {
+	if (typeof content === 'string') return content;
+	if (!Array.isArray(content)) return null;
+
+	const text = content
+		.filter(
+			(part): part is { type: string; text: string } =>
+				typeof part === 'object' &&
+				part !== null &&
+				'type' in part &&
+				'text' in part &&
+				typeof part.type === 'string' &&
+				typeof part.text === 'string',
+		)
+		.filter((part) => part.type === 'text' || part.type === 'output_text')
+		.map((part) => part.text)
+		.join('\n')
+		.trim();
+
+	return text || null;
+}
+
 export type OpenAiCompatibleConfig = {
 	/**
 	 * Human-readable provider name used in error messages.
@@ -140,7 +162,9 @@ export function createOpenAiCompatibleCompletionService(
 
 			if (apiError) return Err(apiError);
 
-			const responseText = completion.choices.at(0)?.message?.content;
+			const responseText = extractResponseText(
+				completion.choices.at(0)?.message?.content,
+			);
 			if (!responseText) {
 				return CompletionError.EmptyResponse({
 					providerLabel: config.providerLabel,
