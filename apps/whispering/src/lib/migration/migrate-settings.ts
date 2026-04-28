@@ -17,6 +17,7 @@ import { whisperingKv } from '$lib/workspace';
 
 const MIGRATION_STATE_KEY = 'whispering:settings-migration';
 type MigrationState = 'completed' | 'not-needed';
+let migrationPromise: Promise<void> | undefined;
 
 function getMigrationState(): MigrationState | null {
 	return window.localStorage.getItem(
@@ -47,7 +48,12 @@ const getKvDefault = (key: string) =>
  *
  * Silent, automatic, idempotent. One bad key doesn't abort the migration.
  */
-export async function migrateOldSettings(): Promise<void> {
+export function migrateOldSettings(): Promise<void> {
+	migrationPromise ??= runSettingsMigration();
+	return migrationPromise;
+}
+
+async function runSettingsMigration(): Promise<void> {
 	const state = getMigrationState();
 	if (state !== null) return;
 
