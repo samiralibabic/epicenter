@@ -656,7 +656,28 @@ bun i
 bun tauri build
 ```
 
-Find the executable in `apps/whispering/target/release`
+On Apple Silicon, make sure Rust is native before building. If `rustc` or `cargo` point to an Intel Homebrew install, Tauri can produce an Intel-only app that runs under Rosetta.
+
+```bash
+uname -m
+rustc -vV | grep host
+cargo -vV | grep host
+```
+
+Healthy Apple Silicon output should include `arm64` from `uname -m` and `aarch64-apple-darwin` from Rust/Cargo. To force an Apple Silicon build with rustup-managed Rust:
+
+```bash
+PATH="$(dirname "$(rustup which cargo)"):$PATH" bun tauri build --target aarch64-apple-darwin
+```
+
+After installing or copying the app, verify the binary you are actually running:
+
+```bash
+file /Applications/Whispering.app/Contents/MacOS/whispering
+lipo -archs /Applications/Whispering.app/Contents/MacOS/whispering
+```
+
+Find build outputs in `apps/whispering/src-tauri/target/release` for the default target, or `apps/whispering/src-tauri/target/aarch64-apple-darwin/release` when building with `--target aarch64-apple-darwin`.
 
 ### Contributing
 
