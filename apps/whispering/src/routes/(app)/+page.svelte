@@ -18,7 +18,6 @@
 	import { extractErrorMessage } from 'wellcrafted/error';
 	import { partitionResults, tryAsync } from 'wellcrafted/result';
 	import { commandCallbacks } from '$lib/commands';
-	import { WhisperingErr } from '$lib/result';
 	import TranscriptDialog from '$lib/components/copyable/TranscriptDialog.svelte';
 	import {
 		CompressionSelector,
@@ -35,6 +34,7 @@
 	} from '$lib/constants/audio';
 	import { getShortcutDisplayLabel } from '$lib/constants/keyboard';
 	import { rpc } from '$lib/query';
+	import { WhisperingErr } from '$lib/result';
 	import { services } from '$lib/services';
 	import { desktopServices } from '$lib/services/desktop';
 	import { deviceConfig } from '$lib/state/device-config.svelte';
@@ -52,8 +52,6 @@
 		...rpc.audio.getPlaybackUrl(() => latestRecording?.id ?? '').options,
 		enabled: !!latestRecording?.id,
 	}));
-
-	const blobUrl = $derived(audioPlaybackUrlQuery.data);
 
 	const availableModes = $derived(
 		RECORDING_MODE_OPTIONS.filter((mode) => {
@@ -387,12 +385,12 @@
 				}}
 			/>
 
-			{#if blobUrl}
+			{#if audioPlaybackUrlQuery.data}
 				<audio
 					style="view-transition-name: {viewTransition.recording(
 						latestRecording.id,
 					).audio}"
-					src={blobUrl}
+					src={audioPlaybackUrlQuery.data}
 					controls
 					class="h-8 w-full"
 				></audio>

@@ -2,9 +2,9 @@
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import * as Table from '@epicenter/ui/table';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { eventsQueryOptions } from '$lib/query/billing';
+	import { billing } from '$lib/query/billing';
 
-	const events = createQuery(() => eventsQueryOptions({ limit: 50 }));
+	const events = createQuery(() => billing.events({ limit: 50 }).options);
 
 	/** Autumn stores timestamp as epoch ms. */
 	function formatTimestamp(ts: number): string {

@@ -3,22 +3,29 @@
 	import { confirmationDialog } from '@epicenter/ui/confirmation-dialog';
 	import * as ContextMenu from '@epicenter/ui/context-menu';
 	import * as TreeView from '@epicenter/ui/tree-view';
-	import { fsState } from '$lib/state/fs-state.svelte';
+	import { requireOpensidian } from '$lib/session';
 	import { getFileIcon } from '$lib/utils/file-icons';
 	import FileTreeItem from './FileTreeItem.svelte';
 	import InlineNameInput from './InlineNameInput.svelte';
 
+	const opensidian = requireOpensidian();
 	let { id }: { id: FileId } = $props();
 
-	const row = $derived(fsState.getFile(id));
+	const row = $derived(opensidian.state.files.getFile(id));
 	const isFolder = $derived(row?.type === 'folder');
-	const isExpanded = $derived(fsState.isExpanded(id));
-	const isSelected = $derived(fsState.activeFileId === id);
-	const children = $derived(isFolder ? fsState.getChildren(id) : []);
-	const isFocused = $derived(fsState.focusedId === id);
-	const isRenaming = $derived(fsState.renamingId === id);
-	const showInlineCreate = $derived(fsState.inlineCreate?.parentId === id);
-	const isContextTarget = $derived(fsState.contextMenuTargetId === id);
+	const isExpanded = $derived(opensidian.state.files.isExpanded(id));
+	const isSelected = $derived(opensidian.state.files.activeFileId === id);
+	const children = $derived(
+		isFolder ? opensidian.state.files.getChildren(id) : [],
+	);
+	const isFocused = $derived(opensidian.state.files.focusedId === id);
+	const isRenaming = $derived(opensidian.state.files.renamingId === id);
+	const showInlineCreate = $derived(
+		opensidian.state.files.inlineCreate?.parentId === id,
+	);
+	const isContextTarget = $derived(
+		opensidian.state.files.contextMenuTargetId === id,
+	);
 
 	/** Whether this item should show the highlight background. */
 	const isHighlighted = $derived(isSelected || isContextTarget);
@@ -26,7 +33,7 @@
 
 {#if row}
 	<ContextMenu.Root
-		onOpenChange={(open) => fsState.setContextMenuTarget(open ? id : null)}
+		onOpenChange={(open) => opensidian.state.files.setContextMenuTarget(open ? id: null)}
 	>
 		<ContextMenu.Trigger>
 			{#snippet child({ props })}
@@ -41,8 +48,8 @@
 						<InlineNameInput
 							defaultValue={row.name}
 							icon="folder"
-							onConfirm={fsState.confirmRename}
-							onCancel={fsState.cancelRename}
+							onConfirm={opensidian.state.files.confirmRename}
+							onCancel={opensidian.state.files.cancelRename}
 						/>
 					</div>
 				{:else if isFolder}
@@ -55,19 +62,19 @@
 						<TreeView.Folder
 							name={row.name}
 							open={isExpanded}
-							onOpenChange={() => fsState.toggleExpand(id)}
+							onOpenChange={() => opensidian.state.files.toggleExpand(id)}
 							class="w-full rounded-sm px-2 py-1 text-sm hover:bg-accent {isHighlighted
 								? 'bg-accent text-accent-foreground'
-								: ''} {isFocused ? 'ring-1 ring-ring' : ''}"
+								: ''} {isFocused ? 'ring-1 ring-ring': ''}"
 						>
 							{#each children as childId (childId)}
 								<FileTreeItem id={childId} />
 							{/each}
 							{#if showInlineCreate}
 								<InlineNameInput
-									icon={fsState.inlineCreate?.type ?? 'file'}
-									onConfirm={fsState.confirmCreate}
-									onCancel={fsState.cancelCreate}
+									icon={opensidian.state.files.inlineCreate?.type ?? 'file'}
+									onConfirm={opensidian.state.files.confirmCreate}
+									onCancel={opensidian.state.files.cancelCreate}
 								/>
 							{/if}
 						</TreeView.Folder>
@@ -82,8 +89,8 @@
 						<InlineNameInput
 							defaultValue={row.name}
 							icon="file"
-							onConfirm={fsState.confirmRename}
-							onCancel={fsState.cancelRename}
+							onConfirm={opensidian.state.files.confirmRename}
+							onCancel={opensidian.state.files.cancelRename}
 						/>
 					</div>
 				{:else}
@@ -93,8 +100,8 @@
 						{id}
 						class="w-full rounded-sm px-2 py-1 text-sm hover:bg-accent {isHighlighted
 							? 'bg-accent text-accent-foreground'
-							: ''} {isFocused ? 'ring-1 ring-ring' : ''}"
-						onclick={() => fsState.selectFile(id)}
+							: ''} {isFocused ? 'ring-1 ring-ring': ''}"
+						onclick={() => opensidian.state.files.selectFile(id)}
 						aria-selected={isSelected}
 						role="treeitem"
 					>
@@ -111,7 +118,7 @@
 		</ContextMenu.Trigger>
 		<ContextMenu.Content
 			onCloseAutoFocus={(e) => {
-				if (fsState.inlineCreate || fsState.renamingId) {
+				if (opensidian.state.files.inlineCreate || opensidian.state.files.renamingId) {
 					e.preventDefault();
 				}
 			}}
@@ -119,9 +126,9 @@
 			{#if isFolder}
 				<ContextMenu.Item
 					onclick={() => {
-						fsState.focus(id);
-						fsState.expand(id);
-						fsState.startCreate('file');
+						opensidian.state.files.focus(id);
+						opensidian.state.files.expand(id);
+						opensidian.state.files.startCreate('file');
 					}}
 				>
 					New File
@@ -129,9 +136,9 @@
 				</ContextMenu.Item>
 				<ContextMenu.Item
 					onclick={() => {
-						fsState.focus(id);
-						fsState.expand(id);
-						fsState.startCreate('folder');
+						opensidian.state.files.focus(id);
+						opensidian.state.files.expand(id);
+						opensidian.state.files.startCreate('folder');
 					}}
 				>
 					New Folder
@@ -139,23 +146,23 @@
 				</ContextMenu.Item>
 				<ContextMenu.Separator />
 			{/if}
-			<ContextMenu.Item onclick={() => fsState.startRename(id)}>
+			<ContextMenu.Item onclick={() => opensidian.state.files.startRename(id)}>
 				Rename
 				<ContextMenu.Shortcut>F2</ContextMenu.Shortcut>
 			</ContextMenu.Item>
 			<ContextMenu.Item
 				class="text-destructive"
 				onclick={() => {
-					const row = fsState.getFile(id);
+					const row = opensidian.state.files.getFile(id);
 					const name = row?.name ?? 'this item';
 					const isFolder = row?.type === 'folder';
 					confirmationDialog.open({
 						title: `Delete ${name}?`,
-						description: isFolder
+						description:isFolder
 							? 'This will delete the folder and all its contents. This action cannot be undone.'
 							: 'This will delete the file. This action cannot be undone.',
 						confirm: { text: 'Delete', variant: 'destructive' },
-						onConfirm: () => fsState.deleteFile(id),
+						onConfirm: () => opensidian.state.files.deleteFile(id),
 					});
 				}}
 			>

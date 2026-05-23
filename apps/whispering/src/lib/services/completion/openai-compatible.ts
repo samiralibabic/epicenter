@@ -4,7 +4,7 @@ import { customFetch } from '$lib/services/http';
 import type { CompletionService } from './types';
 import { CompletionError } from './types';
 
-export type OpenAiCompatibleConfig = {
+type OpenAiCompatibleConfig = {
 	/**
 	 * Human-readable provider name used in error messages.
 	 *
@@ -95,7 +95,7 @@ export type OpenAiCompatibleConfig = {
  */
 export function createOpenAiCompatibleCompletionService(
 	config: OpenAiCompatibleConfig,
-): CompletionService {
+) {
 	return {
 		async complete(params) {
 			// Validate params if validator provided
@@ -149,5 +149,5 @@ export function createOpenAiCompatibleCompletionService(
 
 			return Ok(responseText);
 		},
-	};
+	} satisfies CompletionService;
 }

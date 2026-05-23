@@ -36,7 +36,7 @@ async function deleteFilesInDirectory(
  *   - {id}.{ext} (audio file: .wav, .opus, .mp3, etc.)
  *   - {id}.md (metadata materialized by workspace, NOT written by this service)
  */
-export function createFileSystemBlobStore(): BlobStore {
+export function createFileSystemBlobStore() {
 	return {
 		async save(key, blob) {
 			return tryAsync({
@@ -45,10 +45,7 @@ export function createFileSystemBlobStore(): BlobStore {
 					await mkdir(recordingsPath, { recursive: true });
 
 					const extension = mime.getExtension(blob.type) ?? 'bin';
-					const audioPath = await PATHS.DB.RECORDING_AUDIO(
-						key,
-						extension,
-					);
+					const audioPath = await PATHS.DB.RECORDING_AUDIO(key, extension);
 					const arrayBuffer = await blob.arrayBuffer();
 					await tauriWriteFile(audioPath, new Uint8Array(arrayBuffer));
 				},
@@ -79,15 +76,10 @@ export function createFileSystemBlobStore(): BlobStore {
 			return tryAsync({
 				try: async () => {
 					const recordingsPath = await PATHS.DB.RECORDINGS();
-					const audioFilename = await findAudioFile(
-						recordingsPath,
-						key,
-					);
+					const audioFilename = await findAudioFile(recordingsPath, key);
 
 					if (!audioFilename) {
-						throw new Error(
-						`Audio file not found for key ${key}`,
-						);
+						throw new Error(`Audio file not found for key ${key}`);
 					}
 
 					const audioPath = await PATHS.DB.RECORDING_FILE(audioFilename);
@@ -107,15 +99,10 @@ export function createFileSystemBlobStore(): BlobStore {
 			return tryAsync({
 				try: async () => {
 					const recordingsPath = await PATHS.DB.RECORDINGS();
-					const audioFilename = await findAudioFile(
-						recordingsPath,
-						key,
-					);
+					const audioFilename = await findAudioFile(recordingsPath, key);
 
 					if (!audioFilename) {
-						throw new Error(
-						`Audio file not found for key ${key}`,
-						);
+						throw new Error(`Audio file not found for key ${key}`);
 					}
 
 					const audioPath = await PATHS.DB.RECORDING_FILE(audioFilename);
@@ -147,7 +134,7 @@ export function createFileSystemBlobStore(): BlobStore {
 				catch: (error) => BlobError.WriteFailed({ cause: error }),
 			});
 		},
-	};
+	} satisfies BlobStore;
 }
 
 /**

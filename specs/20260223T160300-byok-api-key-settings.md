@@ -10,21 +10,21 @@ The engine already supports BYOK mode (direct-to-provider with the user's own ke
 
 ## Solution
 
-Add per-provider BYOK API key storage + a minimal settings UI in the sidebar. When a key is stored, it's sent as `apiKey` on `ChatRequest` — the engine uses BYOK mode (direct to provider, no hub proxy needed).
+Add per-provider BYOK API key storage + a minimal settings UI in the sidebar. When a key is stored, it's sent as `apiKey` on `ChatRequest`: the engine uses BYOK mode (direct to provider, no hub proxy needed).
 
 ## Todo
 
-- [ ] **1. Add API key storage** — `apps/tab-manager/src/lib/state/settings.ts`
-  - Add `storage.defineItem<Record<string, string>>('local:providerApiKeys', { fallback: {} })` using wxt storage
+- [ ] **1. Add API key storage**: `apps/tab-manager/src/lib/state/settings.ts`
+  - Add `storage.defineItem<Record<string, string>>('local:provider.api.keys', { fallback: {} })` using wxt storage
   - Export `getApiKey(provider): Promise<string | undefined>` and `setApiKey(provider, key): Promise<void>`
-  - Simple read/write — no versioning needed for v1
+  - Simple read/write: no versioning needed for v1
 
-- [ ] **2. Wire apiKey into ChatRequest** — `apps/tab-manager/src/lib/state/chat.svelte.ts`
+- [ ] **2. Wire apiKey into ChatRequest**: `apps/tab-manager/src/lib/state/chat.svelte.ts`
   - In `sendChatToBgsw()`, call `getApiKey(conv.provider)` before building the request
   - Set `apiKey` field on the `ChatRequest` if a key exists for the provider
   - If no BYOK key, fall through to hub proxy mode as before (no behavior change)
 
-- [ ] **3. Add API Key settings UI** — New `ApiKeySettings.svelte` component
+- [ ] **3. Add API Key settings UI**: New `ApiKeySettings.svelte` component
   - Small settings button (gear icon) in the AI chat controls area
   - Opens a Dialog with a single input for the current provider's API key
   - Reads/writes via `getApiKey`/`setApiKey` from settings.ts
@@ -54,7 +54,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 |------|--------|
 | `apps/tab-manager/src/lib/state/settings.ts` | Add API key storage functions |
 | `apps/tab-manager/src/lib/state/chat.svelte.ts` | Read stored key, pass as `apiKey` on ChatRequest |
-| `apps/tab-manager/src/lib/components/ApiKeySettings.svelte` | New — dialog for entering API keys |
+| `apps/tab-manager/src/lib/components/ApiKeySettings.svelte` | New: dialog for entering API keys |
 | `apps/tab-manager/src/lib/components/AiChat.svelte` | Add gear button to open settings dialog |
 
 ## Review

@@ -1,9 +1,19 @@
 # Auth Surface Simplification
 
 **Date**: 2026-03-25
-**Status**: Implemented
+**Status**: Superseded
 **Author**: Codex
 **Branch**: `feat/sync-auto-reconnect`
+
+**Superseded on 2026-05-07**: This spec was implemented as written on
+2026-03-25, then replaced by the later auth/session/workspace split on
+`origin/main`. The active design no longer has
+`packages/svelte-utils/src/auth-state.svelte.ts`, `createWorkspaceAuth`,
+`restoreUserKey`, or injected `client` / `store` seams in this shape.
+Current app auth lives in `@epicenter/auth` and `@epicenter/auth-svelte`
+through `createCookieAuth` / `createBearerAuth`; signed-in workspace
+construction lives in `createSession`; workspace encryption is attached
+through `attachEncryption(ydoc, { encryptionKeys })`.
 
 ## Overview
 
@@ -475,6 +485,7 @@ checkSession
 ## Review
 
 **Completed**: 2026-03-25
+**Superseded**: 2026-05-07
 **Branch**: `feat/sync-auto-reconnect`
 
 ### Summary
@@ -506,3 +517,36 @@ Those type-check runs all fail for unrelated pre-existing issues outside this au
 - existing app-local errors in Honeycrisp, Opensidian, and tab-manager unrelated to auth surface changes
 
 No verification failure pointed at the touched auth module or the migrated auth call sites.
+
+### Supersession Notes
+
+The March result should be read as historical context, not the current API
+contract. The later `origin/main` implementation moved the domain split out of
+the auth constructor itself:
+
+```text
+Better Auth session
+  -> AuthClient.state.identity
+       user
+       encryptionKeys
+  -> createSession(...)
+       builds signed-in app workspace
+  -> openZhongwen / openHoneycrisp / openTabManager(...)
+       passes encryptionKeys getter
+  -> attachEncryption(ydoc, { encryptionKeys })
+       encrypted tables / kv / indexeddb
+```
+
+The old actionables are superseded:
+
+- `createAuthController` is gone.
+- The old nested `session.session.user` shape is gone.
+- `restoreUserKey` is gone.
+- `createAuth` / `createWorkspaceAuth` as top-level app constructors are gone.
+- Zhongwen is no longer the plain-auth exception; it uses signed-in encrypted workspace state.
+- Platform differences now sit lower, in cookie vs bearer auth construction and app-specific workspace/session composition.
+
+The remaining live review point is narrower than this spec: confirm whether
+`attachEncryption` deriving keyrings at attachment time is the intended rule
+for same-user key rotation. The current code documents that already-attached
+encrypted stores do not observe same-user key rotation without re-attach.

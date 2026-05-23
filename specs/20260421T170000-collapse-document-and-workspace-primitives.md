@@ -65,7 +65,7 @@ Zero production-app consumers. Every `apps/*/src/lib/client.ts` already uses `de
 
 | Shape                   | Count | Examples                                                      |
 |-------------------------|-------|---------------------------------------------------------------|
-| Singleton, `gcTime: ∞`  | 10    | fuji, opensidian, whispering, tab-manager, zhongwen, honeycrisp, skillsDocument (×2), breddit |
+| Singleton, `gcTime: ∞`  | 10    | fuji, opensidian, whispering, tab-manager, zhongwen, honeycrisp, old skills factories (×2), breddit |
 | Multi-doc (dynamic ids) | 5     | `createFileContentDocs`, `createSkillInstructionsDocs`, `createReferenceContentDocs`, entry/note content docs |
 
 **No changes to any of these call sites.** Naming stays, shape stays, `.open(id)` stays.

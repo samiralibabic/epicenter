@@ -1,18 +1,19 @@
-import type {
-	InferKvValue,
-	KvDefinitions,
-	Kv,
-} from '@epicenter/workspace';
+import type { InferKvValue, Kv, KvDefinitions } from '@epicenter/workspace';
+import { createSubscriber } from 'svelte/reactivity';
 
 /**
  * Create a reactive binding to a single workspace KV key.
  *
- * Mirrors Svelte 5's `fromStore()` pattern—wraps an external data source
+ * Mirrors Svelte 5's `fromStore()` pattern: wraps an external data source
  * into a reactive `{ current }` box. Reading `.current` is reactive (triggers
  * re-renders). Writing `.current` calls `kv.set()` under the hood.
  *
  * The observer fires on both local and remote changes (Yjs CRDT sync).
  * On delete, falls back to the KV definition's `defaultValue` via `kv.get()`.
+ *
+ * The binding is tied to one KV store for its lifetime. If the workspace
+ * changes, remount the component or recreate the binding at that lifecycle
+ * boundary.
  *
  * @example
  * ```typescript
@@ -28,23 +29,18 @@ import type {
 export function fromKv<
 	TDefs extends KvDefinitions,
 	K extends keyof TDefs & string,
->(
-	kv: Kv<TDefs>,
-	key: K,
-): { current: InferKvValue<TDefs[K]>; destroy: () => void } {
-	let value = $state(kv.get(key));
-
-	const unobserve = kv.observe(key, (change) => {
-		value = change.type === 'set' ? change.value : kv.get(key);
+>(kv: Kv<TDefs>, key: K): { current: InferKvValue<TDefs[K]> } {
+	const subscribe = createSubscriber((update) => {
+		return kv.observe(key, update);
 	});
 
 	return {
 		get current() {
-			return value;
+			subscribe();
+			return kv.get(key);
 		},
 		set current(newValue: InferKvValue<TDefs[K]>) {
 			kv.set(key, newValue);
 		},
-		destroy: unobserve,
 	};
 }

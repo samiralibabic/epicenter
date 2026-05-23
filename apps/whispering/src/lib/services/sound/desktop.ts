@@ -3,7 +3,7 @@ import type { PlaySoundService } from '.';
 import { audioElements } from './assets';
 import { SoundError } from './types';
 
-export function createPlaySoundServiceDesktop(): PlaySoundService {
+export function createPlaySoundServiceDesktop() {
 	return {
 		playSound: async (soundName) =>
 			tryAsync({
@@ -12,5 +12,5 @@ export function createPlaySoundServiceDesktop(): PlaySoundService {
 				},
 				catch: (error) => SoundError.Play({ cause: error }),
 			}),
-	};
+	} satisfies PlaySoundService;
 }

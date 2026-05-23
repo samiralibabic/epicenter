@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { fromDisposableCache } from '@epicenter/svelte';
-	import { referenceDocs } from '@epicenter/skills';
+	import { skills } from '$lib/skills/client';
 	import CodeMirrorEditor from './CodeMirrorEditor.svelte';
 
 	let { id }: { id: string } = $props();
 
-	const doc = fromDisposableCache(referenceDocs, () => id);
+	const doc = fromDisposableCache(skills.referenceDocs, () => id);
 </script>
 
 <div class="h-48 border-t">

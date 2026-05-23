@@ -7,12 +7,8 @@ export {
 	type SqliteIndex,
 	type SqliteIndexOptions,
 } from './extensions/sqlite-index/index.js';
-// File content documents
-export {
-	createFileContentDoc,
-	type FileContentDoc,
-	type FileContentDocs,
-} from './file-content-docs.js';
+// File content document keys
+export { fileContentDocGuid } from './file-content-docs.js';
 // File system (orchestrator)
 export { attachYjsFileSystem, type YjsFileSystem } from './file-system.js';
 // Formats

@@ -1,9 +1,6 @@
 /** `recordingsFs` is a no-op in non-Tauri environments. */
 
-import {
-	attachBroadcastChannel,
-	attachIndexedDb,
-} from '@epicenter/workspace';
+import { attachBroadcastChannel, attachIndexedDb } from '@epicenter/workspace';
 import { PATHS } from '$lib/constants/paths';
 import { attachRecordingMarkdownFiles } from '$lib/recording-materializer';
 import { openWhispering as openWhisperingDoc } from './index';
@@ -19,7 +16,7 @@ export function openWhispering() {
 		doc.tables.recordings,
 		{
 			dir: PATHS.DB.RECORDINGS(),
-			whenReady: idb.whenLoaded,
+			waitFor: idb.whenLoaded,
 		},
 	);
 

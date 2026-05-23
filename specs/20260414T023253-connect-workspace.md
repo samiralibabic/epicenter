@@ -5,6 +5,8 @@
 **Author**: AI-assisted
 
 > **2026-04-18 Update**: `connectWorkspace` no longer attaches filesystem persistence. It now chains only `unlock → sync` and is ephemeral by design. Rationale: scripts are short-lived and the sync handshake downloads the full doc on connect, so paying for a second SQLite writer only created lock contention with a concurrently running `epicenter start` daemon on the same workspace. Persistence remains the daemon's responsibility; see `epicenter.config.ts` examples. References below that show `persistence` in the chain are historical.
+>
+> **Path note (2026-05-22):** The `resolveEpicenterHome()`, `~/.epicenter/auth/sessions.json`, and `~/.epicenter/persistence/` examples are stale. Do not copy them into new script or daemon persistence work.
 
 ## Overview
 

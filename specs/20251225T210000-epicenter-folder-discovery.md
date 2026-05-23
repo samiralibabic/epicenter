@@ -1,4 +1,6 @@
 > **Status: Superseded** by the centralized workspace model in `20260313T063000-workspace-architecture-decisions.md`. Workspaces now live under `~/.epicenter/workspaces/`, not scattered per-project.
+>
+> **Path note (2026-05-22):** The centralized `~/.epicenter/workspaces/` replacement named above is itself superseded. Keep the project-local `.epicenter/` examples only as historical project-folder design context, not as current global workspace registry guidance.
 
 # .epicenter Folder Discovery
 

@@ -15,10 +15,8 @@
 	],
 	"exports": {
 		".": "./src/index.ts",
-		"./auth-form": "./src/auth-form/index.ts",
-		"./workspace-gate": "./src/workspace-gate/index.ts",
-		"./sync-status-popover": "./src/sync-status-popover/index.ts",
-		"./account-popover": "./src/account-popover/index.ts"
+		"./account-popover": "./src/account-popover/index.ts",
+		"./workspace-gate": "./src/workspace-gate/index.ts"
 	},
 	"dependencies": {
 		"@epicenter/auth": "workspace:*",
@@ -28,6 +26,7 @@
 		"@epicenter/ui": "workspace:*",
 		"@epicenter/workspace": "workspace:*",
 		"@lucide/svelte": "catalog:",
+		"@tanstack/svelte-query": "catalog:",
 		"arktype": "catalog:",
 		"better-auth": "catalog:",
 		"idb": "^8.0.3",
@@ -35,13 +34,14 @@
 	},
 	"devDependencies": {
 		"@standard-schema/spec": "catalog:",
+		"@types/bun": "catalog:",
 		"svelte": "catalog:",
 		"svelte-check": "catalog:",
-		"@types/node": "catalog:",
 		"typescript": "catalog:"
 	},
 	"scripts": {
-		"typecheck": "svelte-check --tsconfig ./tsconfig.json"
+		"typecheck": "svelte-check --tsconfig ./tsconfig.json",
+		"test": "bun test"
 	},
 	"license": "MIT"
 }

@@ -25,3 +25,15 @@ export const SYNC_ORIGIN = Symbol.for('@epicenter/sync/sync-origin');
 
 /** Origin for updates applied from BroadcastChannel cross-tab sync. */
 export const BC_ORIGIN = Symbol.for('@epicenter/sync/bc-origin');
+
+/**
+ * Origins that mean a realtime transport already applied this update locally.
+ *
+ * Realtime transport listeners use this list to avoid forwarding an update
+ * back through another realtime transport.
+ */
+const TRANSPORT_ORIGINS: readonly unknown[] = [SYNC_ORIGIN, BC_ORIGIN];
+
+export function isTransportOrigin(origin: unknown): boolean {
+	return TRANSPORT_ORIGINS.includes(origin);
+}

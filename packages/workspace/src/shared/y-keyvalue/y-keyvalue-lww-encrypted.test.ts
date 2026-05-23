@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import {
+	type EncryptedBlob,
+	getKeyVersion,
+	isEncryptedBlob,
+} from '@epicenter/encryption';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import * as Y from 'yjs';
-import { type EncryptedBlob, getKeyVersion, isEncryptedBlob } from '../crypto';
 import {
 	createEncryptedYkvLww,
 	type EncryptedYKeyValueLww,
@@ -15,7 +19,7 @@ function setup<T = string>(keyring?: ReadonlyMap<number, Uint8Array>) {
 	return { ydoc, yarray: kv.yarray, kv };
 }
 
-/** Construct + activate in one step — replaces the old `initialKeyring` opt for tests. */
+/** Construct and activate in one step. Replaces the old `initialKeyring` opt for tests. */
 function setupActivated<T = string>(
 	ydoc: Y.Doc,
 	arrayKey: string,
@@ -503,7 +507,7 @@ describe('createEncryptedYkvLww', () => {
 						tampered[2] = (tampered[2] ?? 0) ^ 0xff;
 						return tampered as EncryptedBlob;
 					})(),
-					ts: Date.now(),
+					ts: 10_000,
 				},
 			]);
 
@@ -527,7 +531,7 @@ describe('createEncryptedYkvLww', () => {
 						tampered[2] = (tampered[2] ?? 0) ^ 0xff;
 						return tampered as EncryptedBlob;
 					})(),
-					ts: Date.now(),
+					ts: 10_001,
 				},
 			]);
 
@@ -620,7 +624,7 @@ describe('createEncryptedYkvLww', () => {
 					events.push({ key: entryKey, change });
 			});
 
-			// Activate encryption — plaintext entries get encrypted under the hood
+			// Activate encryption. Plaintext entries get encrypted under the hood.
 			// but their decrypted values don't change. Should fire zero events.
 			const key = randomBytes(32);
 			kv.activateEncryption(new Map([[1, key]]));
@@ -645,7 +649,7 @@ describe('createEncryptedYkvLww', () => {
 			}
 
 			// Activate with a two-key keyring: v2 is current, v1 is fallback.
-			// The walk rewrites every v1 blob as v2 — eager rotation.
+			// The walk rewrites every v1 blob as v2. Eager rotation.
 			kv.activateEncryption(
 				new Map([
 					[2, key2],

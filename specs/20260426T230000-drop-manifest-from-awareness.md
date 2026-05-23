@@ -1,8 +1,14 @@
 # Drop manifest from awareness — collapse to argless `system.describe`
 
-**Status**: ready to execute
+**Status**: Shipped; API details superseded
 **Date**: 2026-04-26
 **Supersedes**: `specs/20260426T220000-system-describe-wire-trim.md` on the awareness-wire-shape and `system.*` API questions. The earlier spec trimmed `input` from the wire manifest while keeping a "lite" manifest in awareness; this spec finishes the job by removing the manifest from awareness entirely.
+
+**Review 2026-05-01**: The core change shipped. Awareness carries peer
+identity only, and action discovery is fetched on demand through argless
+`system.describe`. Later API work replaced the proposed `peerSystem()` helper
+with `createRemoteClient({ peerDirectory, rpc }).describe(peerId)`. The old
+`epicenter list --peer` detail flow is no longer the current CLI model.
 
 ## Why this exists
 

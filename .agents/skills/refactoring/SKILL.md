@@ -1,6 +1,6 @@
 ---
 name: refactoring
-description: Systematic code audit and refactoring methodology—caller counting, type safety boundaries, inlining single-use extractions, keeping trivial duplications inline over premature extraction, collapsing duplicate branches, and surgical commits. Use when cleaning up code, auditing for code smells, refactoring modules, or reviewing internal function structure.
+description: "Per-change refactoring mechanics: count callers exactly, decide inline vs keep, collapse duplicate switch branches, route raw access through a single typed boundary, surgical one-change-per-commit, post-refactor straggler sweep for stale JSDoc and dead exports. Use when actually editing code to clean it up, when deciding whether a 1-caller helper earns its keep, or when planning a sequence of small refactor commits. For the smell catalog use code-audit; for session-long simplification use collapse-pass."
 metadata:
   author: epicenter
   version: '1.0'
@@ -8,9 +8,9 @@ metadata:
 
 # Refactoring Methodology
 
-Systematic approach to auditing and improving code. Every change is evidence-based—count callers, show diffs, commit surgically.
+Systematic approach to auditing and improving code. Every change is evidence-based: count callers, show diffs, commit surgically.
 
-> **Related Skills**: See `control-flow` for linearizing conditionals and guard clauses. See `factory-function-composition` for the four-zone factory anatomy. See `method-shorthand-jsdoc` for when to use `this.method()` vs direct calls.
+> **Related Skills**: See `post-implementation-review` for the full second-read ritual after implementation. See `cohesive-clean-breaks` when the refactor changes public shape, ownership, naming, or lifecycle boundaries. See `control-flow` for linearizing conditionals and guard clauses. See `factory-function-composition` for the four-zone factory anatomy. See `method-shorthand-jsdoc` for when to use `this.method()` vs direct calls.
 
 ## When to Apply This Skill
 
@@ -45,7 +45,7 @@ pushSheetFromSnapshot(cols, rows)           1  ← restoreFromSnapshot only ⚠�
 |---|---|
 | 0 | Dead code. Delete. |
 | 1 | Inline candidate. Keep only if: complex logic worth naming, part of a constructor family, or carries important JSDoc. |
-| 2–3 | Evaluate. If all callers are in the same method, might still inline. |
+| 2-3 | Evaluate. If all callers are in the same method, might still inline. |
 | 4+ | Keep. |
 
 ### When to Keep a Single-Caller Function
@@ -156,13 +156,13 @@ parseSheetFromCsv(csv, result);
 
 ## Prefer Inline for Trivial Duplications
 
-When a duplicated block is 1–3 lines and appears 2–3 times within the same file, keeping it inline is usually more readable than extracting a helper. The helper adds a name to learn, a definition to jump to, and an abstraction boundary to reason about—all of which cost more than the duplication saves.
+When a duplicated block is 1-3 lines and appears 2-3 times within the same file, keeping it inline is usually more readable than extracting a helper. The helper adds a name to learn, a definition to jump to, and an abstraction boundary to reason about: all of which cost more than the duplication saves.
 
 **The readability test:** Does a reader need to leave the callsite to understand what's happening? If the inline code is self-explanatory, extraction hurts more than it helps.
 
 ```typescript
 // Two adjacent functions with identical 2-line path construction.
-// A buildChildPath() helper saves zero cognitive load—readers
+// A buildChildPath() helper saves zero cognitive load: readers
 // understand the inline version instantly.
 
 // GOOD: Keep inline. The repetition is obvious and local.
@@ -186,7 +186,7 @@ function buildChildPath(parentId: FileId | null, name: string): string {
 }
 ```
 
-Same principle in templates—a class string used twice is easier to scan inline than to chase to a `$derived` variable:
+Same principle in templates: a class string used twice is easier to scan inline than to chase to a `$derived` variable:
 
 ```svelte
 <!-- GOOD: Both usages visible at a glance while scanning the template -->
@@ -200,7 +200,7 @@ Same principle in templates—a class string used twice is easier to scan inline
 		{isHighlighted ? 'bg-accent text-accent-foreground' : ''}"
 />
 
-<!-- BAD: Extracted to a variable—reader leaves the template to understand styling -->
+<!-- BAD: Extracted to a variable: reader leaves the template to understand styling -->
 <TreeView.Folder class={itemClass} />
 ```
 
@@ -295,7 +295,7 @@ c4f8ddc  refactor: move SheetBinding to sheet.ts, accept as single param
 
 ## Post-Refactor Straggler Sweep
 
-After a refactor lands, immediately hunt for dead references the change left behind. Refactors that remove or move code create orphaned exports, stale JSDoc, and unnecessary indirection that won't trigger type errors—they compile fine but add confusion.
+After a refactor lands, immediately hunt for dead references the change left behind. Refactors that remove or move code create orphaned exports, stale JSDoc, and unnecessary indirection that won't trigger type errors: they compile fine but add confusion.
 
 ### The Sweep Checklist
 
@@ -333,14 +333,14 @@ The sweep is a separate commit from the refactor. Label it `refactor(scope): rem
 
 ## Anti-Patterns
 
-- **Premature extraction**: Extracting a 1–3 line block used 2–3 times into a named helper. The indirection costs more than the duplication. See "Prefer Inline for Trivial Duplications" above.
+- **Premature extraction**: Extracting a 1-3 line block used 2-3 times into a named helper. The indirection costs more than the duplication. See "Prefer Inline for Trivial Duplications" above.
 - **Abstracting away differences**: Three push constructors with different fields share boilerplate, but a `pushEntry(type, fields: Record<string, unknown>)` helper loses all type safety. The duplication communicates structure.
 - **Type-erasing helpers**: Any helper that accepts `unknown` or `Record<string, any>` to "reduce duplication"
 - **Refactoring while fixing bugs**: Fix the bug minimally first, refactor in a separate commit
-- **Batch-committing**: "Cleaned up the module" as one commit with 15 changes—impossible to review or revert
+- **Batch-committing**: "Cleaned up the module" as one commit with 15 changes: impossible to review or revert
 - **Shotgun inlining**: Inlining everything with 1 caller regardless of context. Respect constructor families and complex logic.
 - **Skipping the straggler sweep**: Refactoring without cleaning up dead references. The code compiles, but the next person reads stale JSDoc and wastes 30 minutes confused about an endpoint that no longer exists.
 - **Identity functions**: `function f(x) { return x; }` has callers, but does nothing. It's dead code wearing a disguise. Inline the call.
-- **Speculative v2 code**: Commented-out types, tables, or functions "deferred to v2" with zero consumers. Git remembers—delete from the source file.
+- **Speculative v2 code**: Commented-out types, tables, or functions "deferred to v2" with zero consumers. Git remembers: delete from the source file.
 - **Secondary key when primary exists**: Matching records by a secondary key (name, slug, path) when a stable primary key (id) is available. The secondary key can collide, change, or diverge across systems. If the primary key exists, use it.
-- **Indirect re-exports from non-barrel files**: `export { Foo } from './types.js'` at the bottom of `create-foo.ts`. The `export { }` re-export syntax belongs in `index.ts` barrels only. Implementation files export directly at the declaration. Same principle in any module system—Python's `from .types import Foo` at EOF, Rust's `pub use` in non-`mod.rs` files.
+- **Indirect re-exports from non-barrel files**: `export { Foo } from './types.js'` at the bottom of `create-foo.ts`. The `export { }` re-export syntax belongs in `index.ts` barrels only. Implementation files export directly at the declaration. Same principle in any module system: Python's `from .types import Foo` at EOF, Rust's `pub use` in non-`mod.rs` files.

@@ -5,8 +5,8 @@
 import { expect, test } from 'bun:test';
 import { type } from 'arktype';
 import * as Y from 'yjs';
-import { createKv } from './internal.js';
 import { createEncryptedYkvLww } from '../shared/y-keyvalue/y-keyvalue-lww-encrypted.js';
+import { createKv } from './attach-kv.js';
 import { defineKv } from './define-kv.js';
 import { KV_KEY } from './keys.js';
 

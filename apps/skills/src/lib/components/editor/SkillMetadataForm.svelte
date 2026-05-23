@@ -4,13 +4,16 @@
 	import * as Field from '@epicenter/ui/field';
 	import { Input } from '@epicenter/ui/input';
 	import { Textarea } from '@epicenter/ui/textarea';
-	import { skillsState } from '$lib/state/skills-state.svelte';
+	import {
+		type SkillMetadataUpdate,
+		skillsState,
+	} from '$lib/state/skills-state.svelte';
 	import { validateSkill } from '$lib/utils/validation';
 
 	let { skill }: { skill: Skill } = $props();
 
 	/**
-	 * Live validation errors—recomputed on every reactive change to skill fields.
+	 * Live validation errors, recomputed on every reactive change to skill fields.
 	 * Shown inline but never block writes. The table is the source of truth.
 	 */
 	const errors = $derived(
@@ -22,11 +25,7 @@
 		}),
 	);
 
-	function updateSkill(
-		updates: Partial<
-			Pick<Skill, 'name' | 'description' | 'license' | 'compatibility'>
-		>,
-	) {
+	function updateSkill(updates: SkillMetadataUpdate) {
 		skillsState.updateSkill(skill.id, updates);
 	}
 </script>
@@ -57,7 +56,7 @@
 				/>
 			</Field.Content>
 			<Field.Description
-				>Lowercase, hyphens only (1–64 chars)</Field.Description
+				>Lowercase, hyphens only (1 to 64 chars)</Field.Description
 			>
 		</Field.Field>
 
@@ -108,7 +107,7 @@
 			/>
 		</Field.Content>
 		<Field.Description
-			>Which agents/tools this skill targets (optional, ≤500 chars)</Field.Description
+			>Which agents/tools this skill targets (optional, up to 500 chars)</Field.Description
 		>
 	</Field.Field>
 

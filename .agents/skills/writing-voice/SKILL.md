@@ -1,6 +1,6 @@
 ---
 name: writing-voice
-description: Voice and tone rules for all written content—prose, UI text, tooltips, error messages. Use when the user says "fix the tone", "rewrite this", "sounds like AI", "sounds corporate", or when writing any user-facing text, landing pages, product copy, or open-source documentation.
+description: 'Voice/tone rules for prose, UI text, tooltips, error messages. Use when: "fix the tone", "rewrite this", "sounds like AI", "sounds corporate", or writing user-facing text and docs.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -9,6 +9,8 @@ metadata:
 # Writing Voice
 
 **Core principle**: Write for the ear, not just the eyes. Prose should be suitable to read out loud.
+
+For technical explanations where the user is trying to understand a system, combine this voice with [notebook-explanation](../notebook-explanation/SKILL.md): short working notes, code blocks, tiny definitions, ASCII diagrams, and durable rules.
 
 ## When to Apply This Skill
 
@@ -38,7 +40,7 @@ Patterns that scream "AI wrote this":
 - **Marketing words**: "game-changing", "revolutionary", "unleash", "empower"
 - **Structured sections**: "Key Features:", "Benefits:", "Why This Matters:"
 - **Vague superlatives**: "incredibly powerful", "seamlessly integrates"
-- **Dramatic hyperbole**: "feels like an eternity", "pain point", "excruciating"—use facts instead
+- **Dramatic hyperbole**: "feels like an eternity", "pain point", "excruciating". Use facts instead.
 - **AI adjectives**: "perfectly", "effortlessly", "beautifully"
 - **Space-hyphen-space**: "The code works - the tests pass"
 - **Overusing fragments**: "Every. Single. Time." (once is emphasis, twice is a pattern)
@@ -47,16 +49,17 @@ Patterns that scream "AI wrote this":
 
 ## Punctuation
 
-Em dashes (—) are always closed—no surrounding spaces. Never ` — ` or ` - `.
+No em dashes. No en dashes. This is a project-wide rule from `AGENTS.md` and it applies to prose, UI text, comments, error strings, and commit messages. If you reach for one, you are reaching for the wrong tool. Pick from this list instead.
 
 | Prefer        | When                                                           |
 | ------------- | -------------------------------------------------------------- |
 | Period (.)    | Default choice. Two sentences are often clearer than one.      |
 | Colon (:)     | Introducing explanation: "Here's the thing: it doesn't work"   |
 | Semicolon (;) | Related independent clauses: "The code works; the tests pass"  |
-| Em dash (—)   | Asides and emphasis, always closed: "It's fast—really fast"    |
+| Parens ( )    | Aside that the sentence could survive without                  |
+| Comma (,)     | Short qualifier inside a sentence                              |
 
-When in doubt, use a period.
+When in doubt, use a period. Two clear sentences beat one clever one.
 
 ## How to Write Good Prose
 
@@ -115,7 +118,7 @@ Bad (header-heavy):
 
 Good (flowing):
 
-> Sessions were timing out during file uploads. The refresh logic only triggered on navigation events, so any background activity—uploads, sync, long-running mutations—would silently lose the session.
+> Sessions were timing out during file uploads. The refresh logic only triggered on navigation events, so any background activity (uploads, sync, long-running mutations) would silently lose the session.
 >
 > The fix was a keepalive that fires on any authenticated request, not just page transitions.
 
@@ -144,6 +147,25 @@ Mechanical substitutions you can apply without judgment:
 ## Explaining Technical Concepts
 
 When explaining how something works, show the mechanism, not the marketing. Lead with what happens, then why.
+
+When the topic is architecture, auth, APIs, ownership, or design tradeoffs, prefer notebook style over long prose:
+
+```txt
+Question:
+  What are we trying to understand?
+
+Model:
+  term = meaning
+  boundary = owner
+
+Flow:
+  thing A
+    -> thing B
+    -> thing C
+
+Rule:
+  durable takeaway
+```
 
 Bad (over-explains, AI voice):
 
@@ -211,16 +233,16 @@ When the user provides example text or tone guidance, match it:
 
 ## Financial Language
 
-Epicenter's primary goal is not to make money. Vision and mission come first. Financial sustainability exists to fund more open-source development and sponsor contributors—it's a means, not the point.
+Epicenter's primary goal is not to make money. Vision and mission come first. Financial sustainability exists to fund more open-source development and sponsor contributors; it's a means, not the point.
 
-When writing about how the project sustains itself, be cautious with language that sounds like a pitch deck. Avoid "revenue," "monetization," "ARR," dollar-figure valuations, and other tech bro jargon. Say "financial sustainability" or "sustaining the project" instead. Name companies like Grafana or Bitwarden as references, but drop the dollar figures—otherwise it reads as if we're chasing their numbers rather than explaining our approach.
+When writing about how the project sustains itself, be cautious with language that sounds like a pitch deck. Avoid "revenue," "monetization," "ARR," dollar-figure valuations, and other tech bro jargon. Say "financial sustainability" or "sustaining the project" instead. Name companies like Grafana or Bitwarden as references, but drop the dollar figures; otherwise it reads as if we're chasing their numbers rather than explaining our approach.
 
 ## Empathy for the Reader
 
 Technical writing works when the reader feels understood, not lectured. This means:
 
 - Acknowledge the reader's frustration before offering the fix. If a warning is confusing, say so. "This warning is confusing" costs nothing and builds trust.
-- Show the path they likely walked. If you found the answer after hitting the same wall, trace that path briefly. "You probably tried X, then Y, and ended up here"—this signals you understand their situation.
+- Show the path they likely walked. If you found the answer after hitting the same wall, trace that path briefly. "You probably tried X, then Y, and ended up here." That signals you understand their situation.
 - Respect their time by leading with the answer. Don't make them wade through context to find the fix. Give them the fix, then explain why it works.
 - Assume competence. Don't over-explain fundamentals. If someone is reading about `$derived` vs `$state`, they already know what reactivity is.
 - Present trade-offs honestly. Every solution has costs. Saying "this is perfect" when it has caveats will lose the reader's trust the moment they hit those caveats.
@@ -236,7 +258,7 @@ Don't describe what the tool does in the abstract. Tell the reader why you built
 
 ### Vulnerability builds trust
 
-"I just finished college and was about to move back with my parents" earns more credibility than any feature list. Admitting uncertainty ("It's not there yet regarding memory, but it's getting there") signals honesty. Don't perform confidence—show real progress and real gaps.
+"I just finished college and was about to move back with my parents" earns more credibility than any feature list. Admitting uncertainty ("It's not there yet regarding memory, but it's getting there") signals honesty. Don't perform confidence; show real progress and real gaps.
 
 ### First person over generalized claims
 
@@ -252,4 +274,4 @@ Don't restate the thesis. End with a door: "Fork it, break it, ship your own ver
 
 ### Casual honesty about competitors
 
-"There are plenty of transcription apps out there" and "one of my other OSS favorites is Handy" — acknowledge the ecosystem without trash-talking. Recommend alternatives genuinely. The confidence to name competitors signals you're not insecure about your position.
+"There are plenty of transcription apps out there" and "one of my other OSS favorites is Handy": acknowledge the ecosystem without trash-talking. Recommend alternatives genuinely. The confidence to name competitors signals you're not insecure about your position.

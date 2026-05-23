@@ -1,11 +1,12 @@
 /**
  * Typed Hono routes for the billing dashboard SPA.
  *
- * All routes require authentication (authGuard applied in app.ts).
- * Data flows from Autumn's API—no custom tables needed.
+ * All routes require auth (requireCookieOrBearerUser, applied in app.ts).
+ * Data flows from Autumn's API; no custom tables needed.
  *
- * Response types are defined in billing-contract.ts (the shared contract).
- * The dashboard imports those same types for its typed fetch client.
+ * Most routes return Autumn SDK responses verbatim. The dashboard derives
+ * its typed fetch client from billing-contract.ts; `/models` is the one
+ * route that returns repo-owned data and satisfies its contract type.
  */
 
 import { sValidator } from '@hono/standard-validator';
@@ -13,16 +14,8 @@ import { type } from 'arktype';
 import { Hono } from 'hono';
 import type { Env } from './app';
 import { createAutumn } from './autumn';
-import type {
-	AggregateResponse,
-	AttachResponse,
-	EventsListResponse,
-	ModelsResponse,
-	PlansListResponse,
-	PortalResponse,
-	PreviewResponse,
-} from './billing-contract';
-import { ANNUAL_PLANS, FEATURE_IDS, PLAN_IDS, PLANS } from './billing-plans';
+import type { ModelsResponse } from './billing-contract';
+import { FEATURE_IDS, PLAN_IDS } from './billing-plans';
 import { MODEL_CREDITS } from './model-costs';
 
 const billingRoutes = new Hono<Env>();
@@ -53,7 +46,6 @@ billingRoutes.get('/balance', async (c) => {
 	const autumn = createAutumn(c.env);
 	const customer = await autumn.customers.getOrCreate({
 		customerId: c.var.user.id,
-		name: c.var.user.name ?? undefined,
 		email: c.var.user.email ?? undefined,
 		expand: ['subscriptions.plan', 'balances.feature'],
 	});
@@ -145,15 +137,11 @@ billingRoutes.get('/plans', async (c) => {
 /**
  * GET /billing/models
  *
- * Returns the MODEL_CREDITS map as JSON plus plan metadata.
+ * Returns the MODEL_CREDITS map as JSON.
  * Powers the Model Cost Guide table in the dashboard.
  */
 billingRoutes.get('/models', (c) => {
-	return c.json({
-		credits: MODEL_CREDITS,
-		plans: PLANS,
-		annualPlans: ANNUAL_PLANS,
-	} satisfies ModelsResponse);
+	return c.json({ credits: MODEL_CREDITS } satisfies ModelsResponse);
 });
 
 // ── Upgrade preview ──────────────────────────────────────────────────────
@@ -216,42 +204,6 @@ billingRoutes.post('/upgrade', sValidator('json', attachSchema), async (c) => {
 	return c.json(result);
 });
 
-// ── Cancel subscription ──────────────────────────────────────────────────
-
-/**
- * POST /billing/cancel
- *
- * Cancel a subscription at end of billing cycle.
- */
-billingRoutes.post('/cancel', sValidator('json', planIdSchema), async (c) => {
-	const autumn = createAutumn(c.env);
-	const { planId } = c.req.valid('json');
-	const result = await autumn.billing.update({
-		customerId: c.var.user.id,
-		planId,
-		cancelAction: 'cancel_end_of_cycle',
-	});
-	return c.json(result);
-});
-
-// ── Uncancel ─────────────────────────────────────────────────────────────
-
-/**
- * POST /billing/uncancel
- *
- * Reverse a pending cancellation.
- */
-billingRoutes.post('/uncancel', sValidator('json', planIdSchema), async (c) => {
-	const autumn = createAutumn(c.env);
-	const { planId } = c.req.valid('json');
-	const result = await autumn.billing.update({
-		customerId: c.var.user.id,
-		planId,
-		cancelAction: 'uncancel',
-	});
-	return c.json(result);
-});
-
 // ── Top-up ───────────────────────────────────────────────────────────────
 
 /**
@@ -290,59 +242,5 @@ billingRoutes.get('/portal', async (c) => {
 	});
 	return c.json(result);
 });
-
-// ── Billing controls (spend limits, alerts, auto top-ups) ────────────────
-
-const controlsSchema = type({
-	'spendLimits?': type({
-		featureId: 'string',
-		enabled: 'boolean',
-		'overageLimit?': 'number | undefined',
-	})
-		.array()
-		.or('undefined'),
-	'usageAlerts?': type({
-		featureId: 'string',
-		threshold: 'number',
-		thresholdType: "'usage' | 'usage_percentage'",
-		enabled: 'boolean',
-		'name?': 'string | undefined',
-	})
-		.array()
-		.or('undefined'),
-	'autoTopups?': type({
-		featureId: 'string',
-		enabled: 'boolean',
-		threshold: 'number',
-		quantity: 'number',
-		'purchaseLimit?': type({
-			interval: "'month'",
-			intervalCount: 'number',
-			limit: 'number',
-		}).or('undefined'),
-	})
-		.array()
-		.or('undefined'),
-});
-
-/**
- * POST /billing/controls
- *
- * Update per-user billing controls: spend limits, usage alerts, auto top-ups.
- * These are stored and evaluated by Autumn—no infrastructure on our side.
- */
-billingRoutes.post(
-	'/controls',
-	sValidator('json', controlsSchema),
-	async (c) => {
-		const autumn = createAutumn(c.env);
-		const data = c.req.valid('json');
-		const result = await autumn.customers.update({
-			customerId: c.var.user.id,
-			billingControls: data,
-		});
-		return c.json(result);
-	},
-);
 
 export { billingRoutes };

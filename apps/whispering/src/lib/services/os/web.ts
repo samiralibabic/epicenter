@@ -11,7 +11,7 @@ type NavigatorWithUAData = Navigator & {
 	userAgentData: UserAgentData;
 };
 
-export function createOsServiceWeb(): OsService {
+export function createOsServiceWeb() {
 	return {
 		type(): OsType {
 			// Try modern User-Agent Client Hints API first
@@ -23,7 +23,7 @@ export function createOsServiceWeb(): OsService {
 			// Fallback to traditional user agent detection
 			return getPlatformFromUserAgent(navigator);
 		},
-	};
+	} satisfies OsService;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { Table } from '@epicenter/workspace';
+import type * as Y from 'yjs';
 import type { FileId } from '../ids.js';
 import type { FileRow } from '../table.js';
 import { disambiguateNames } from './naming.js';
@@ -23,8 +24,11 @@ function snapFrom(row: FileRow): RowSnapshot {
  * patches only the affected index entries instead of rebuilding everything.
  * Touch-only changes (size/updatedAt) are detected via a snapshot of
  * path-relevant fields and skipped entirely—O(1) per editing mutation.
+ *
+ * Teardown is hooked to `ydoc.once('destroy', ...)`. Callers do not call a
+ * dispose method; destroying the workspace's Y.Doc cascades.
  */
-export function attachFileSystemIndex(filesTable: Table<FileRow>) {
+export function attachFileSystemIndex(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 	/** "/docs/api.md" → FileId */
 	const pathToId = new Map<string, FileId>();
 	/** FileId → "/docs/api.md" (reverse lookup) */
@@ -40,6 +44,7 @@ export function attachFileSystemIndex(filesTable: Table<FileRow>) {
 	buildInitialState();
 
 	const unobserve = filesTable.observe(processChanges);
+	ydoc.once('destroy', unobserve);
 
 	// ═══════════════════════════════════════════════════════════════════════
 	// INITIAL BUILD — runs once before the observer is registered
@@ -475,8 +480,6 @@ export function attachFileSystemIndex(filesTable: Table<FileRow>) {
 			const children = childrenOf.get(parentId);
 			return children ? Array.from(children) : [];
 		},
-		/** Stop observing the files table. */
-		dispose: unobserve,
 	};
 }
 

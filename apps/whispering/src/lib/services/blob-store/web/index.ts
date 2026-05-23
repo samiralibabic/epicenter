@@ -29,7 +29,7 @@ function serializedAudioToBlob(serializedAudio: SerializedAudio): Blob {
 	});
 }
 
-export function createBlobStoreWeb(): BlobStore {
+export function createBlobStoreWeb() {
 	const db = new WhisperingDatabase();
 	/** Cache for blob object URLs to avoid recreating them. */
 	const urlCache = new Map<string, string>();
@@ -121,5 +121,5 @@ export function createBlobStoreWeb(): BlobStore {
 				catch: (error) => BlobError.WriteFailed({ cause: error }),
 			});
 		},
-	};
+	} satisfies BlobStore;
 }

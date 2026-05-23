@@ -39,14 +39,14 @@ The native auth client should use CLI-based naming consistently in API config, C
 
 | Location | Current value | Role |
 | --- | --- | --- |
-| `apps/api/src/auth/create-auth.ts` | `clientId: 'epicenter-runner'`, `name: 'Epicenter Runner'` | Trusted native OAuth client registration |
+| `apps/api/src/auth/create-auth.ts` | `clientId: 'epicenter-runner'`, `name: 'Epicenter Runner'` | Device-flow client identity |
 | `apps/api/src/auth-pages/device-page.tsx` | `Epicenter Runner` | User-facing device auth copy |
 | `packages/cli/src/auth/api.ts` | `CLIENT_ID = 'epicenter-runner'` | CLI-side auth client id |
 | `packages/cli/package.json` | `@epicenter/cli`, bin `epicenter` | Canonical package and binary naming |
 
 **Key finding**: The stale name is hardcoded in the auth flow. It is not derived from package metadata.
 
-**Implication**: A safe fix is a focused rename across the trusted client registration, matching CLI client id constant, and device auth UI copy.
+**Implication**: A safe fix is a focused rename across server device-client validation, the matching CLI client id constant, and device auth UI copy.
 
 ## Design Decisions
 
@@ -66,9 +66,8 @@ packages/cli/src/auth/api.ts
           |
           v
 apps/api/src/auth/create-auth.ts
-  trusted client registration
+  device client validation
   id = epicenter-cli
-  name = Epicenter CLI
           |
           v
 apps/api/src/auth-pages/device-page.tsx
@@ -80,7 +79,7 @@ apps/api/src/auth-pages/device-page.tsx
 ### Phase 1: Rename auth client identity
 
 - [x] Update the spec with final findings and review notes.
-- [x] Rename the trusted client id and display name in `apps/api/src/auth/create-auth.ts`.
+- [x] Rename the server-side device auth client id in `apps/api/src/auth/create-auth.ts`.
 - [x] Rename the matching CLI client id in `packages/cli/src/auth/api.ts`.
 - [x] Update the device authorization page copy in `apps/api/src/auth-pages/device-page.tsx`.
 - [x] Run diagnostics on changed files and note any unrelated issues.

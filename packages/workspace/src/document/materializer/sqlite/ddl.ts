@@ -14,6 +14,15 @@
 
 type JsonSchema = Record<string, unknown>;
 
+const SQLITE_TYPE_BY_JSON_TYPE: Record<string, string> = {
+	string: 'TEXT',
+	number: 'REAL',
+	integer: 'INTEGER',
+	boolean: 'INTEGER',
+	object: 'TEXT',
+	array: 'TEXT',
+};
+
 // ════════════════════════════════════════════════════════════════════════════
 // PUBLIC API
 // ════════════════════════════════════════════════════════════════════════════
@@ -101,11 +110,10 @@ export function generateDdl(
  *   ],
  * });
  *
- * // Picks the `_v: 2` schema
- * console.log((resolved.properties as Record<string, unknown>).title);
+ * // Picks the `_v: 2` schema, including its `title` property.
  * ```
  */
-export function resolveSchema(schema: JsonSchema): JsonSchema {
+function resolveSchema(schema: JsonSchema): JsonSchema {
 	const candidates = Array.isArray(schema.oneOf)
 		? schema.oneOf.filter(isRecord)
 		: undefined;
@@ -176,22 +184,10 @@ function columnDef(
 
 	const jsonType =
 		typeof propSchema.type === 'string' ? propSchema.type : undefined;
+	const sqliteType =
+		jsonType === undefined ? undefined : SQLITE_TYPE_BY_JSON_TYPE[jsonType];
 
-	switch (jsonType) {
-		case 'string':
-			return appendNullability(`${quotedName} TEXT`, isRequired);
-		case 'number':
-			return appendNullability(`${quotedName} REAL`, isRequired);
-		case 'integer':
-			return appendNullability(`${quotedName} INTEGER`, isRequired);
-		case 'boolean':
-			return appendNullability(`${quotedName} INTEGER`, isRequired);
-		case 'object':
-		case 'array':
-			return appendNullability(`${quotedName} TEXT`, isRequired);
-		default:
-			return appendNullability(`${quotedName} TEXT`, isRequired);
-	}
+	return appendNullability(`${quotedName} ${sqliteType ?? 'TEXT'}`, isRequired);
 }
 
 function appendNullability(column: string, isRequired: boolean) {

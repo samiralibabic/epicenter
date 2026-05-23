@@ -18,8 +18,6 @@
 		"directory": "packages/sync"
 	},
 	"homepage": "https://epicenter.so",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts"
 	},
@@ -28,9 +26,9 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@epicenter/constants": "workspace:*",
 		"lib0": "catalog:",
-		"wellcrafted": "catalog:",
-		"y-protocols": "catalog:"
+		"wellcrafted": "catalog:"
 	},
 	"peerDependencies": {
 		"yjs": "catalog:"

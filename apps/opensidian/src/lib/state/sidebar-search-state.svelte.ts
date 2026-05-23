@@ -1,6 +1,7 @@
 import { createPersistedState } from '@epicenter/svelte';
+import { debounce } from '@epicenter/util';
 import { type } from 'arktype';
-import { opensidian } from '$lib/opensidian/client';
+import type { OpensidianBrowser } from '$lib/opensidian/browser';
 
 export type MatchSnippet = {
 	snippet: string;
@@ -16,7 +17,11 @@ export type FileGroup = {
 
 const PAGE_SIZE = 50;
 
-function createSidebarSearchState() {
+export function createSidebarSearchState({
+	binding,
+}: {
+	binding: OpensidianBrowser;
+}) {
 	// Persisted preferences
 	const caseSensitiveState = createPersistedState({
 		key: 'opensidian.sidebar-search.case-sensitive',
@@ -44,7 +49,6 @@ function createSidebarSearchState() {
 	let totalFiles = $state(0);
 	let hasMore = $state(false);
 	let currentOffset = 0;
-	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 	function groupByFile(
 		rows: Array<{
@@ -99,7 +103,7 @@ function createSidebarSearchState() {
 					(r) => re.test(r.snippet) || re.test(r.name),
 				);
 			} catch {
-				// Invalid regex — return unfiltered (FTS already matched)
+				// Invalid regex: return unfiltered (FTS already matched)
 			}
 		}
 
@@ -107,7 +111,7 @@ function createSidebarSearchState() {
 	}
 
 	async function executeSearch(query: string, offset: number) {
-		const client = opensidian.sqliteIndex.client;
+		const client = binding.sqliteIndex.client;
 		const trimmed = query.trim();
 
 		try {
@@ -143,18 +147,34 @@ function createSidebarSearchState() {
 				regexState.current,
 			);
 
-			return { rows: filtered, hasMore: hasMoreResults };
+			return {
+				rows: filtered,
+				hasMore: hasMoreResults,
+				consumedRows: pageRows.length,
+			};
 		} catch {
 			// Invalid FTS5 query syntax
-			return { rows: [], hasMore: false };
+			return { rows: [], hasMore: false, consumedRows: 0 };
 		}
 	}
 
-	function triggerSearch(query: string) {
-		if (debounceTimer) clearTimeout(debounceTimer);
+	const runSearch = debounce(async (trimmed: string) => {
+		currentOffset = 0;
+		const result = await executeSearch(trimmed, 0);
 
+		const groups = groupByFile(result.rows);
+		fileGroups = groups;
+		totalResults = result.rows.length;
+		totalFiles = groups.length;
+		hasMore = result.hasMore;
+		currentOffset = result.consumedRows;
+		isSearching = false;
+	}, 200);
+
+	function triggerSearch(query: string) {
 		const trimmed = query.trim();
 		if (trimmed.length < 2) {
+			runSearch.cancel();
 			fileGroups = [];
 			totalResults = 0;
 			totalFiles = 0;
@@ -165,18 +185,7 @@ function createSidebarSearchState() {
 		}
 
 		isSearching = true;
-		debounceTimer = setTimeout(async () => {
-			currentOffset = 0;
-			const result = await executeSearch(trimmed, 0);
-
-			const groups = groupByFile(result.rows);
-			fileGroups = groups;
-			totalResults = result.rows.length;
-			totalFiles = groups.length;
-			hasMore = result.hasMore;
-			currentOffset = result.rows.length;
-			isSearching = false;
-		}, 200);
+		runSearch(trimmed);
 	}
 
 	return {
@@ -263,21 +272,12 @@ function createSidebarSearchState() {
 			totalResults += result.rows.length;
 			totalFiles = fileGroups.length;
 			hasMore = result.hasMore;
-			currentOffset += result.rows.length;
+			currentOffset += result.consumedRows;
 			isSearching = false;
 		},
 
-		reset() {
-			searchQuery = '';
-			fileGroups = [];
-			totalResults = 0;
-			totalFiles = 0;
-			hasMore = false;
-			isSearching = false;
-			currentOffset = 0;
-			if (debounceTimer) clearTimeout(debounceTimer);
+		[Symbol.dispose]() {
+			runSearch.cancel();
 		},
 	};
 }
-
-export const sidebarSearchState = createSidebarSearchState();

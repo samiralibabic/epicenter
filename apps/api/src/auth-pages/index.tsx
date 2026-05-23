@@ -1,3 +1,5 @@
+/** @jsxImportSource hono/jsx */
+
 /**
  * Render functions for auth pages.
  *
@@ -6,8 +8,8 @@
  * in `.tsx` files so `app.ts` doesn't need renaming.
  */
 
+import { CliCallbackPage } from './cli-callback-page';
 import { ConsentPage } from './consent-page';
-import { DevicePage } from './device-page';
 import { AuthLayout } from './layout';
 import { SignInPage } from './sign-in-page';
 import { SignedInPage } from './signed-in-page';
@@ -34,14 +36,6 @@ export function renderConsentPage({
 	);
 }
 
-export function renderDevicePage({ userCode }: { userCode?: string }) {
-	return (
-		<AuthLayout title="Authorize Device — Epicenter">
-			<DevicePage userCode={userCode} />
-		</AuthLayout>
-	);
-}
-
 export function renderSignedInPage({
 	displayName,
 	email,
@@ -52,6 +46,29 @@ export function renderSignedInPage({
 	return (
 		<AuthLayout title="Signed in — Epicenter">
 			<SignedInPage displayName={displayName} email={email} />
+		</AuthLayout>
+	);
+}
+
+export function renderCliCallbackPage({
+	code,
+	state,
+	error,
+	errorDescription,
+}: {
+	code?: string;
+	state?: string;
+	error?: string;
+	errorDescription?: string;
+}) {
+	return (
+		<AuthLayout title="Epicenter CLI sign-in">
+			<CliCallbackPage
+				code={code}
+				state={state}
+				error={error}
+				errorDescription={errorDescription}
+			/>
 		</AuthLayout>
 	);
 }

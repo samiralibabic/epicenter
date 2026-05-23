@@ -28,7 +28,7 @@
 			confirmationText: string;
 		};
 		/**
-		 * Called when the user confirms. Can be async—the dialog will show
+		 * Called when the user confirms. Can be async, so the dialog will show
 		 * a loading state and stay open until the promise resolves.
 		 * Throw an error to keep the dialog open (e.g., on failure).
 		 */
@@ -159,10 +159,10 @@
 </script>
 
 <script lang="ts">
-	import * as AlertDialog from '#/alert-dialog';
-	import { Input } from '#/input';
-	import { Spinner } from '#/spinner';
-	import { cn } from '#/utils';
+	import * as AlertDialog from '../alert-dialog/index.js';
+	import { Input } from '../input/index.js';
+	import { Spinner } from '../spinner/index.js';
+	import { cn } from '../utils.js';
 </script>
 
 <AlertDialog.Root bind:open={confirmationDialog.isOpen}>

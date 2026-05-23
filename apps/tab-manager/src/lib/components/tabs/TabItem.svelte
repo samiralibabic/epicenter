@@ -13,26 +13,28 @@
 	import Volume2Icon from '@lucide/svelte/icons/volume-2';
 	import VolumeXIcon from '@lucide/svelte/icons/volume-x';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { bookmarkState } from '$lib/state/bookmark-state.svelte';
+	import { requireTabManager } from '$lib/session.svelte';
 	import {
 		type BrowserTab,
 		browserState,
 	} from '$lib/state/browser-state.svelte';
-	import { savedTabState } from '$lib/state/saved-tab-state.svelte';
 	import { getDomain } from '$lib/utils/format';
 	import TabFavicon from './TabFavicon.svelte';
 
+	const tabManager = requireTabManager();
 	let { tab }: { tab: BrowserTab } = $props();
 
 	const domain = $derived(tab.url ? getDomain(tab.url) : '');
-	const isBookmarked = $derived(bookmarkState.isUrlBookmarked(tab.url));
+	const isBookmarked = $derived(
+		tabManager.state.bookmarks.isUrlBookmarked(tab.url),
+	);
 </script>
 
 <Item.Root
 	size="sm"
 	class={cn(
 		'w-full text-left',
-		tab.active ? 'bg-accent/50' : 'hover:bg-accent',
+		tab.active ? 'bg-accent/50': 'hover:bg-accent',
 	)}
 >
 	{#snippet child({ props }: { props: Record<string, unknown> })}
@@ -82,7 +84,7 @@
 				<Button
 					variant="ghost"
 					size="icon-xs"
-					tooltip={tab.pinned ? 'Unpin' : 'Pin'}
+					tooltip={tab.pinned ? 'Unpin': 'Pin'}
 					onclick={(e: MouseEvent) => {
 						e.stopPropagation();
 						if (tab.pinned) {
@@ -103,7 +105,7 @@
 					<Button
 						variant="ghost"
 						size="icon-xs"
-						tooltip={tab.mutedInfo?.muted ? 'Unmute' : 'Mute'}
+						tooltip={tab.mutedInfo?.muted ? 'Unmute': 'Mute'}
 						onclick={(e: MouseEvent) => {
 							e.stopPropagation();
 							if (tab.mutedInfo?.muted) {
@@ -150,13 +152,17 @@
 					size="icon-xs"
 					tooltip="Save for later"
 					onclick={(e: MouseEvent) => {
-						e.stopPropagation();
-						// Save always succeeds in the workspace; toast only if the
-						// source-tab close half failed (partial-success path).
-						savedTabState.save(tab).then((result) => {
-							if (result?.closeResult.error) toastOnError(result.closeResult);
-						});
-					}}
+							e.stopPropagation();
+							// Save always succeeds in the workspace; toast only if the
+							// source-tab close half failed (partial-success path).
+							tabManager.state.savedTabs.save(tab).then((result) => {
+								if (result?.closeResult.error)
+									toastOnError(
+										result.closeResult,
+										'Could not close tab after saving',
+									);
+							});
+						}}
 				>
 					<ArchiveIcon />
 				</Button>
@@ -164,15 +170,15 @@
 				<Button
 					variant="ghost"
 					size="icon-xs"
-					tooltip={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
+					tooltip={isBookmarked ? 'Remove bookmark': 'Bookmark'}
 					onclick={(e: MouseEvent) => {
 						e.stopPropagation();
-						// Pure CRDT writes — can't fail, no Result to toast.
-						void bookmarkState.toggle(tab);
+						// Pure CRDT writes: can't fail, no Result to toast.
+						void tabManager.state.bookmarks.toggle(tab);
 					}}
 				>
 					<StarIcon
-						class={isBookmarked ? 'fill-amber-500 text-amber-500' : ''}
+						class={isBookmarked ? 'fill-amber-500 text-amber-500': ''}
 					/>
 				</Button>
 

@@ -15,8 +15,9 @@
 	import TextPreviewDialog from '$lib/components/copyable/TextPreviewDialog.svelte';
 	import { rpc } from '$lib/query';
 	import { transformationRuns } from '$lib/state/transformation-runs.svelte';
-	import type { TransformationRun } from '$lib/workspace';
+	import { transformationStepRuns } from '$lib/state/transformation-step-runs.svelte';
 	import { viewTransition } from '$lib/utils/viewTransitions';
+	import type { TransformationRun } from '$lib/workspace';
 
 	let { runs }: { runs: TransformationRun[] } = $props();
 
@@ -130,6 +131,9 @@
 						</Table.Row>
 
 						{#if expandedRunId === run.id}
+							{@const stepRuns = transformationStepRuns.getByTransformationRunId(
+								run.id,
+							)}
 							<Table.Row>
 								<Table.Cell class="space-y-4 p-4" colspan={5}>
 									<Label class="text-sm font-medium">Input</Label>
@@ -142,7 +146,7 @@
 										<Label class="text-sm font-medium">Error</Label>
 										<CopyablePre variant="error" copyableText={run.error} />
 									{/if}
-									{#if run.stepRuns.length > 0}
+									{#if stepRuns.length > 0}
 										<div class="flex flex-col gap-2">
 											<Label class="text-sm font-medium">Steps</Label>
 											<Card.Root>
@@ -157,7 +161,7 @@
 														</Table.Row>
 													</Table.Header>
 													<Table.Body>
-														{#each run.stepRuns as stepRun}
+														{#each stepRuns as stepRun}
 															<Table.Row>
 																<Table.Cell>
 																	<Badge variant={`status.${stepRun.status}`}>

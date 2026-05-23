@@ -2,19 +2,22 @@
 	import { autocompletion } from '@codemirror/autocomplete';
 	import type { FileId } from '@epicenter/filesystem';
 	import { fromDisposableCache } from '@epicenter/svelte';
-	import { Spinner } from '@epicenter/ui/spinner';
-	import { opensidian } from '$lib/opensidian/client';
-	import { fsState } from '$lib/state/fs-state.svelte';
+	import { Loading } from '@epicenter/ui/loading';
+	import { requireOpensidian } from '$lib/session';
 	import CodeMirrorEditor from './CodeMirrorEditor.svelte';
 	import { linkDecorations } from './extensions/link-decorations';
 	import { wikilinkAutocomplete } from './extensions/wikilink-autocomplete';
+
+	const opensidian = requireOpensidian();
 
 	let {
 		fileId,
 	}: {
 		fileId: FileId;
 	} = $props();
-	const filename = $derived(fsState.getFile(fileId)?.name ?? 'untitled.md');
+	const filename = $derived(
+		opensidian.state.files.getFile(fileId)?.name ?? 'untitled.md',
+	);
 	const isMarkdown = $derived(
 		filename.endsWith('.md') || !filename.includes('.'),
 	);
@@ -22,8 +25,9 @@
 	const doc = fromDisposableCache(opensidian.fileContentDocs, () => fileId);
 
 	const sharedLinkDecorations = linkDecorations({
-		onNavigate: (ref) => fsState.selectFile(ref.id as FileId),
-		resolveTitle: (ref) => fsState.getFile(ref.id as FileId)?.name ?? null,
+		onNavigate: (ref) => opensidian.state.files.selectFile(ref.id as FileId),
+		resolveTitle: (ref) =>
+			opensidian.state.files.getFile(ref.id as FileId)?.name ?? null,
 	});
 
 	const extensions = $derived(
@@ -45,16 +49,14 @@
 </script>
 
 <!--
-	Gate on whenReady — `asText()` on Timeline mutates when the doc is empty
-	(it pushes an entry). Calling it before persistence hydrates races the
-	IDB replay and can corrupt the timeline (phantom text entry alongside
-	the real stored entries).
+	Gate on idb hydration: `asText()` on Timeline mutates when the doc is empty
+	(it pushes an entry). Calling it before idb hydrates races the replay
+	and can corrupt the timeline (phantom text entry alongside the real
+	stored entries).
 -->
-{#await doc.current.whenReady}
-	<div class="flex h-full items-center justify-center">
-		<Spinner class="size-5 text-muted-foreground" />
-	</div>
-{:then}
+{#await doc.current.idb.whenLoaded}
+	<Loading class="h-full" />
+{:then _}
 	<CodeMirrorEditor
 		ytext={doc.current.content.asText()}
 		{extensions}

@@ -53,5 +53,3 @@ export const AutostartServiceLive = {
 			catch: (error) => AutostartError.DisableFailed({ cause: error }),
 		}),
 };
-
-export type AutostartService = typeof AutostartServiceLive;

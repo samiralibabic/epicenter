@@ -10,7 +10,7 @@ Self-hosting eliminates that threat without the tax.
 
 When you deploy a server on your own hardware, the encryption key sits on a machine in your closet. The server decrypts data to serve requests—search, AI, password recovery all work normally. But nobody else has access to the machine. The properties are identical to zero-knowledge: no third party can read your data. The mechanism is different: instead of mathematical guarantees, you have physical control.
 
-This isn't a separate implementation or a compatible mode. It's the same `createEncryptedKvLww` function using XChaCha20-Poly1305 from `@noble/ciphers` for every operation. The only variable is the `key` source. In the cloud, the key is derived from `ENCRYPTION_SECRETS` on the server and sent to the client on authentication. When self-hosting, you enter a password that runs through PBKDF2 (SHA-256) with 600,000 iterations to derive the key locally. It never touches the network. The server receives the same encrypted blobs—bare `Uint8Array` with a binary header—but the trust boundary has moved from our infrastructure to your own password.
+This isn't a separate implementation or a compatible mode. It's the same `createEncryptedKvLww` function using XChaCha20-Poly1305 from `@noble/ciphers` for every operation. The only variable is who owns the deployment secret. In the cloud, Epicenter infrastructure owns `ENCRYPTION_SECRETS`, derives user keys on the server, and sends them to the client on authentication. When self-hosting, you own `ENCRYPTION_SECRETS` and the server that uses it. The encrypted blobs use the same bare `Uint8Array` binary header, but the trust boundary has moved from our infrastructure to yours.
 
 ```
 Zero-knowledge (hosted):
@@ -19,10 +19,10 @@ Zero-knowledge (hosted):
   Cost: no search, no AI, no password recovery, key management ceremony
 
 Self-hosted (Zero-knowledge):
-  Key: Derived locally via PBKDF2 (600k iterations) from your password
-  Flow: User → password stays local → client encrypts → server stores blobs
+  Key: Derived by your server from your ENCRYPTION_SECRETS
+  Flow: Your server -> client receives keys on auth -> client encrypts -> server stores blobs
   Cost: you maintain a server
-  Properties: identical—nobody else can read your data
+  Properties: nobody outside your infrastructure can read your data
 ```
 
 The populations overlap almost perfectly. The people who care enough about server trust to want zero-knowledge are exactly the people technical enough to run a Docker container on a home server or a $5/month VPS. You don't need to solve the key management problem for your mom—your mom doesn't distrust the server operator.
@@ -38,7 +38,7 @@ Self-hosting means one codebase. The server handles encryption, the server handl
 │  Hosted (Epicenter Cloud)                           │
 │                                                     │
 │  Server: Cloudflare Workers + Durable Objects       │
-│  Encryption key: per-user, stored on our infra      │
+│  Encryption key: our ENCRYPTION_SECRETS             │
 │  Trust model: you trust Epicenter                   │
 └─────────────────────────────────────────────────────┘
 
@@ -46,7 +46,7 @@ Self-hosting means one codebase. The server handles encryption, the server handl
 │  Self-hosted                                        │
 │                                                     │
 │  Server: same binary, your VPS or home server       │
-│  Encryption key: per-user, stored on YOUR infra     │
+│  Encryption key: your ENCRYPTION_SECRETS            │
 │  Trust model: you trust yourself                    │
 └─────────────────────────────────────────────────────┘
 

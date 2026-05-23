@@ -1,0 +1,250 @@
+/**
+ * Cloudflare Durable Object adapter for {@link createRoomCore}.
+ *
+ * The `DurableObject` base class is the one place a class is unavoidable:
+ * Cloudflare's runtime instantiates it per room and routes the
+ * Hibernation API callbacks (`webSocketMessage`, `webSocketClose`,
+ * `webSocketError`, `alarm`) to method overrides. This class is a thin
+ * shell: every callback forwards to a single {@link RoomCore} instance
+ * built in the constructor.
+ *
+ * ## Lifecycle
+ *
+ * 1. **Constructor**: `blockConcurrencyWhile` runs a synchronous init
+ *    that builds the {@link RoomUpdateLog} over `ctx.storage`, creates
+ *    the `RoomCore`, and re-registers any sockets that survived
+ *    hibernation via `ctx.getWebSockets()`.
+ * 2. **`fetch`**: only handles WebSocket upgrades; HTTP sync goes via
+ *    RPC (`stub.sync()`, `stub.getDoc()`).
+ * 3. **Hibernation callbacks**: forward to `core` directly.
+ * 4. **`alarm`**: deferred compaction 30 s after the room empties.
+ *
+ * ## RoomSocket compatibility
+ *
+ * Cloudflare's hibernation `WebSocket` exposes `send`, `close`, and
+ * `readyState`. TypeScript's structural typing treats it as a
+ * {@link RoomSocket}, so the raw socket is passed straight to
+ * `core.addConnection` / `core.handleMessage` / `core.removeConnection`
+ * with no wrapper.
+ */
+
+import { DurableObject } from 'cloudflare:workers';
+import { MAIN_SUBPROTOCOL, parseSubprotocols } from '@epicenter/sync';
+import { createRoomCore, type RoomCore } from '../../core';
+import { createDurableObjectUpdateLog } from './update-log';
+
+/** Delay before alarm-based compaction fires (30 seconds). */
+const COMPACTION_DELAY_MS = 30_000;
+
+/**
+ * Yjs sync + dispatch room backed by a Cloudflare Durable Object.
+ *
+ * Owns the Hibernation API integration (`acceptWebSocket`,
+ * `serializeAttachment`, `setAlarm`) and forwards every meaningful event
+ * to the {@link RoomCore} instance built in the constructor.
+ *
+ * ## Worker to DO interface
+ *
+ * - **RPC** (`stub.sync()`, `stub.getDoc()`): for HTTP sync and snapshot
+ *   bootstrap. Direct method calls avoid Request/Response serialization
+ *   overhead for binary payloads.
+ * - **fetch** (`stub.fetch(request)`): for WebSocket upgrades only;
+ *   the 101 Switching Protocols handshake requires HTTP semantics.
+ *
+ * ## Auth & data isolation
+ *
+ * Handled upstream by Hono routes in `app.ts`. The Worker validates the
+ * caller, checks any route-owned policy, and builds the internal DO name
+ * before calling RPC methods or forwarding `fetch`. The DO itself does
+ * not re-validate. DO names are host-owned opaque strings of the form
+ * `subject:{user.id}:rooms:{room}`.
+ */
+export class Room extends DurableObject {
+	/**
+	 * The runtime-agnostic room logic. Initialized synchronously inside
+	 * `ctx.blockConcurrencyWhile()` in the constructor. The definite
+	 * assignment assertion is safe because of two guarantees working
+	 * together:
+	 *
+	 * 1. **Cloudflare runtime guarantee**: `blockConcurrencyWhile`
+	 *    prevents the DO from receiving any incoming requests until the
+	 *    initialization promise resolves.
+	 * 2. **Synchronous async callback**: The callback passed to
+	 *    `blockConcurrencyWhile` contains no `await`, so it executes to
+	 *    completion synchronously.
+	 *
+	 * If an `await` is ever added to the `blockConcurrencyWhile`
+	 * callback, guarantee (2) breaks.
+	 *
+	 * @see https://developers.cloudflare.com/durable-objects/api/state/#blockconcurrencywhile
+	 */
+	private core!: RoomCore;
+
+	constructor(ctx: DurableObjectState, env: Env) {
+		super(ctx, env);
+
+		ctx.setWebSocketAutoResponse(
+			new WebSocketRequestResponsePair('ping', 'pong'),
+		);
+
+		ctx.blockConcurrencyWhile(async () => {
+			const updateLog = createDurableObjectUpdateLog(ctx.storage);
+			this.core = createRoomCore({ updateLog });
+
+			// Restore connections that survived hibernation. The hibernation
+			// WebSocket structurally satisfies RoomSocket (send/close/
+			// readyState), so we pass the raw ws directly.
+			//
+			// Presence is rebuilt implicitly: the core's connections map is
+			// the source of truth, so once these entries are restored,
+			// presence helpers return correct results immediately. No
+			// broadcast, no clock seeding, no force-clear; any subsequent
+			// upgrade or close drives the next presence delta the same way
+			// it would on a never-hibernated DO.
+			for (const ws of ctx.getWebSockets()) {
+				const attachment = ws.deserializeAttachment() as {
+					installationId: string;
+				} | null;
+				if (!attachment) continue;
+				this.core.addConnection(ws, attachment.installationId);
+			}
+		});
+	}
+
+	/**
+	 * Only handles WebSocket upgrades. HTTP sync operations are exposed
+	 * as RPC methods called directly on the stub (see {@link Room.sync}
+	 * / {@link Room.getDoc}), avoiding the overhead of constructing and
+	 * parsing Request/Response objects for binary payloads.
+	 *
+	 * The `installationId` query parameter is required: it is the
+	 * address used by `dispatch({ to })` and the value the relay stamps
+	 * on the socket attachment for the lifetime of the connection. No
+	 * round-trip validation: the URL stamp is the binding.
+	 *
+	 * Cancels any pending compaction alarm: a new client just connected,
+	 * so compacting now would be wasteful.
+	 *
+	 * The client offers
+	 * `sec-websocket-protocol: <MAIN_SUBPROTOCOL>, bearer.<token>`; we
+	 * echo only the main subprotocol to complete the handshake.
+	 */
+	override async fetch(request: Request): Promise<Response> {
+		if (request.headers.get('Upgrade') !== 'websocket') {
+			return new Response('Method not allowed', { status: 405 });
+		}
+
+		const url = new URL(request.url);
+		const installationId = url.searchParams.get('installationId');
+		if (!installationId) {
+			return new Response('missing installationId', { status: 400 });
+		}
+
+		void this.ctx.storage.deleteAlarm();
+
+		const pair = new WebSocketPair();
+		const [client, server] = [pair[0], pair[1]];
+
+		this.ctx.acceptWebSocket(server);
+
+		// Stash installationId so it survives hibernation.
+		server.serializeAttachment({ installationId });
+
+		// Register with the core. addConnection sends the initial
+		// SyncStep1 and presence snapshot, and rebroadcasts presence to
+		// peers if this is the first socket for the install.
+		this.core.addConnection(server, installationId);
+
+		const responseHeaders = new Headers();
+		const offered = parseSubprotocols(
+			request.headers.get('sec-websocket-protocol'),
+		);
+		if (offered.includes(MAIN_SUBPROTOCOL)) {
+			responseHeaders.set('sec-websocket-protocol', MAIN_SUBPROTOCOL);
+		}
+
+		return new Response(null, {
+			status: 101,
+			webSocket: client,
+			headers: responseHeaders,
+		});
+	}
+
+	/** Forward inbound messages to the core. */
+	override async webSocketMessage(
+		ws: WebSocket,
+		message: ArrayBuffer | string,
+	): Promise<void> {
+		this.core.handleMessage(ws, message);
+	}
+
+	/**
+	 * Forward close events to the core and schedule deferred compaction
+	 * if the room emptied.
+	 *
+	 * The defensive `ws.close(code, reason)` after the core call covers
+	 * a hibernation edge case where the server side outlives the client
+	 * side; calling close on an already-closed socket throws and is
+	 * swallowed.
+	 */
+	override async webSocketClose(
+		ws: WebSocket,
+		code: number,
+		reason: string,
+		_wasClean: boolean,
+	): Promise<void> {
+		this.core.removeConnection(ws, code);
+
+		try {
+			ws.close(code, reason);
+		} catch {
+			/* already closed by the remote end */
+		}
+
+		if (this.core.connectionCount === 0) {
+			void this.ctx.storage.setAlarm(Date.now() + COMPACTION_DELAY_MS);
+		}
+	}
+
+	/**
+	 * Handle a WebSocket error by closing with status 1011 (Internal
+	 * Error). Delegates to {@link Room.webSocketClose} so the same
+	 * cleanup path runs regardless of whether the socket closed cleanly
+	 * or errored.
+	 */
+	override async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+		await this.webSocketClose(ws, 1011, 'WebSocket error', false);
+	}
+
+	/**
+	 * Compact the update log after all clients disconnect.
+	 *
+	 * Scheduled 30 s after the last WebSocket closes via
+	 * `ctx.storage.setAlarm`. Cancelled if a client reconnects before
+	 * the alarm fires (see `fetch`).
+	 *
+	 * @see https://developers.cloudflare.com/durable-objects/api/alarms/
+	 */
+	override async alarm(): Promise<void> {
+		if (this.core.connectionCount > 0) return;
+		this.core.compact();
+	}
+
+	// --- RPC methods (called via stub.sync() / stub.getDoc()) ---
+
+	/**
+	 * HTTP sync via RPC. Forwards to {@link RoomCore.sync}, which
+	 * returns a `Result` so the route can answer 400 on a malformed
+	 * body without throwing.
+	 */
+	async sync(body: Uint8Array) {
+		return this.core.sync(body);
+	}
+
+	/**
+	 * Snapshot bootstrap via RPC. Forwards to {@link RoomCore.getDoc}.
+	 */
+	async getDoc() {
+		return this.core.getDoc();
+	}
+}

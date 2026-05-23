@@ -11,10 +11,15 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { attachTables, createDisposableCache } from '@epicenter/workspace';
+import {
+	attachTables,
+	attachTimeline,
+	createDisposableCache,
+	onLocalUpdate,
+} from '@epicenter/workspace';
 import { Bash } from 'just-bash';
 import * as Y from 'yjs';
-import { createFileContentDoc } from '../file-content-docs.js';
+import { fileContentDocGuid } from '../file-content-docs.js';
 import { attachYjsFileSystem } from '../file-system.js';
 import type { FileId } from '../ids.js';
 import { filesTable } from '../table.js';
@@ -161,15 +166,43 @@ describe('markdown integration with YjsFileSystem', () => {
 		const tables = attachTables(ydoc, { files: filesTable });
 		const ws = { id, ydoc, tables };
 		const contentDocs = createDisposableCache(
-			(fileId: FileId) =>
-				createFileContentDoc({
-					fileId,
-					workspaceId: ws.id,
-					filesTable: ws.tables.files,
-				}),
+			(fileId: FileId) => {
+				const contentYdoc = new Y.Doc({
+					guid: fileContentDocGuid({ workspaceId: ws.id, fileId }),
+					gc: true,
+				});
+				onLocalUpdate(contentYdoc, () =>
+					ws.tables.files.update(fileId, { updatedAt: Date.now() }),
+				);
+				return {
+					ydoc: contentYdoc,
+					content: attachTimeline(contentYdoc),
+					whenReady: Promise.resolve(),
+					[Symbol.dispose]() {
+						contentYdoc.destroy();
+					},
+				};
+			},
 			{ gcTime: Number.POSITIVE_INFINITY },
 		);
-		return attachYjsFileSystem(ws.tables.files, contentDocs);
+		return attachYjsFileSystem(ws.ydoc, ws.tables.files, {
+			async read(fileId) {
+				await using handle = contentDocs.open(fileId);
+				await handle.whenReady;
+				return handle.content.read();
+			},
+			async write(fileId, text) {
+				await using handle = contentDocs.open(fileId);
+				await handle.whenReady;
+				handle.content.write(text);
+			},
+			async append(fileId, text) {
+				await using handle = contentDocs.open(fileId);
+				await handle.whenReady;
+				handle.content.appendText(text);
+				return handle.content.read();
+			},
+		});
 	}
 
 	test('write and read .md file with front matter', async () => {

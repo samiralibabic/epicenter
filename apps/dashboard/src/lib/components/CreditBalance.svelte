@@ -5,10 +5,10 @@
 	import { Progress } from '@epicenter/ui/progress';
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { balanceQuery } from '$lib/query/billing';
+	import { billing } from '$lib/query/billing';
 	import { capitalize } from '$lib/utils';
 
-	const balance = createQuery(() => balanceQuery.options);
+	const balance = createQuery(() => billing.balance.options);
 
 	/** The ai_credits balance object from the customer response. */
 	const creditBalance = $derived(

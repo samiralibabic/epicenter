@@ -2,9 +2,9 @@
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import * as Table from '@epicenter/ui/table';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { modelsQuery } from '$lib/query/billing';
+	import { billing } from '$lib/query/billing';
 
-	const models = createQuery(() => modelsQuery.options);
+	const models = createQuery(() => billing.models.options);
 
 	/** Sorted model entries: cheapest first, then alphabetical. */
 	const sortedModels = $derived(

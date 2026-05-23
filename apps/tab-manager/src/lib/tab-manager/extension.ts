@@ -1,61 +1,60 @@
 /**
- * Live browser state (tabs, windows, tab groups) is NOT stored here —
+ * Live browser state (tabs, windows, tab groups) is NOT stored here.
  * Chrome is the sole authority for ephemeral browser state. See
  * `browser-state.svelte.ts`.
  */
 
-import type { AuthClient } from '@epicenter/auth-svelte';
-import { APP_URLS } from '@epicenter/constants/vite';
-import {
-	attachBroadcastChannel,
-	attachIndexedDb,
-	attachSync,
-	type DeviceDescriptor,
-	toWsUrl,
-} from '@epicenter/workspace';
-import type { DeviceId } from '$lib/workspace/definition';
-import { openTabManager as openTabManagerDoc } from './index';
+import type { LocalOwner } from '@epicenter/workspace';
+import * as Y from 'yjs';
+import { createTabManagerActions } from '$lib/workspace/actions';
+import { type DeviceId, tabManagerTables } from '$lib/workspace/definition';
 
 /**
- * Construction is async because awareness publishes the device descriptor
- * synchronously at attach time (no two-step "online but no device yet"
- * window). Awaiting the descriptor up front means every peer sees a
- * well-formed `state.device` from the first frame.
+ * Build the tab-manager binding. Synchronous: callers must resolve the
+ * installation id before invoking (the extension's installation id comes from
+ * `chrome.storage.local` via `createDeviceProfile()` in `device.ts`).
  *
- * `whenReady` still gates UI render on idb hydration; sync (the WebSocket)
- * is independent and connects whenever the network allows.
+ * Consumers gate UI render on `tabManager.idb.whenLoaded`; Cloud sync is
+ * independent and connects whenever a Workspace route is available.
  */
-export async function openTabManager({
-	auth,
-	device,
+export function openTabManagerBrowser({
+	owner,
+	installationId,
 }: {
-	auth: AuthClient;
-	device: DeviceDescriptor<DeviceId> | Promise<DeviceDescriptor<DeviceId>>;
+	owner: LocalOwner;
+	installationId: DeviceId;
 }) {
-	const resolvedDevice = await Promise.resolve(device);
+	const ydoc = new Y.Doc({ guid: 'epicenter.tab-manager', gc: true });
+	const encryption = owner.attachEncryption(ydoc);
+	const tables = encryption.attachTables(tabManagerTables);
+	const kv = encryption.attachKv({});
+	const batch = (fn: () => void) => ydoc.transact(fn);
 
-	const doc = openTabManagerDoc({ deviceId: Promise.resolve(resolvedDevice.id) });
+	const idb = owner.attachLocal(ydoc);
 
-	const idb = attachIndexedDb(doc.ydoc);
-	attachBroadcastChannel(doc.ydoc);
-
-	const sync = attachSync(doc, {
-		url: toWsUrl(`${APP_URLS.API}/workspaces/${doc.ydoc.guid}`),
-		waitFor: idb,
-		device: resolvedDevice,
-		getToken: () => auth.getToken(),
+	const actions = createTabManagerActions({
+		tables,
+		batch,
+		deviceId: installationId,
 	});
 
 	return {
-		...doc,
+		installationId,
+		ydoc,
+		tables,
+		kv,
+		batch,
 		idb,
-		sync,
-		/**
-		 * Resolves when IndexedDB has hydrated the local snapshot — the UI
-		 * can render with persisted data. Does NOT gate sync (the WebSocket
-		 * can connect at any time, including never if the extension is offline).
-		 */
-		whenReady: idb.whenLoaded,
-		device: resolvedDevice,
+		actions,
+		async wipe() {
+			ydoc.destroy();
+			await idb.whenDisposed;
+			await owner.wipeLocalYjsData([ydoc.guid]);
+		},
+		[Symbol.dispose]() {
+			ydoc.destroy();
+		},
 	};
 }
+
+export type TabManagerBrowser = ReturnType<typeof openTabManagerBrowser>;

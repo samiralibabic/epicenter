@@ -5,20 +5,21 @@
 	"version": "0.0.1",
 	"type": "module",
 	"exports": {
-		"./workspace": "./src/lib/workspace.ts"
+		".": "./src/lib/workspace.ts",
+		"./daemon": "./daemon.ts"
 	},
 	"scripts": {
 		"dev": "bun run dev:local",
 		"dev:local": "vite dev",
-		"dev:remote": "vite dev --mode production",
 		"build": "NODE_ENV=production vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
+		"test": "bun test",
 		"typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
 	},
 	"devDependencies": {
 		"@epicenter/ui": "workspace:*",
-		"bun-types": "catalog:",
+		"@types/bun": "catalog:",
 		"@lucide/svelte": "catalog:",
 		"@sveltejs/adapter-static": "catalog:",
 		"@sveltejs/kit": "catalog:",
@@ -33,8 +34,10 @@
 		"vite": "catalog:"
 	},
 	"dependencies": {
+		"@epicenter/auth": "workspace:*",
 		"@epicenter/auth-svelte": "workspace:*",
 		"@epicenter/constants": "workspace:*",
+		"@epicenter/encryption": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
 		"@epicenter/workspace": "workspace:*",
 		"@tanstack/svelte-table": "catalog:",
@@ -53,6 +56,7 @@
 		"prosemirror-view": "^1.41.0",
 		"typebox": "catalog:",
 		"wellcrafted": "catalog:",
+		"y-indexeddb": "catalog:",
 		"y-prosemirror": "^1.3.7",
 		"yjs": "catalog:",
 		"virtua": "catalog:"

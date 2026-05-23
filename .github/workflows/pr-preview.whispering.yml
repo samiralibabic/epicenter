@@ -33,7 +33,7 @@ jobs:
   # any running builds for this PR, saving CI minutes
   cancel-on-close:
     if: github.event.action == 'closed'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - run: echo "PR closed - cancelling in-progress builds via concurrency group"
 
@@ -48,10 +48,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
+          - platform: 'blacksmith-6vcpu-macos-15'
             args: '--target aarch64-apple-darwin'
 
-          - platform: 'macos-latest'
+          - platform: 'blacksmith-6vcpu-macos-15'
             args: '--target x86_64-apple-darwin'
 
           - platform: 'ubuntu-22.04'

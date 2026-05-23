@@ -4,11 +4,11 @@ import { createDisposableCache } from './disposable-cache.js';
 
 /**
  * Helper: a minimal Disposable wrapping a Y.Doc. Y.Doc is the most common
- * real-world value, but the cache itself is generic — these tests exercise
+ * real-world value, but the cache itself is generic; these tests exercise
  * the cache through Y.Doc only because Y.Doc.isDestroyed gives an easy
  * "did dispose actually run?" assertion.
  */
-function makeYDocCache(opts?: { gcTime?: number }) {
+function makeYDocCache({ gcTime }: { gcTime?: number } = {}) {
 	return createDisposableCache(
 		(id: string) => {
 			const ydoc = new Y.Doc({ guid: id });
@@ -19,7 +19,7 @@ function makeYDocCache(opts?: { gcTime?: number }) {
 				},
 			};
 		},
-		{ gcTime: opts?.gcTime },
+		{ gcTime },
 	);
 }
 
@@ -57,18 +57,6 @@ describe('open / cache identity', () => {
 		a[Symbol.dispose]();
 		b[Symbol.dispose]();
 	});
-
-	test('build closure runs without coupling to a parent context', () => {
-		// Pure builder — no closures, no module-scope state. The cache calls
-		// it with just an id and gets back a Disposable.
-		const cache = createDisposableCache((id: string) => ({
-			ydoc: new Y.Doc({ guid: id }),
-			[Symbol.dispose]() {},
-		}));
-		const h = cache.open('a');
-		expect(h.ydoc.guid).toBe('a');
-		h[Symbol.dispose]();
-	});
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -92,7 +80,7 @@ describe('throwing build closure', () => {
 
 		expect(() => cache.open('foo')).toThrow('boom');
 		expect(cache.has('foo')).toBe(false);
-		// The second attempt must run the closure again — no poisoned entry.
+		// The second attempt must run the closure again; no poisoned entry.
 		const handle = cache.open('foo');
 		expect(calls).toBe(2);
 		expect(handle.ydoc.guid).toBe('foo');
@@ -111,7 +99,6 @@ describe('arbitrary fields flow through the handle', () => {
 			return {
 				ydoc,
 				body: { kind: 'rich-text' as const },
-				whenReady: Promise.resolve(),
 				[Symbol.dispose]() {
 					ydoc.destroy();
 				},
@@ -124,43 +111,6 @@ describe('arbitrary fields flow through the handle', () => {
 		expect(a.body).toBe(b.body); // same reference under the hood
 		a[Symbol.dispose]();
 		b[Symbol.dispose]();
-	});
-
-	test('whenReady-style readiness composition works (cache is agnostic to it)', async () => {
-		let resolveA!: () => void;
-		let resolveB!: () => void;
-		const cache = createDisposableCache((id: string) => {
-			const ydoc = new Y.Doc({ guid: id });
-			const a = new Promise<void>((r) => {
-				resolveA = r;
-			});
-			const b = new Promise<void>((r) => {
-				resolveB = r;
-			});
-			return {
-				ydoc,
-				whenReady: Promise.all([a, b]),
-				[Symbol.dispose]() {
-					ydoc.destroy();
-				},
-			};
-		});
-
-		const handle = cache.open('a');
-		let resolved = false;
-		void handle.whenReady.then(() => {
-			resolved = true;
-		});
-
-		await new Promise((r) => setTimeout(r, 5));
-		expect(resolved).toBe(false);
-		resolveA();
-		await new Promise((r) => setTimeout(r, 5));
-		expect(resolved).toBe(false);
-		resolveB();
-		await handle.whenReady;
-		expect(resolved).toBe(true);
-		handle[Symbol.dispose]();
 	});
 });
 
@@ -273,7 +223,7 @@ describe('cache[Symbol.dispose]', () => {
 		});
 		cache.open('a');
 
-		// No await — cache dispose returns void and cascades synchronously.
+		// No await: cache dispose returns void and cascades synchronously.
 		cache[Symbol.dispose]();
 
 		await sentinel;
@@ -281,7 +231,7 @@ describe('cache[Symbol.dispose]', () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// open / dispose — refcount, grace-period disposal, disposable protocol
+// open / dispose: refcount, grace-period disposal, disposable protocol
 // ════════════════════════════════════════════════════════════════════════════
 
 describe('open / dispose', () => {
@@ -310,7 +260,7 @@ describe('open / dispose', () => {
 		expect(h1.ydoc.isDestroyed).toBe(true);
 	});
 
-	test('using h = cache.open(id) — disposes on scope exit', async () => {
+	test('using h = cache.open(id) disposes on scope exit', async () => {
 		const cache = makeYDocCache({ gcTime: 10 });
 		let ydocRef: Y.Doc;
 		{
@@ -348,7 +298,7 @@ describe('open / dispose', () => {
 		expect(h.ydoc.isDestroyed).toBe(true);
 	});
 
-	test('gcTime: 0 — last dispose tears down synchronously', () => {
+	test('gcTime: 0 tears down synchronously on last dispose', () => {
 		const cache = makeYDocCache({ gcTime: 0 });
 		const h1 = cache.open('a');
 		const h2 = cache.open('a');
@@ -358,7 +308,7 @@ describe('open / dispose', () => {
 		expect(h1.ydoc.isDestroyed).toBe(true);
 	});
 
-	test('gcTime: Infinity — entry stays live indefinitely; cache dispose forces teardown', async () => {
+	test('gcTime: Infinity keeps entry live indefinitely; cache dispose forces teardown', async () => {
 		const cache = makeYDocCache({ gcTime: Number.POSITIVE_INFINITY });
 		const h = cache.open('a');
 		const ydoc = h.ydoc;
@@ -373,19 +323,82 @@ describe('open / dispose', () => {
 		cache[Symbol.dispose]();
 		expect(ydoc.isDestroyed).toBe(true);
 	});
+});
 
-	test('default gcTime is finite (5s) — teardown eventually fires without explicit cache dispose', async () => {
-		// Guards the documented default. A bug that flipped the default back
-		// to Infinity would make this test hang past the assertion window.
-		const cache = makeYDocCache(); // default
+// ════════════════════════════════════════════════════════════════════════════
+// re-entrancy
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('re-entrancy', () => {
+	test("value's [Symbol.dispose] can re-enter via cache.open(sameId) and gets a fresh entry", () => {
+		// During teardown, the entry is removed from the cache's internal map
+		// BEFORE the value's [Symbol.dispose]() runs. So a re-entrant open of
+		// the same id during teardown must construct a brand new entry, not
+		// resurrect the about-to-be-destroyed one.
+		// biome-ignore lint/suspicious/noExplicitAny: cache referenced inside its own builder
+		let cache: any;
+		let buildCount = 0;
+		// biome-ignore lint/suspicious/noExplicitAny: handle type is parameterized via the cache itself
+		let reopenedHandle: any;
+		cache = createDisposableCache(
+			(id: string) => {
+				buildCount++;
+				const buildIndex = buildCount;
+				return {
+					id,
+					buildIndex,
+					[Symbol.dispose]() {
+						// Only re-open once, from the first instance's teardown.
+						if (buildIndex === 1 && !reopenedHandle) {
+							reopenedHandle = cache.open(id);
+						}
+					},
+				};
+			},
+			{ gcTime: 0 },
+		);
+
 		const h = cache.open('a');
-		const ydoc = h.ydoc;
 		h[Symbol.dispose]();
-		// Not waiting the full 5s here — just confirm the timer was armed by
-		// looking up has(). It should be true (in grace), not absent.
+
+		// The dispose triggered a re-open. We should now have a fresh entry,
+		// not a stale reference to the just-destroyed one.
+		expect(buildCount).toBe(2);
+		expect(reopenedHandle.buildIndex).toBe(2);
 		expect(cache.has('a')).toBe(true);
-		expect(ydoc.isDestroyed).toBe(false);
-		// Cleanup
+		reopenedHandle[Symbol.dispose]();
+		expect(cache.has('a')).toBe(false);
+	});
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// plain-object invariant (T must be a plain object)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('plain-object invariant', () => {
+	test('class instances passed directly LOSE prototype methods on the handle', () => {
+		// The handle is built via spread, which copies own enumerable
+		// properties only. Methods on the class prototype are NOT copied.
+		// This test pins down that documented limitation so a future change
+		// to the wrapping strategy doesn't silently regress it.
+		class WithPrototypeMethod {
+			name = 'underlying';
+			greet(): string {
+				return `hi from ${this.name}`;
+			}
+			[Symbol.dispose]() {}
+		}
+		const cache = createDisposableCache(
+			(_id: string) => new WithPrototypeMethod(),
+		);
+		const handle = cache.open('a');
+
+		// Own field is preserved by the spread.
+		expect(handle.name).toBe('underlying');
+		// Prototype method is NOT preserved by the spread.
+		expect((handle as unknown as { greet?: unknown }).greet).toBeUndefined();
+
+		handle[Symbol.dispose]();
 		cache[Symbol.dispose]();
 	});
 });

@@ -107,7 +107,7 @@ console.log('Updated packages/constants/src/versions.ts');
 const cargoTomls = files.filter((f) => f.type === 'toml');
 for (const { path } of cargoTomls) {
 	const tauriDir = join(root, path, '..');
-	const packageName = path.split('/')[1]; // apps/{name}/src-tauri/Cargo.toml → {name}
+	const packageName = path.split('/')[1]!; // apps/{name}/src-tauri/Cargo.toml → {name}
 	try {
 		console.log(`\nUpdating Cargo.lock for ${packageName}...`);
 		const proc = Bun.spawn(['cargo', 'update', '-p', packageName], {

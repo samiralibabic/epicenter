@@ -19,13 +19,6 @@
 	},
 	"homepage": "https://epicenter.so",
 	"type": "module",
-	"imports": {
-		"#*": [
-			"./src/*",
-			"./src/*.ts",
-			"./src/*/index.ts"
-		]
-	},
 	"exports": {
 		"./*": "./src/*/index.ts",
 		"./utils": "./src/utils.ts",
@@ -33,7 +26,7 @@
 		"./app.css": "./src/app.css"
 	},
 	"scripts": {
-		"typecheck": "svelte-check"
+		"typecheck": "svelte-check --tsconfig ./tsconfig.json"
 	},
 	"dependencies": {
 		"@fontsource-variable/manrope": "^5.2.6",
@@ -53,7 +46,7 @@
 		"@epicenter/workspace": "workspace:*",
 		"@emoji-mart/data": "^1.2.1",
 		"@internationalized/date": "^3.10.0",
-		"@types/node": "catalog:",
+		"@types/bun": "catalog:",
 		"jsrepo": "catalog:",
 		"layerchart": "2.0.0-next.48",
 		"mode-watcher": "catalog:",

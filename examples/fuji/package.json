@@ -1,0 +1,21 @@
+{
+	"name": "@examples/fuji",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"description": "Canonical Epicenter project layout demonstrated against the @epicenter/fuji workspace.",
+	"scripts": {
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@epicenter/cli": "workspace:*",
+		"@epicenter/fuji": "workspace:*",
+		"@epicenter/workspace": "workspace:*",
+		"wellcrafted": "catalog:",
+		"yjs": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"typescript": "catalog:"
+	}
+}

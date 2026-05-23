@@ -2,7 +2,7 @@ import { Ok, tryAsync } from 'wellcrafted/result';
 import type { TextService } from './types';
 import { TextError } from './types';
 
-export function createTextServiceWeb(): TextService {
+export function createTextServiceWeb() {
 	return {
 		readFromClipboard: () =>
 			tryAsync({
@@ -40,5 +40,5 @@ export function createTextServiceWeb(): TextService {
 			TextError.NotSupported({
 				operation: 'Simulating keystrokes',
 			}),
-	};
+	} satisfies TextService;
 }

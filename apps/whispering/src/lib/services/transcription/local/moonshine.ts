@@ -263,6 +263,3 @@ export const MoonshineTranscriptionServiceLive = {
 		return result;
 	},
 };
-
-export type MoonshineTranscriptionService =
-	typeof MoonshineTranscriptionServiceLive;

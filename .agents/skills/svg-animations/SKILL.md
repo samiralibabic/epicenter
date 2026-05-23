@@ -1,14 +1,14 @@
 ---
 name: svg-animations
-description: Create beautiful, performant SVG animations and illustrations. Use this skill when the user asks to create SVG graphics, icons, illustrations, animated logos, path animations, morphing shapes, loading spinners, or any animated SVG content. Covers SMIL animations, CSS-driven SVG animation, path drawing effects, shape morphing, motion paths, gradients, masks, and filters.
+description: 'SVG animations: SMIL, CSS, path drawing, shape morphing, motion paths, gradients, masks, filters. Use for SVG graphics, icons, animated logos, spinners.'
 ---
 
-This skill guides creation of handcrafted SVG animations — from simple animated icons to complex multi-stage path animations. SVGs are a markup language for images; every element is a DOM node you can style, animate, and script.
+This skill guides creation of handcrafted SVG animations : from simple animated icons to complex multi-stage path animations. SVGs are a markup language for images; every element is a DOM node you can style, animate, and script.
 
 ## SVG Fundamentals
 
 ### Coordinate System
-SVGs use a coordinate system defined by `viewBox="minX minY width height"`. The viewBox is your canvas — all coordinates are relative to it, making SVGs resolution-independent.
+SVGs use a coordinate system defined by `viewBox="minX minY width height"`. The viewBox is your canvas : all coordinates are relative to it, making SVGs resolution-independent.
 
 ```svg
 <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
@@ -27,7 +27,7 @@ SVGs use a coordinate system defined by `viewBox="minX minY width height"`. The 
 <polyline points="10,80 40,20 70,60 100,10" fill="none" stroke="#264653" stroke-width="2" />
 ```
 
-### The `<path>` Element — The Power Tool
+### The `<path>` Element : The Power Tool
 
 The `d` attribute defines a path using commands. Uppercase = absolute, lowercase = relative.
 
@@ -50,7 +50,7 @@ The `d` attribute defines a path using commands. Uppercase = absolute, lowercase
 <path d="M 10 80 C 40 10, 65 10, 95 80" stroke="#000" fill="none" stroke-width="2" />
 ```
 
-**Smooth Cubic** (`S`): Reflects the previous control point automatically — perfect for chaining fluid S-curves.
+**Smooth Cubic** (`S`): Reflects the previous control point automatically : perfect for chaining fluid S-curves.
 
 ```svg
 <path d="M 10 80 C 40 10, 65 10, 95 80 S 150 150, 180 80" stroke="#000" fill="none" />
@@ -191,9 +191,9 @@ path:hover {
 
 ## SMIL Animations (Native SVG)
 
-SMIL animations are declared directly inside SVG markup. They work even when SVG is loaded as an `<img>` or CSS `background-image` — where CSS and JS can't reach.
+SMIL animations are declared directly inside SVG markup. They work even when SVG is loaded as an `<img>` or CSS `background-image` : where CSS and JS can't reach.
 
-### `<animate>` — Animate Any Attribute
+### `<animate>` : Animate Any Attribute
 
 ```svg
 <circle cx="50" cy="50" r="20" fill="#e63946">
@@ -210,7 +210,7 @@ With keyframes:
          dur="3s" repeatCount="indefinite" />
 ```
 
-### `<animateTransform>` — Transform Animations
+### `<animateTransform>` : Transform Animations
 
 ```svg
 <rect x="-20" y="-20" width="40" height="40" fill="#264653">
@@ -221,7 +221,7 @@ With keyframes:
 
 Types: `translate`, `scale`, `rotate`, `skewX`, `skewY`
 
-### `<animateMotion>` — Move Along a Path
+### `<animateMotion>` : Move Along a Path
 
 ```svg
 <circle r="5" fill="#e63946">
@@ -235,7 +235,7 @@ Types: `translate`, `scale`, `rotate`, `skewX`, `skewY`
 
 `rotate="auto"` orients the element tangent to the path. `rotate="auto-reverse"` flips it 180°.
 
-### `<set>` — Discrete Value Changes
+### `<set>` : Discrete Value Changes
 
 ```svg
 <rect width="40" height="40" fill="#264653">
@@ -253,11 +253,11 @@ Types: `translate`, `scale`, `rotate`, `skewX`, `skewY`
 ```
 
 Trigger values:
-- `begin="click"` — on click
-- `begin="2s"` — after 2 seconds
-- `begin="other.end"` — when another animation ends
-- `begin="other.end + 1s"` — 1s after another ends
-- `begin="other.repeat(2)"` — on 2nd repeat of another
+- `begin="click"` : on click
+- `begin="2s"` : after 2 seconds
+- `begin="other.end"` : when another animation ends
+- `begin="other.end + 1s"` : 1s after another ends
+- `begin="other.repeat(2)"` : on 2nd repeat of another
 
 ### Easing with `calcMode` and `keySplines`
 
@@ -387,25 +387,25 @@ Both shapes must have identical command structures (same number of points, same 
 
 ## Best Practices
 
-1. **Use `viewBox`, never hardcode `width`/`height` in the SVG** — let the container size it. This keeps it resolution-independent.
+1. **Use `viewBox`, never hardcode `width`/`height` in the SVG** : let the container size it. This keeps it resolution-independent.
 
-2. **`<defs>` for reusable definitions** — gradients, filters, masks, clipPaths, and reusable shapes belong in `<defs>`.
+2. **`<defs>` for reusable definitions** : gradients, filters, masks, clipPaths, and reusable shapes belong in `<defs>`.
 
-3. **Prefer SMIL for self-contained SVGs** (icons, logos loaded via `<img>`) — CSS/JS won't work there. Use CSS animations when the SVG is inlined and you want to coordinate with the rest of the page.
+3. **Prefer SMIL for self-contained SVGs** (icons, logos loaded via `<img>`) : CSS/JS won't work there. Use CSS animations when the SVG is inlined and you want to coordinate with the rest of the page.
 
-4. **Shape morphing requires matching commands** — same number of path commands, same types, same order. If shapes differ, add invisible intermediate points to equalize.
+4. **Shape morphing requires matching commands** : same number of path commands, same types, same order. If shapes differ, add invisible intermediate points to equalize.
 
 5. **`stroke-linecap="round"`** makes line animations look polished.
 
 6. **`fill="freeze"`** in SMIL keeps the final animation state. Without it, the element snaps back.
 
-7. **`transform-origin: center`** in CSS — SVG transforms default to the origin (0,0), not the element center. Always set this explicitly.
+7. **`transform-origin: center`** in CSS : SVG transforms default to the origin (0,0), not the element center. Always set this explicitly.
 
 8. **Use `getTotalLength()`** in JS to get exact path lengths for stroke animations instead of guessing.
 
-9. **Layer animations with `<g>` groups** — animate the group transform separately from individual element properties for complex choreography.
+9. **Layer animations with `<g>` groups** : animate the group transform separately from individual element properties for complex choreography.
 
-10. **Performance:** SVG animations are GPU-composited when animating `transform` and `opacity`. Animating `d`, `points`, or layout attributes triggers repaints — use sparingly on complex SVGs.
+10. **Performance:** SVG animations are GPU-composited when animating `transform` and `opacity`. Animating `d`, `points`, or layout attributes triggers repaints : use sparingly on complex SVGs.
 
 11. **`will-change: transform`** on animated SVG elements helps the browser optimize compositing.
 

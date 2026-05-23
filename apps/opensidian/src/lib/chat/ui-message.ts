@@ -11,7 +11,7 @@
 import type { MessagePart } from '@tanstack/ai';
 import type { UIMessage } from '@tanstack/ai-svelte';
 
-import type { ChatMessage, ChatMessageId } from '../workspace/definition.js';
+import type { ChatMessage, ChatMessageId } from 'opensidian';
 
 type Expect<T extends true> = T;
 type Equal<TLeft, TRight> =

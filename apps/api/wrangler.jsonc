@@ -36,20 +36,21 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"name": "WORKSPACE_ROOM",
-				"class_name": "WorkspaceRoom"
-			},
-			{
-				"name": "DOCUMENT_ROOM",
-				"class_name": "DocumentRoom"
+				"name": "ROOM",
+				"class_name": "Room"
 			}
 		]
 	},
-	// SQLite-backed DO — persistent storage survives hibernation.
+	// SQLite-backed DO: persistent storage survives hibernation.
 	"migrations": [
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["WorkspaceRoom", "DocumentRoom"]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["Room"],
+			"deleted_classes": ["WorkspaceRoom", "DocumentRoom"]
 		}
 	],
 	// --- Secrets (set via `wrangler secret put`, typed via `wrangler types`) ---

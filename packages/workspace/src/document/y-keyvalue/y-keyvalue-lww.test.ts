@@ -15,24 +15,62 @@
  */
 import { describe, expect, test } from 'bun:test';
 import * as Y from 'yjs';
-import { YKeyValueLww, type YKeyValueLwwEntry } from './y-keyvalue-lww';
 import { YKeyValue, type YKeyValueEntry } from './_reference/y-keyvalue';
+import { YKeyValueLww, type YKeyValueLwwEntry } from './y-keyvalue-lww';
+
+/**
+ * Create the smallest useful LWW KV fixture.
+ *
+ * The single source of truth remains `YKeyValueLww`; this helper only removes
+ * repeated Y.Doc and Y.Array wiring from tests that are asserting KV behavior,
+ * not construction behavior.
+ */
+function setupKv<T = string>() {
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const yarray = ydoc.getArray<YKeyValueLwwEntry<T>>('data');
+	const kv = new YKeyValueLww(yarray);
+	return { ydoc, yarray, kv };
+}
+
+/**
+ * Create two docs that can exchange Yjs updates.
+ *
+ * Sync semantics belong to Yjs. Tests use this helper only when they need the
+ * repeated two-doc boundary for conflict and convergence assertions.
+ */
+function setupSyncedArrays<T = string>(guid = 'shared') {
+	const doc1 = new Y.Doc({ guid });
+	const doc2 = new Y.Doc({ guid });
+	return {
+		doc1,
+		doc2,
+		array1: doc1.getArray<YKeyValueLwwEntry<T>>('data'),
+		array2: doc2.getArray<YKeyValueLwwEntry<T>>('data'),
+	};
+}
+
+/**
+ * Apply each document's current update to the other document.
+ *
+ * This keeps sync direction consistent in every test that cares about
+ * convergence, while leaving conflict resolution in the production KV class.
+ */
+function syncBoth(doc1: Y.Doc, doc2: Y.Doc): void {
+	Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
+	Y.applyUpdate(doc1, Y.encodeStateAsUpdate(doc2));
+}
 
 describe('YKeyValueLww', () => {
 	describe('Basic Operations', () => {
 		test('set stores value and get retrieves it', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'bar');
 			expect(kv.get('foo')).toBe('bar');
 		});
 
 		test('set overwrites existing value', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'first');
 			kv.set('foo', 'second');
@@ -40,9 +78,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('bulkSet inserts all entries', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { kv } = setupKv();
 
 			kv.bulkSet([
 				{ key: 'foo', val: 'bar' },
@@ -57,9 +93,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('bulkSet updates existing entries', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { yarray, kv } = setupKv();
 
 			kv.set('foo', 'first');
 			kv.bulkSet([
@@ -83,9 +117,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('delete removes value', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'bar');
 			kv.delete('foo');
@@ -94,9 +126,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('bulkDelete removes all specified keys', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { kv } = setupKv();
 
 			kv.bulkSet([
 				{ key: 'foo', val: 'bar' },
@@ -112,9 +142,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('bulkDelete is a no-op for missing keys', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { yarray, kv } = setupKv();
 
 			kv.bulkSet([
 				{ key: 'foo', val: 'bar' },
@@ -130,9 +158,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('entries have timestamp field', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { yarray, kv } = setupKv();
 
 			kv.set('foo', 'bar');
 
@@ -144,9 +170,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('timestamps are monotonically increasing', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
-			const kv = new YKeyValueLww(yarray);
+			const { yarray, kv } = setupKv();
 
 			kv.set('a', '1');
 			kv.set('b', '2');
@@ -164,12 +188,7 @@ describe('YKeyValueLww', () => {
 
 	describe('LWW Conflict Resolution', () => {
 		test('higher timestamp wins regardless of sync order', () => {
-			// Create two docs that will sync
-			const doc1 = new Y.Doc({ guid: 'shared' });
-			const doc2 = new Y.Doc({ guid: 'shared' });
-
-			const array1 = doc1.getArray<YKeyValueLwwEntry<string>>('data');
-			const array2 = doc2.getArray<YKeyValueLwwEntry<string>>('data');
+			const { doc1, doc2, array1, array2 } = setupSyncedArrays();
 
 			// Manually push entries with controlled timestamps
 			// Client 1 writes with LOWER timestamp (earlier)
@@ -178,9 +197,7 @@ describe('YKeyValueLww', () => {
 			// Client 2 writes with HIGHER timestamp (later)
 			array2.push([{ key: 'x', val: 'from-client-2-later', ts: 2000 }]);
 
-			// Sync in both directions
-			Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
-			Y.applyUpdate(doc1, Y.encodeStateAsUpdate(doc2));
+			syncBoth(doc1, doc2);
 
 			// Now create KV wrappers - they should resolve conflicts
 			const kv1 = new YKeyValueLww(array1);
@@ -192,11 +209,7 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('later edit wins over earlier edit (LWW semantics)', () => {
-			const doc1 = new Y.Doc({ guid: 'shared' });
-			const doc2 = new Y.Doc({ guid: 'shared' });
-
-			const array1 = doc1.getArray<YKeyValueLwwEntry<string>>('data');
-			const array2 = doc2.getArray<YKeyValueLwwEntry<string>>('data');
+			const { doc1, doc2, array1, array2 } = setupSyncedArrays();
 
 			// Manually push entries with CONTROLLED timestamps to test LWW
 			// Client 1 writes with LOWER timestamp (earlier edit)
@@ -205,9 +218,7 @@ describe('YKeyValueLww', () => {
 			// Client 2 writes with HIGHER timestamp (later edit)
 			array2.push([{ key: 'doc', val: 'edit-from-client-2', ts: 2000 }]);
 
-			// Sync both directions
-			Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
-			Y.applyUpdate(doc1, Y.encodeStateAsUpdate(doc2));
+			syncBoth(doc1, doc2);
 
 			// Create KV wrappers - they should resolve conflicts using timestamps
 			const kv1 = new YKeyValueLww(array1);
@@ -219,45 +230,29 @@ describe('YKeyValueLww', () => {
 		});
 
 		test('convergence: both clients see same value after sync', () => {
-			const results: Array<{
-				value: string | undefined;
-				ts1: number;
-				ts2: number;
-			}> = [];
+			const cases = [
+				{ ts1: 1000, ts2: 2000, expected: 'client-2-0' },
+				{ ts1: 3000, ts2: 2000, expected: 'client-1-1' },
+				{ ts1: 1500, ts2: 1501, expected: 'client-2-2' },
+				{ ts1: 4000, ts2: 3999, expected: 'client-1-3' },
+			] as const;
 
-			for (let i = 0; i < 10; i++) {
-				const doc1 = new Y.Doc({ guid: `shared-${i}` });
-				const doc2 = new Y.Doc({ guid: `shared-${i}` });
+			for (const [index, { ts1, ts2, expected }] of cases.entries()) {
+				const { doc1, doc2, array1, array2 } = setupSyncedArrays(
+					`shared-${index}`,
+				);
 
-				const array1 = doc1.getArray<YKeyValueLwwEntry<string>>('data');
-				const array2 = doc2.getArray<YKeyValueLwwEntry<string>>('data');
+				array1.push([{ key: 'key', val: `client-1-${index}`, ts: ts1 }]);
+				array2.push([{ key: 'key', val: `client-2-${index}`, ts: ts2 }]);
 
-				// Manually insert with controlled timestamps to test ordering
-				const ts1 = 1000 + Math.random() * 1000;
-				const ts2 = 1000 + Math.random() * 1000;
+				syncBoth(doc1, doc2);
 
-				array1.push([{ key: 'key', val: `client-1-${i}`, ts: ts1 }]);
-				array2.push([{ key: 'key', val: `client-2-${i}`, ts: ts2 }]);
-
-				// Sync
-				Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
-				Y.applyUpdate(doc1, Y.encodeStateAsUpdate(doc2));
-
-				// Create KV wrappers
 				const kv1 = new YKeyValueLww(array1);
 				const kv2 = new YKeyValueLww(array2);
 
-				// Must converge
 				expect(kv1.get('key')).toBe(kv2.get('key'));
-
-				// Higher timestamp should win
-				const expectedWinner = ts1 > ts2 ? `client-1-${i}` : `client-2-${i}`;
-				expect(kv1.get('key')).toBe(expectedWinner);
-
-				results.push({ value: kv1.get('key'), ts1, ts2 });
+				expect(kv1.get('key')).toBe(expected);
 			}
-
-			console.log('LWW convergence results:', results);
 		});
 	});
 
@@ -868,7 +863,7 @@ describe('YKeyValueLww', () => {
 				});
 
 				// After transaction, observer has fired and cleared pendingDeletes
-				// Verify by setting a new value — if pendingDeletes wasn't cleared,
+				// Verify by setting a new value: if pendingDeletes wasn't cleared,
 				// has() would still return false incorrectly
 				kv.set('foo', 'baz');
 				expect(kv.has('foo')).toBe(true);
@@ -880,7 +875,7 @@ describe('YKeyValueLww', () => {
 				const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
 				const kv = new YKeyValueLww(yarray);
 
-				// set then delete in same batch — entry added+deleted from yarray
+				// set then delete in same batch: entry added+deleted from yarray
 				ydoc.transact(() => {
 					kv.set('foo', 'bar');
 					kv.delete('foo');
@@ -916,7 +911,7 @@ describe('YKeyValueLww', () => {
 				// Sync client 2's update to client 1
 				Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
 
-				// Client 1 should see the remote value — pendingDeletes must not mask it
+				// Client 1 should see the remote value: pendingDeletes must not mask it
 				expect(kv1.has('foo')).toBe(true);
 				expect(kv1.get('foo')).toBe('remote-value');
 			});
@@ -980,7 +975,7 @@ describe('YKeyValueLww', () => {
 				// After batch: two set() calls in same batch push two entries to yarray.
 				// delete() only removes the first matching entry via findIndex().
 				// The second entry survives, and the observer processes it as an add.
-				// This is a known edge case — the second set's entry "wins".
+				// This is a known edge case: the second set's entry "wins".
 				expect(kv.has('foo')).toBe(true);
 				expect(kv.get('foo')).toBe('second');
 			});
@@ -990,7 +985,7 @@ describe('YKeyValueLww', () => {
 				const yarray = ydoc.getArray<YKeyValueLwwEntry<string>>('data');
 				const kv = new YKeyValueLww(yarray);
 
-				// Delete a key that was never set — should not throw
+				// Delete a key that was never set: should not throw
 				kv.delete('never-existed');
 				expect(kv.has('never-existed')).toBe(false);
 				expect(kv.get('never-existed')).toBeUndefined();
@@ -1050,7 +1045,7 @@ describe('YKeyValueLww', () => {
 				// Sync client 2's update to client 1
 				Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
 
-				// 'a' should still be deleted — the remote add of 'c' should not affect it
+				// 'a' should still be deleted: the remote add of 'c' should not affect it
 				expect(kv1.has('a')).toBe(false);
 				expect(kv1.get('a')).toBeUndefined();
 				// 'c' should be visible

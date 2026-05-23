@@ -1,26 +1,41 @@
-import { createSessionStore } from '@epicenter/cli';
+/**
+ * Shared workspace shape for the two-peer cross-peer sync repro.
+ *
+ * Each peer's `daemon.ts` calls `openNotes(ctx-derived-args)` so both peers
+ * agree on the workspace id, the table schema, and the action set; the only
+ * thing that differs between peers is the `installationId` (the daemon ctx default
+ * is `${route}-daemon`, but cross-peer sync requires distinct installationIds for
+ * the same workspace, so each peer hard-codes its own).
+ */
+
+import { EPICENTER_API_URL } from '@epicenter/constants/apps';
+import type { OpenWebSocket } from '@epicenter/workspace';
 import {
-	attachSync,
 	attachTables,
 	defineMutation,
 	defineQuery,
 	defineTable,
-	type DeviceDescriptor,
-	toWsUrl,
+	openCollaboration,
+	roomWsUrl,
 } from '@epicenter/workspace';
 import { type } from 'arktype';
 import Type from 'typebox';
 import * as Y from 'yjs';
 
-const SERVER_URL = 'https://api.epicenter.so';
 const WORKSPACE_ID = 'epicenter.notes-repro';
 
 // `_v: '1'` here is arktype syntax for the literal NUMBER 1 (numeric strings
 // in arktype's type position resolve to number literals). The `set()` call
-// below passes `_v: 1` — same value, two different syntax conventions.
+// below passes `_v: 1`: same value, two different syntax conventions.
 const Note = defineTable(type({ id: 'string', body: 'string', _v: '1' }));
 
-export function openNotes(device: DeviceDescriptor) {
+export function openNotes({
+	installationId,
+	openWebSocket,
+}: {
+	installationId: string;
+	openWebSocket: OpenWebSocket;
+}) {
 	const ydoc = new Y.Doc({ guid: WORKSPACE_ID });
 	const tables = attachTables(ydoc, { notes: Note });
 
@@ -39,21 +54,21 @@ export function openNotes(device: DeviceDescriptor) {
 		},
 	};
 
-	const sessions = createSessionStore();
-	const sync = attachSync(ydoc, {
-		url: toWsUrl(`${SERVER_URL}/workspaces/${WORKSPACE_ID}`),
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl(EPICENTER_API_URL, ydoc.guid),
+		openWebSocket,
+		installationId,
 		actions,
-		device,
-		getToken: async () =>
-			(await sessions.load(SERVER_URL))?.accessToken ?? null,
 	});
 
 	return {
+		workspaceId: ydoc.guid,
 		actions,
-		sync,
-		whenReady: sync.whenConnected,
-		[Symbol.dispose]() {
+		collaboration,
+		whenReady: collaboration.whenConnected,
+		async [Symbol.asyncDispose]() {
 			ydoc.destroy();
+			await collaboration.whenDisposed;
 		},
 	};
 }

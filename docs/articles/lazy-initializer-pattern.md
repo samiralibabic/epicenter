@@ -69,8 +69,8 @@ The null-tracking variables are gone. Each lazy value declares what it computes,
 
 These lazy values are created inside a callback. When the callback returns, they go out of scope and get garbage collected. There's no global state, no module-level singleton, no cleanup needed. Each invocation of the observer gets its own fresh lazy values, computed on demand, discarded when done.
 
-This is different from the async lazy singleton pattern, where you cache a `Promise` at module scope so an expensive async operation only runs once for the lifetime of the process. That pattern is for long-lived resources: database connections, loaded configs, initialized SDKs. This pattern is for one-shot deferred computation within a single function scope—values that are expensive enough to skip if unused, but only needed for the duration of one call.
+This helper is deliberately sync-only. It is different from the async lazy singleton pattern, where you cache a `Promise` at module scope so an expensive async operation only runs once for the lifetime of the process. That pattern is for long-lived resources: database connections, loaded configs, initialized SDKs. This pattern is for one-shot deferred computation within a single function scope: values that are expensive enough to skip if unused, but only needed for the duration of one call.
 
-The distinction matters. Reach for the async singleton when you want one instance forever. Reach for `lazy()` when you want "compute this at most once, but only if something actually asks for it."
+The distinction matters. Reach for an explicit promise field when async lifecycle code needs a barrier. Reach for `lazy()` when you want "compute this sync value at most once, but only if something actually asks for it."
 
 The vague code smell from the let-then-check pattern was pointing at a real gap. `lazy()` fills it.

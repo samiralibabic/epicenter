@@ -4,6 +4,8 @@
 **Status**: shipped (PR #1705, merged 2026-04-26 at `252dced47`). The v4 reasoning landed; the v5 amendment to Layer 4 below covers the iso/env/client reversal. The always-async-Result section was reversed by `specs/20260425T200000-actions-passthrough-adr.md`.
 **Author**: AI-assisted, pairing with Braden
 
+> **Path note (2026-05-22)**: The `epicenterPaths.persistence(...)` code example below predates the current path policy. The `epicenterPaths` symbol was removed; project-local persistence now lives under `<projectDir>/.epicenter/sqlite/` via `attachSqlite` and machine state under `env-paths('epicenter')`. See `specs/20260522T203209-top-level-epicenter-path-cleanup.md`.
+
 > ⚠ **v5 amendment — read this before relying on the Overview, the Design decisions table, or any Layer text.**
 >
 > The "no `openFuji()` wrapper function — the module IS the workspace" axiom that runs through the [thesis](#one-sentence-thesis), the [Overview](#overview), the [Design decisions table](#design-decisions), and the original Layer 4 was **reversed within hours** when a Node consumer needed to construct the workspace's Y.Doc without dragging in `y-indexeddb`. Bundle bleed prevention required restoring the wrapper as a *seam* between iso construction and env binding.
@@ -417,7 +419,7 @@ import type { AuthClient } from '@epicenter/auth-svelte';
 import { APP_URLS } from '@epicenter/constants/vite';
 import {
   attachBroadcastChannel, attachIndexedDb, attachSync,
-  createDisposableCache, dispatchAction, toWsUrl,
+  createDisposableCache, dispatchAction, websocketUrl,
 } from '@epicenter/workspace';
 import { createEntryContentDoc } from '$lib/entry-content-docs';
 import type { EntryId } from '$lib/workspace';
@@ -435,7 +437,7 @@ export function openFuji({ auth }: { auth: AuthClient }) {
     { gcTime: 5_000 },
   );
   const sync = attachSync(doc.ydoc, {
-    url: toWsUrl(`${APP_URLS.API}/workspaces/${doc.ydoc.guid}`),
+    url: websocketUrl(`${APP_URLS.API}/workspaces/${doc.ydoc.guid}`),
     waitFor: idb.whenLoaded,
     awareness: doc.awareness.raw,
     getToken: () => auth.getToken(),
@@ -453,7 +455,7 @@ import { createPersistedState } from '@epicenter/svelte';
 import { openFuji } from './browser';
 
 const session = createPersistedState({
-  key: 'fuji:authSession',
+  key: 'fuji.auth.session',
   schema: AuthSession.or('null'),
   defaultValue: null,
 });
@@ -495,13 +497,13 @@ import { createPersistedState } from '@epicenter/svelte';
 import {
   attachAwareness, attachBroadcastChannel, attachEncryption,
   attachIndexedDb, attachSync, dispatchAction,
-  serializeActionManifest, invoke, toWsUrl,
+  serializeActionManifest, invoke, websocketUrl,
 } from '@epicenter/workspace';
 import { createFujiActions, fujiTables } from '$lib/workspace';
 import { createEntryContentDocs } from '$lib/entry-content-docs';
 import * as Y from 'yjs';
 
-const session = createPersistedState({ key: 'fuji:authSession', schema: AuthSession.or('null'), defaultValue: null });
+const session = createPersistedState({ key: 'fuji.auth.session', schema: AuthSession.or('null'), defaultValue: null });
 export const auth = createAuth({ baseURL: APP_URLS.API, session });
 
 // ── Identity (persisted locally) ───────────────────────────────────
@@ -524,7 +526,7 @@ const actions = createFujiActions(tables);
 
 // ── Network ────────────────────────────────────────────────────────
 const sync = attachSync(ydoc, {
-  url: toWsUrl(`${APP_URLS.API}/workspaces/${ydoc.guid}`),
+  url: websocketUrl(`${APP_URLS.API}/workspaces/${ydoc.guid}`),
   waitFor: idb.whenLoaded,
   awareness: awareness.raw,
   getToken: () => auth.getToken(),

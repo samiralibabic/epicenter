@@ -1,5 +1,7 @@
 # `$state<Handle | null>` Is the Component Lifecycle in Disguise
 
+When a Svelte component opens a disposable handle from a prop, that prop is often the component's identity. Key the parent on that identity, open the handle synchronously in the child, and let unmount dispose it. You usually do not need nullable state to describe a lifecycle the tree already owns.
+
 I was reviewing five Svelte components that all opened a Yjs doc handle. Four of them looked like this:
 
 ```svelte
@@ -11,7 +13,7 @@ I was reviewing five Svelte components that all opened a Yjs doc handle. Four of
 	$effect(() => {
 		const h = fileContentDocs.open(fileId);
 		handle = h;
-		return () => { h.dispose(); handle = null; };
+		return () => { h[Symbol.dispose](); handle = null; };
 	});
 </script>
 
@@ -28,7 +30,7 @@ One of them, `EntryEditor.svelte`, looked like this:
 	const id = entry.id;
 
 	const contentDoc = entryContentDocs.open(id);
-	$effect(() => () => contentDoc.dispose());
+	$effect(() => () => contentDoc[Symbol.dispose]());
 </script>
 
 <Editor yxmlfragment={contentDoc.content.binding} />
@@ -63,7 +65,7 @@ Before (`honeycrisp/+page.svelte`):
 		if (!id) { bodyHandle = null; return; }
 		const handle = noteBodyDocs.open(id);
 		bodyHandle = handle;
-		return () => { handle.dispose(); bodyHandle = null; };
+		return () => { handle[Symbol.dispose](); bodyHandle = null; };
 	});
 </script>
 
@@ -90,7 +92,7 @@ And `NoteBodyPane.svelte`:
 <script lang="ts">
 	let { noteId }: { noteId: string } = $props();
 	const handle = noteBodyDocs.open(noteId);
-	$effect(() => () => handle.dispose());
+	$effect(() => () => handle[Symbol.dispose]());
 </script>
 
 <HoneycripEditor yxmlfragment={handle.body.binding} ... />
@@ -109,23 +111,23 @@ The code DeepWiki produced:
 ```svelte
 $effect(() => {
 	if (externalResource) {
-		externalResource.dispose();
+		externalResource[Symbol.dispose]();
 	}
 	externalResource = openExternalResource(resourceId);
 	return () => {
 		if (externalResource) {
-			externalResource.dispose();
+			externalResource[Symbol.dispose]();
 		}
 	};
 });
 ```
 
-That disposes twice on every prop change. The effect body disposes the previous resource, assigns a new one, and the returned cleanup — which captured `externalResource` by closure — fires next and disposes the one that was just assigned. Then the body runs again and opens a third one. Classic.
+That disposes twice on every prop change. The effect body disposes the previous resource, assigns a new one, and the returned cleanup, which captured `externalResource` by closure, fires next and disposes the one that was just assigned. Then the body runs again and opens a third one. Classic.
 
 This isn't a slight against the docs. It's the point. The pattern is hard to write correctly. The equivalent Pattern A version cannot write this bug, because the effect has one line:
 
 ```svelte
-$effect(() => () => handle.dispose());
+$effect(() => () => handle[Symbol.dispose]());
 ```
 
 There is no body to desynchronize from the cleanup, because the body is the cleanup.
@@ -134,7 +136,7 @@ There is no body to desynchronize from the cleanup, because the body is the clea
 
 The reason people reach for the effect pattern is remount cost. `{#key}` destroys the component, which means destroying the DOM, which means the editor loses its scroll position, selection, focus, IME state, internal undo history.
 
-For Yjs-backed editors this doesn't matter. The content state lives in the CRDT, not in the editor instance. Reconnecting to the same doc restores content instantly. Scroll and focus aren't worth preserving across a document switch anyway — the user is navigating to a different thing.
+For Yjs-backed editors this doesn't matter. The content state lives in the CRDT, not in the editor instance. Reconnecting to the same doc restores content instantly. Scroll and focus aren't worth preserving across a document switch anyway, because the user is navigating to a different thing.
 
 The cost is real when you have in-component UI state that should survive an id swap. A spreadsheet view that remembers the selected cell when you switch sheets. A timeline scrubber that keeps its zoom level across documents. If that state isn't in the doc and isn't persisted, `{#key}` will wipe it.
 
@@ -150,10 +152,10 @@ Two, there's meaningful local UI state that would regress if the component remou
 
 Three, no small wrapper component could absorb the id boundary without losing that context.
 
-Two of the five callsites — `ReferencesPanel` with its expand-collapse toggle, and the honeycrisp page itself — looked like condition one. Both collapsed to Pattern A anyway, because a wrapper component was cheaper than the nullable state.
+Two of the five callsites, `ReferencesPanel` with its expand-collapse toggle and the honeycrisp page itself, looked like condition one. Both collapsed to Pattern A anyway, because a wrapper component was cheaper than the nullable state.
 
 ## The smell, stated plainly
 
 If you see `$state<Handle | null>(null)` followed by a `$effect` that opens the handle, assigns it, and disposes it in cleanup, you're reimplementing a component lifecycle that the parent could own with one `{#key}` or `{#if}`. Push the boundary up. Let the tree do the work.
 
-Related: [Svelte skill — External Resource Handles section](../.agents/skills/svelte/SKILL.md), and the commits that landed this across the codebase (`d183f8a8`, `f689ae86`).
+Related: [Svelte Context Is Not Reactive, But `{#key}` Rebuilds the Tree](./context-is-not-reactive-but-the-tree-is.md), [Svelte skill: External Resource Handles section](../.agents/skills/svelte/SKILL.md), and the commits that landed this across the codebase (`d183f8a8`, `f689ae86`).

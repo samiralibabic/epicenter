@@ -18,56 +18,59 @@ const vimPreference = createPersistedState({
 	defaultValue: false,
 });
 
-// ── Singleton factory ───────────────────────────────────────────
+let vimConfigured = false;
 
 /**
- * Reactive editor state singleton.
+ * Reactive editor state factory.
  *
  * Bridges CodeMirror 6 editor state into Svelte 5 reactivity via
  * an `EditorView.updateListener` that pushes values into `$state`.
- * Components import the singleton and read getters directly—fine-grained
- * reactivity means only consumers of a changed value re-render.
+ * The signed-in session creates one instance and exposes it at
+ * `opensidian.state.editor`.
  *
- * Vim preference is backed by `createPersistedState`—cross-tab sync
+ * Vim preference is backed by `createPersistedState`: cross-tab sync
  * and focus-based re-reads come free.
  *
- * Follows the same factory pattern as `fs-state.svelte.ts` and
+ * Follows the same factory pattern as `files-state.svelte.ts` and
  * `terminal-state.svelte.ts`.
  *
  * @example
  * ```svelte
  * <script>
- *   import { editorState } from '$lib/state/editor-state.svelte';
- *   // Reactive reads — only re-render when the specific value changes
- *   const line = $derived(editorState.cursorLine);
+ *   const opensidian = requireOpensidian();
+ *   const line = $derived(opensidian.state.editor.cursorLine);
  * </script>
  *
- * <span>Ln {editorState.cursorLine}, Col {editorState.cursorCol}</span>
- * <button onclick={() => editorState.toggleVim()}>
- *   {editorState.vimEnabled ? 'VIM' : 'NORMAL'}
+ * <span>Ln {opensidian.state.editor.cursorLine}, Col {opensidian.state.editor.cursorCol}</span>
+ * <button onclick={() => opensidian.state.editor.toggleVim()}>
+ *   {opensidian.state.editor.vimEnabled ? 'VIM' : 'NORMAL'}
  * </button>
  * ```
  */
-function createEditorState() {
+export function createEditorState() {
 	// ── Vim global config (idempotent, runs once at construction) ──
 
 	const yUndo = yUndoManagerKeymap.find((k) => k.key === 'Mod-z')?.run;
 	const yRedo = yUndoManagerKeymap.find((k) => k.key === 'Mod-y')?.run;
 
-	// Remap j→gj and k→gk so cursor movement respects line wrapping.
-	Vim.map('j', 'gj', 'normal');
-	Vim.map('k', 'gk', 'normal');
+	if (!vimConfigured) {
+		vimConfigured = true;
 
-	// Override Vim's built-in undo/redo to route through the Yjs UndoManager.
-	// Without this, Vim's `u` and `Ctrl-R` call CodeMirror's `history()` undo—
-	// which isn't configured because all edits flow through Yjs.
-	if (yUndo && yRedo) {
-		Vim.defineAction('undo', (cm, actionArgs) => {
-			for (let i = 0; i < actionArgs.repeat; i++) yUndo(cm.cm6);
-		});
-		Vim.defineAction('redo', (cm, actionArgs) => {
-			for (let i = 0; i < actionArgs.repeat; i++) yRedo(cm.cm6);
-		});
+		// Remap j to gj and k to gk so cursor movement respects line wrapping.
+		Vim.map('j', 'gj', 'normal');
+		Vim.map('k', 'gk', 'normal');
+
+		// Override Vim's built-in undo/redo to route through the Yjs UndoManager.
+		// Without this, Vim's `u` and `Ctrl-R` call CodeMirror's `history()` undo:
+		// that isn't configured because all edits flow through Yjs.
+		if (yUndo && yRedo) {
+			Vim.defineAction('undo', (cm, actionArgs) => {
+				for (let i = 0; i < actionArgs.repeat; i++) yUndo(cm.cm6);
+			});
+			Vim.defineAction('redo', (cm, actionArgs) => {
+				for (let i = 0; i < actionArgs.repeat; i++) yRedo(cm.cm6);
+			});
+		}
 	}
 
 	function countWords(doc: Text): number {
@@ -137,11 +140,11 @@ function createEditorState() {
 		 * Build a fresh set of CM6 extensions for a new EditorView.
 		 *
 		 * Returns the vim compartment, dark theme, and the update listener
-		 * that bridges CM6 → `$state`. Call once per view creation—do NOT
+		 * that bridges CM6 to `$state`. Call once per view creation. Do not
 		 * reuse across views.
 		 *
 		 * Must be placed **before** other keymap extensions per the
-		 * `@replit/codemirror-vim` README—vim uses ViewPlugin eventHandlers
+		 * `@replit/codemirror-vim` README: vim uses ViewPlugin eventHandlers
 		 * for key dispatch, but ordering affects insert-mode key fallthrough.
 		 *
 		 * @param isDark Whether the editor is in dark mode. Passed by
@@ -189,5 +192,3 @@ function createEditorState() {
 		},
 	};
 }
-
-export const editorState = createEditorState();

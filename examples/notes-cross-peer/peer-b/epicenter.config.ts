@@ -1,7 +1,4 @@
-import { openNotes } from '../notes';
+import { defineConfig } from '@epicenter/workspace';
+import notes from './workspaces/notes/daemon.ts';
 
-export const notes = openNotes({
-	id: 'notes-repro-peer-b',
-	name: 'Peer B',
-	platform: 'node',
-});
+export default defineConfig({ daemon: { routes: { notes } } });

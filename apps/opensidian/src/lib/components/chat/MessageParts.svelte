@@ -3,8 +3,10 @@
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import type {
 		MessagePart,
+		ToolCallPart as TanStackToolCallPart,
 		ToolResultPart as ToolResultPartType,
 	} from '@tanstack/ai-client';
+	import type { SessionTools } from '$lib/chat/chat-state.svelte';
 	import ToolCallPart from './ToolCallPart.svelte';
 	import ToolResultPart from './ToolResultPart.svelte';
 
@@ -29,7 +31,11 @@
 	{#if part.type === 'text'}
 		<p class="whitespace-pre-wrap text-sm">{part.content}</p>
 	{:else if part.type === 'tool-call'}
-		<ToolCallPart {part} {onApproveToolCall} {onDenyToolCall} />
+		<ToolCallPart
+			part={part as TanStackToolCallPart<SessionTools>}
+			{onApproveToolCall}
+			{onDenyToolCall}
+		/>
 	{:else if part.type === 'tool-result'}
 		<ToolResultPart part={part as ToolResultPartType} />
 	{:else if part.type === 'thinking'}
@@ -39,7 +45,7 @@
 				onclick={() => (thinkingExpanded = !thinkingExpanded)}
 			>
 				<ChevronRightIcon
-					class="size-3 transition-transform {thinkingExpanded ? 'rotate-90' : ''}"
+					class="size-3 transition-transform {thinkingExpanded ? 'rotate-90': ''}"
 				/>
 				<BrainIcon class="size-3" />
 				Thinking…

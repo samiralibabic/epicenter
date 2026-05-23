@@ -3,7 +3,7 @@ import { tryAsync } from 'wellcrafted/result';
 import type { AnalyticsService } from './types';
 import { AnalyticsError } from './types';
 
-export function createAnalyticsServiceDesktop(): AnalyticsService {
+export function createAnalyticsServiceDesktop() {
 	return {
 		logEvent: async (event) =>
 			tryAsync({
@@ -16,5 +16,5 @@ export function createAnalyticsServiceDesktop(): AnalyticsService {
 				},
 				catch: (error) => AnalyticsError.LogEventFailed({ cause: error }),
 			}),
-	};
+	} satisfies AnalyticsService;
 }

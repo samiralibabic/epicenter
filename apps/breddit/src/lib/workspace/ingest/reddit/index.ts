@@ -137,7 +137,7 @@ function transformKv(raw: ParsedRedditData): KvData {
 export async function importRedditExport(
 	input: Blob | ArrayBuffer,
 	workspace: RedditWorkspaceClient,
-	options?: { onProgress?: (progress: ImportProgress) => void },
+	{ onProgress }: { onProgress?: (progress: ImportProgress) => void } = {},
 ): Promise<ImportStats> {
 	const stats: ImportStats = {
 		tables: {},
@@ -150,7 +150,7 @@ export async function importRedditExport(
 	// ═══════════════════════════════════════════════════════════════════════════
 	// PHASE 1: PARSE ZIP → RAW CSV DATA
 	// ═══════════════════════════════════════════════════════════════════════════
-	options?.onProgress?.({ phase: 'parse', current: 0, total: 1 });
+	onProgress?.({ phase: 'parse', current: 0, total: 1 });
 	const rawData = await parseRedditZip(input);
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -161,7 +161,7 @@ export async function importRedditExport(
 	// Batch all table and KV inserts into a single Y.Doc transaction
 	workspace.batch(() => {
 		for (const table of tableNames) {
-			options?.onProgress?.({
+			onProgress?.({
 				phase: 'transform',
 				current: tableIndex++,
 				total: tableNames.length,
@@ -185,7 +185,7 @@ export async function importRedditExport(
 		// ═══════════════════════════════════════════════════════════════════════
 		// PHASE 3: KV STORE
 		// ═══════════════════════════════════════════════════════════════════════
-		options?.onProgress?.({ phase: 'insert', current: 0, total: 1 });
+		onProgress?.({ phase: 'insert', current: 0, total: 1 });
 		const kvData = transformKv(rawData);
 		for (const [key, value] of Object.entries(kvData) as [
 			keyof KvData,

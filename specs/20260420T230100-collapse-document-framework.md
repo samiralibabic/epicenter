@@ -261,7 +261,7 @@ function buildEntryContentDoc(rowId: EntryId) {
   const content = attachRichText(ydoc);
   const idb     = attachIndexedDb(ydoc);
   const sync    = attachSync(ydoc, {
-    url: (docId) => toWsUrl(`${APP_URLS.API}/docs/${docId}`),
+    url: (docId) => websocketUrl(`${APP_URLS.API}/docs/${docId}`),
     getToken: () => auth.token,
     waitFor: idb.whenLoaded,
   });

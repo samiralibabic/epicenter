@@ -191,6 +191,3 @@ export const ParakeetTranscriptionServiceLive = {
 		return result;
 	},
 };
-
-export type ParakeetTranscriptionService =
-	typeof ParakeetTranscriptionServiceLive;
