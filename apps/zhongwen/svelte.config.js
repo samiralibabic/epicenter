@@ -8,6 +8,9 @@ const config = {
 		adapter: staticAdapter({
 			fallback: 'index.html',
 		}),
+		alias: {
+			'$platform/auth': './src/lib/platform/auth/auth.ts',
+		},
 	},
 };
 

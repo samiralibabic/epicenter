@@ -1,7 +1,7 @@
 /**
  * Pure tab-analysis helpers shared by the command palette.
  *
- * These functions take a tab array and return analysis results—no dependency
+ * These functions take a tab array and return analysis results, with no dependency
  * on `browserState` or any other reactive data source.
  * Consumers provide their own tab arrays from whatever source they use.
  *
@@ -20,7 +20,7 @@ import { getDomain } from '$lib/utils/format';
  *
  * Strips the fragment (client-side anchor) and trailing slash, and sorts
  * query parameters so identical param sets in different order still match.
- * Query parameters are preserved—`?v=A` and `?v=B` are different pages.
+ * Query parameters are preserved: `?v=A` and `?v=B` are different pages.
  *
  * @example
  * ```typescript
@@ -47,15 +47,11 @@ export function normalizeUrl(url: string): string {
 }
 
 /**
- * Minimum fields needed for tab analysis helpers.
- *
- * Kept generic so tests can pass plain objects without importing
- * the full `BrowserTab` type from browser-state.
+ * Minimum field needed for URL-based tab analysis. The generic return type
+ * preserves the caller's full record shape.
  */
-type TabLike = {
-	id: number;
-	url?: string | undefined;
-	title?: string | undefined;
+type TabAnalysisInput = {
+	url?: string;
 };
 
 /**
@@ -77,7 +73,7 @@ type TabLike = {
  * // Map { 'https://github.com/foo' => [tab-1, tab-2] }
  * ```
  */
-export function findDuplicateGroups<T extends TabLike>(
+export function findDuplicateGroups<T extends TabAnalysisInput>(
 	tabs: T[],
 ): Map<string, T[]> {
 	const byUrl = new Map<string, T[]>();
@@ -98,7 +94,7 @@ export function findDuplicateGroups<T extends TabLike>(
  *
  * Returns a Map from domain string to the tabs on that domain.
  * Tabs without a URL are skipped. Includes all domains, even those
- * with a single tab—callers should filter to 2+ if needed.
+ * with a single tab. Callers should filter to 2+ if needed.
  *
  * @example
  * ```typescript
@@ -112,7 +108,7 @@ export function findDuplicateGroups<T extends TabLike>(
  * // Map { 'github.com' => [tab-1, tab-2], 'youtube.com' => [tab-3] }
  * ```
  */
-export function groupTabsByDomain<T extends TabLike>(
+export function groupTabsByDomain<T extends TabAnalysisInput>(
 	tabs: T[],
 ): Map<string, T[]> {
 	const byDomain = new Map<string, T[]>();

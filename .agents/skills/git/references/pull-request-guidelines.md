@@ -150,7 +150,7 @@ Show how components stack:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  createDocumentFactory((id) => { ... }).open(id)            │  ← High-level
+│  createDisposableCache((id) => { ... }).open(id)            │  ← High-level
 │    User-owned Y.Doc builder, composes attach* primitives    │
 ├─────────────────────────────────────────────────────────────┤
 │  attachTables(ydoc, {...}) / attachKv(ydoc, {...})          │  ← Mid-level
@@ -258,6 +258,91 @@ ASCII art characters to use: `┌ ┐ └ ┘ ─ │ ├ ┤ ┬ ┴ ┼ ▼ �
 Never let prose run for more than a short paragraph without a visual break. The rhythm should be: context → visual → explanation → visual → ...
 
 Each visual (code snippet, ASCII diagram, before/after block) should be preceded by 1-3 sentences of context and optionally followed by a sentence explaining the subtle detail. If you're writing more than 4-5 sentences of prose in a row, you're missing an opportunity for a diagram or code block.
+
+#### Reviewer-Oriented Bodies for Stacked PRs
+
+When rewriting descriptions for a stack that has already been split, write for the developer who is deciding where to spend attention. They care about the contract, the shape change, and the shortest honest review path. They do not need a second changelog, a test transcript, or a list of files GitHub already shows.
+
+Use this as a pressure test:
+
+- What contract stayed stable or changed?
+- What one call site teaches the new shape?
+- What ownership boundary should the reviewer understand before reading files?
+- Is there a best file order for reviewing the diff?
+
+For a cleanup PR where the public surface stays stable, make that stability explicit before discussing internals:
+
+```ts
+// Still the public shape:
+const thing = createThing(options);
+
+await thing.start();
+await thing.refresh();
+await thing.stop();
+```
+
+Then use a tiny tree to show what moved:
+
+```txt
+Before:
+  createThing
+    -> helperA
+    -> helperB
+    -> internal type visible outside the module
+
+After:
+  createThing
+    -> owns helper mechanics locally
+    -> exposes only the public contract
+```
+
+For a tracer or architecture PR, show the shape before prose gets abstract:
+
+```txt
+feature-root/
+  shared.ts   shared model, schema, actions
+  client.ts   browser or UI runtime
+  server.ts   server, daemon, or persistence runtime
+```
+
+Then show how two runtimes compose the same shared root:
+
+```ts
+const clientFeature = openFeature(owner.shared);
+attachClientRuntime(clientFeature);
+
+const serverFeature = openFeature(server.shared);
+attachServerRuntime(serverFeature);
+```
+
+For a loader, convention, or framework change, make the new rule small enough to remember:
+
+```txt
+<root>/<name>/<entrypoint>.ts
+```
+
+Then show the smallest user-written module that proves the contract:
+
+```ts
+export default defineFeature({
+	async open(ctx) {
+		const feature = openFeature(ctx.shared);
+		return attachRuntime(feature, ctx);
+	},
+});
+```
+
+The review path is not a "Changes" section. It is a map for the human reviewer:
+
+```md
+Good review path:
+
+1. Start with the contract or discovery file.
+2. Read the runtime adapter that consumes it.
+3. Skim one migrated caller as proof the shape works.
+```
+
+Only include that path when the order genuinely helps. For a two-file fix, prose plus one code snippet is enough.
 
 #### Framing Patterns That Work
 
@@ -517,35 +602,36 @@ The old encryption system had five moving parts to answer one question: does thi
 ```typescript
 // Before — 3 steps, async, stateful
 const ydoc = new Y.Doc({ guid: id });
-const encryption = attachEncryption(ydoc);
-const tables = encryption.attachTables(ydoc, defs);
+const encryption = attachEncryption(ydoc, { encryptionKeys });
+const tables = encryption.attachTables(defs);
 
 await encryption.unlock(keys);
 ```
 
-Now it's one synchronous call, no unlock step, no state machine:
+Now keys are read lazily at every registration site, with no unlock step and no state machine:
 
 ```typescript
-// After — sync, idempotent
+// After — sync, lazy reads, no mutation hook
 const ydoc = new Y.Doc({ guid: id });
-const encryption = attachEncryption(ydoc);
-const tables = encryption.attachTables(ydoc, defs);
-
-encryption.applyKeys(keys);  // done
+const encryption = attachEncryption(ydoc, {
+	encryptionKeys: () => requireSignedIn(auth).encryptionKeys,
+});
+const tables = encryption.attachTables(defs);
+// done, registration and activation happen in one call
 ```
 
-`applyKeys()` is idempotent and safe to call multiple times. The encrypted Y.Map wrapper no longer maintains a dual-cache — it encrypts on write and decrypts on read, one direction each way. The encryption runtime, key stores, IndexedDB wrappers, and dual-cache logic are all gone.
+The encrypted Y.Map wrapper no longer maintains a dual-cache: it encrypts on write and decrypts on read, one direction each way. The encryption runtime, key stores, IndexedDB wrappers, and dual-cache logic are all gone. Encrypted stores derive their keyring when they attach; same-user key rotation needs a re-attach to affect already-attached stores.
 
 ```
 Before:
-  attachEncryption(ydoc)
+  attachEncryption(ydoc, { encryptionKeys })
     ├── encryption-runtime.ts (state machine)
     ├── user-key-store.ts (IndexedDB persistence)
     └── y-keyvalue-lww-encrypted.ts (dual-cache: encrypted + decrypted)
 
 After:
-  attachEncryption(ydoc)
-    └── .applyKeys(keys)  // sync, one method
+  attachEncryption(ydoc, { encryptionKeys })
+    └── reads encryptionKeys() when each encrypted store attaches
         └── y-keyvalue-lww-encrypted.ts (one-way: encrypt on write, decrypt on read)
 ```
 
@@ -603,13 +689,14 @@ RESPONSE: [101] [1=RES] [requestId] [requesterClientId]                         
 The DO is a dumb relay. It forwards a REQUEST to the target peer if they're connected, or synthesizes a PeerOffline RESPONSE if they're not. No RPC logic lives in the server — it just routes bytes.
 
 ```typescript
-const peers = workspace.extensions.sync.peers();
-const ext = peers.find(p => p.client === 'browser-extension');
+const ext = workspace.collaboration.peers
+  .list()
+  .find((p) => p.replicaId === 'browser-extension');
 
-const { data, error } = await workspace.extensions.sync.rpc(
-  ext.clientId,
-  'tabs.close',
-  { tabIds: [1, 2] }
+const { data, error } = await workspace.collaboration.dispatch(
+  'tabs_close',
+  { tabIds: [1, 2] },
+  { to: ext.connId, signal: AbortSignal.timeout(10_000) },
 );
 ```
 

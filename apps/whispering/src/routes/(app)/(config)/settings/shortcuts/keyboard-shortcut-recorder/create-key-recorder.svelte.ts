@@ -1,3 +1,4 @@
+import { debounce } from '@epicenter/util';
 import type { KeyboardEventSupportedKey } from '$lib/constants/keyboard';
 import type { PressedKeys } from '$lib/utils/createPressedKeys.svelte';
 
@@ -32,21 +33,12 @@ export function createKeyRecorder({
 	// State
 	let isListening = $state(false);
 	const capturedKeys = new Set<KeyboardEventSupportedKey>();
-	let captureWindowTimer: NodeJS.Timeout | null = null;
-
-	// Helper: Clear the capture window timer
-	function clearCaptureTimer() {
-		if (captureWindowTimer) {
-			clearTimeout(captureWindowTimer);
-			captureWindowTimer = null;
-		}
-	}
 
 	// Helper: Complete the key combination
 	function completeRecording() {
 		if (!isListening || capturedKeys.size === 0) return;
 
-		clearCaptureTimer();
+		completeAfterWindow.cancel();
 		isListening = false;
 
 		// Convert Set to Array for registration
@@ -56,6 +48,10 @@ export function createKeyRecorder({
 		onRegister(combination);
 	}
 
+	// Each new key restarts this window; it fires once the pressed keys
+	// have stayed quiet for CAPTURE_WINDOW_MS.
+	const completeAfterWindow = debounce(completeRecording, CAPTURE_WINDOW_MS);
+
 	// Main effect: Watch for key changes
 	$effect(() => {
 		if (!isListening) return;
@@ -63,7 +59,7 @@ export function createKeyRecorder({
 		// Escape key cancels recording
 		if (pressedKeys.current.includes('escape')) {
 			isListening = false;
-			clearCaptureTimer();
+			completeAfterWindow.cancel();
 			capturedKeys.clear();
 			return;
 		}
@@ -79,8 +75,7 @@ export function createKeyRecorder({
 
 		// New keys extend the capture window
 		if (hasNewKeys && capturedKeys.size > 0) {
-			clearCaptureTimer();
-			captureWindowTimer = setTimeout(completeRecording, CAPTURE_WINDOW_MS);
+			completeAfterWindow();
 		}
 
 		// All keys released = immediate completion
@@ -97,17 +92,17 @@ export function createKeyRecorder({
 		start() {
 			isListening = true;
 			capturedKeys.clear();
-			clearCaptureTimer();
+			completeAfterWindow.cancel();
 		},
 		stop() {
 			isListening = false;
 			capturedKeys.clear();
-			clearCaptureTimer();
+			completeAfterWindow.cancel();
 		},
 		clear() {
 			isListening = false;
 			capturedKeys.clear();
-			clearCaptureTimer();
+			completeAfterWindow.cancel();
 			onClear();
 		},
 		register: onRegister,

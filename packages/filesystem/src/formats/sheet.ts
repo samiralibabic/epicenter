@@ -3,14 +3,14 @@
  * re-exported from @epicenter/workspace.
  */
 
-import { computeMidpoint } from '@epicenter/workspace';
+import { computeMidpoint } from '@epicenter/workspace/document/attach-timeline';
 import type * as Y from 'yjs';
 
 // Re-export ordering helpers from workspace (canonical location)
 export {
 	computeMidpoint,
 	generateInitialOrders,
-} from '@epicenter/workspace';
+} from '@epicenter/workspace/document/attach-timeline';
 
 /**
  * Reorder a row by updating its fractional order property.

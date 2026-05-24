@@ -5,5 +5,3 @@ export const GroqCompletionServiceLive =
 		providerLabel: 'Groq',
 		getBaseUrl: () => 'https://api.groq.com/openai/v1',
 	});
-
-export type GroqCompletionService = typeof GroqCompletionServiceLive;

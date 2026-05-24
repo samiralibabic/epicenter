@@ -1,6 +1,6 @@
 ---
 name: handoff-prompt
-description: Draft a self-contained implementation prompt that an agent can execute with zero prior context. Use when the user says "draft a prompt", "write a handoff", "make a prompt I can copy-paste", "create a delegation brief", or wants to hand off a task to another agent, tool, or conversation.
+description: 'Draft a self-contained implementation prompt for zero-context handoff. Use when: "draft a prompt", "write a handoff", "make a prompt I can copy-paste", "create a delegation brief".'
 metadata:
   author: epicenter
   version: '2.0'
@@ -19,8 +19,8 @@ A handoff prompt is a cold execution brief. The recipient has never seen this co
 | Planning document, lives in `specs/*.md` | Communication artifact, lives in clipboard |
 | Tracks progress with checkboxes | Single-shot fire-and-forget |
 | Assumes the reader has repo access and can explore | Assumes the reader has zero context |
-| Leaves open questions for the implementer | Closes all questions—the recipient shouldn't need to ask |
-| Iterative—you come back and update it | One shot—you won't get to clarify |
+| Leaves open questions for the implementer | Closes all questions:the recipient shouldn't need to ask |
+| Iterative:you come back and update it | One shot:you won't get to clarify |
 
 A spec says "here's the plan." A handoff prompt says "here's everything you need to do it right now."
 
@@ -41,7 +41,7 @@ Not: "Build a page that explains the app." The recipient needs exact locations.
 
 ### Context
 
-Everything the recipient needs to understand the codebase without reading it. This is the most important section—it's what makes the prompt self-contained.
+Everything the recipient needs to understand the codebase without reading it. This is the most important section:it's what makes the prompt self-contained.
 
 What to include depends on the handoff type:
 
@@ -51,7 +51,7 @@ What to include depends on the handoff type:
 
 **For debugging handoffs** (fixing broken behavior): include the error output, reproduction steps, what was already tried and why it didn't work. The recipient needs to pick up where you left off, not re-diagnose from scratch.
 
-**For all types**: never paraphrase when you can paste. "The workspace uses Yjs" is useless. The actual `createDocumentFactory((id) => { ... }).open(id)` call is useful.
+**For all types**: never paraphrase when you can paste. "The workspace uses Yjs" is useless. The actual `createDisposableCache((id) => { ... }).open(id)` call is useful.
 
 ```
 ## Context
@@ -68,7 +68,7 @@ IndexedDB persistence, and an in-browser SQLite index.
 
 ### Requirements
 
-What to build. Be exhaustive—the recipient can't ask clarifying questions.
+What to build. Be exhaustive:the recipient can't ask clarifying questions.
 
 For UI work: describe each section with what it contains, what components to use, what data it displays, and how it behaves.
 
@@ -78,7 +78,7 @@ If there's a choice to make (which component, which layout, which approach), mak
 
 ### MUST DO
 
-Non-negotiable requirements. Keep this short—only things that genuinely can't be left to judgment.
+Non-negotiable requirements. Keep this short:only things that genuinely can't be left to judgment.
 
 ```
 ## MUST DO
@@ -88,7 +88,7 @@ Non-negotiable requirements. Keep this short—only things that genuinely can't 
 
 ### MUST NOT DO
 
-Hard blocks only. Things that are genuinely never acceptable for this task—not soft preferences, not style guidance. Litmus test: would this be wrong regardless of context? If yes, hard block. If "it depends," leave it out. The agent uses judgment for everything else.
+Hard blocks only. Things that are genuinely never acceptable for this task:not soft preferences, not style guidance. Litmus test: would this be wrong regardless of context? If yes, hard block. If "it depends," leave it out. The agent uses judgment for everything else.
 
 ```
 ## MUST NOT DO
@@ -142,7 +142,7 @@ Which ones? The recipient doesn't know what "standard" means in this project. Li
 ### Leaving decisions open
 
 ```
-You could use either a Card grid or an Accordion for this section—pick whichever works better.
+You could use either a Card grid or an Accordion for this section:pick whichever works better.
 ```
 
 Pick one. The recipient will waste time deliberating instead of building.
@@ -169,13 +169,13 @@ and `Badge` from `@epicenter/ui/badge`. The page has 4 sections...
 
 The workspace setup code is:
 \`\`\`typescript
-const factory = createDocumentFactory((id: string) => {
+const cache = createDisposableCache((id: string) => {
   const ydoc = new Y.Doc({ guid: id });
   const tables = attachTables(ydoc, { files: filesTable });
   const idb = attachIndexedDb(ydoc);
-  return { ydoc, tables, idb, whenReady: idb.whenLoaded, [Symbol.dispose]() { ydoc.destroy(); } };
+  return { ydoc, tables, idb, [Symbol.dispose]() { ydoc.destroy(); } };
 });
-export const ws = factory.open('opensidian');
+export const ws = cache.open('opensidian');
 \`\`\`
 
 MUST NOT: suppress TypeScript errors, delete existing tests to pass build.

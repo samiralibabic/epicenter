@@ -24,5 +24,3 @@ export const CustomCompletionServiceLive =
 			return Ok(undefined);
 		},
 	});
-
-export type CustomCompletionService = typeof CustomCompletionServiceLive;

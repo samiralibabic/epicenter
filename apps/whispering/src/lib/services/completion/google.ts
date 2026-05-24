@@ -43,5 +43,3 @@ export const GoogleCompletionServiceLive: CompletionService = {
 		return Ok(completion);
 	},
 };
-
-export type GoogleCompletionService = typeof GoogleCompletionServiceLive;

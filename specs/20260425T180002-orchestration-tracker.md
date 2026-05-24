@@ -57,7 +57,7 @@ PR-E (CLI cross-device)       ← spec: 20260425T000000-device-actions-via-aware
 | PR | Status | Description location | Notes |
 |---|---|---|---|
 | PR-A | **MERGED 2026-04-26** (`252dced47`) | https://github.com/EpicenterHQ/epicenter/pull/1705 | 520 commits. Both phases landed; six of seven Deletion targets executed; Deletion 3 reversed mid-flight (iso/env/client split). PR body draft + execution prompts deleted post-merge. |
-| PR-D + PR-E | **Collapsed into one PR.** Execution prompt drafted. | Spec: `specs/20260425T210000-remote-action-dispatch.md` (see "Final design" section). Execution: `specs/20260426T000000-execution-prompt-device-actions-and-remote-dispatch.md`. Awareness publishing convention: `specs/20260425T000000-device-actions-via-awareness.md`. | Single branch `device-actions-and-remote-dispatch`, 8 commits. Public surface collapsed to `peer<T>(workspace, deviceId)` (one function), `--peer <deviceId>` (no DSL), first-match-wins (no ambiguity error), `actions:` data on `attachSync` (no callback). Net negative LoC. |
+| PR-D + PR-E | **Collapsed into one PR.** Execution prompt drafted. | Spec: `specs/20260425T210000-remote-action-dispatch.md` (see "Final design" section). Execution: `specs/20260426T000000-execution-prompt-device-actions-and-remote-dispatch.md`. Awareness publishing convention: `specs/20260425T000000-device-actions-via-awareness.md`. | Single branch `device-actions-and-remote-dispatch`, 8 commits. Public surface collapsed to `peer<T>(sync, deviceId)` (one function), `--peer <deviceId>` (no DSL), first-match-wins (no ambiguity error), `actions:` data on `attachSync` (no callback). Net negative LoC. |
 
 ---
 
@@ -69,7 +69,7 @@ PR-A merged at `252dced47` on 2026-04-26. Phase 1 + Phase 2 + iso/env/client + a
 
 ### Step 5 — execute the combined PR-D + PR-E branch
 
-PR-D (awareness publishing) and PR-E (CLI cross-device dispatch) collapsed into one PR on branch `device-actions-and-remote-dispatch`. Final design lives in `specs/20260425T210000-remote-action-dispatch.md` (the "Final design" section); execution brief in `specs/20260426T000000-execution-prompt-device-actions-and-remote-dispatch.md`. Surface area collapsed to `peer<T>(workspace, deviceId)` (one function), `--peer <deviceId>` (no DSL), first-match-wins (no ambiguity error), `actions:` data on `attachSync` (no callback). Net negative LoC. Eight commits.
+PR-D (awareness publishing) and PR-E (CLI cross-device dispatch) collapsed into one PR on branch `device-actions-and-remote-dispatch`. Final design lives in `specs/20260425T210000-remote-action-dispatch.md` (the "Final design" section); execution brief in `specs/20260426T000000-execution-prompt-device-actions-and-remote-dispatch.md`. Surface area collapsed to `peer<T>(sync, deviceId)` (one function), `--peer <deviceId>` (no DSL), first-match-wins (no ambiguity error), `actions:` data on `attachSync` (no callback). Net negative LoC. Eight commits.
 
 ---
 

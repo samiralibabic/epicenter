@@ -1,15 +1,6 @@
 {
-	"extends": "./.wxt/tsconfig.json",
+	"extends": ["../../tsconfig.dom.json", "./.wxt/tsconfig.json"],
 	"compilerOptions": {
-		"allowImportingTsExtensions": true,
-		"verbatimModuleSyntax": true,
-		"noEmit": true,
-		"strict": true,
-		"skipLibCheck": true,
-		"moduleResolution": "bundler",
-		"module": "ESNext",
-		"target": "ESNext",
-		"lib": ["ESNext", "DOM", "DOM.Iterable"],
 		"customConditions": ["browser"],
 		"paths": {
 			"$lib/*": ["./src/lib/*"]

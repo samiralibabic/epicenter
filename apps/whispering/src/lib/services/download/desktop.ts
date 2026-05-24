@@ -5,7 +5,7 @@ import { getAudioExtension } from '$lib/services/transcription/utils';
 import type { DownloadService } from '.';
 import { DownloadError } from './types';
 
-export function createDownloadServiceDesktop(): DownloadService {
+export function createDownloadServiceDesktop() {
 	return {
 		downloadBlob: async ({ name, blob }) => {
 			const extension = getAudioExtension(blob.type);
@@ -30,5 +30,5 @@ export function createDownloadServiceDesktop(): DownloadService {
 			if (writeError) return Err(writeError);
 			return Ok(undefined);
 		},
-	};
+	} satisfies DownloadService;
 }

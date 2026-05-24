@@ -2,6 +2,6 @@
 	"extends": ["../../tsconfig.base.json", "./.svelte-kit/tsconfig.json"],
 	"compilerOptions": {
 		"checkJs": true,
-		"types": ["bun-types"]
+		"types": ["bun"]
 	}
 }

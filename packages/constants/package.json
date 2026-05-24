@@ -12,20 +12,25 @@
 	},
 	"exports": {
 		"./apps": "./src/apps.ts",
+		"./auth": "./src/auth.ts",
+		"./node": "./src/node.ts",
+		"./oauth": "./src/oauth.ts",
 		"./vite": "./src/vite.ts",
 		"./versions": "./src/versions.ts",
 		"./ai-chat-errors": "./src/ai-chat-errors.ts"
 	},
 	"devDependencies": {
+		"@better-auth/oauth-provider": "catalog:",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
 		"vite": "catalog:"
 	},
 	"dependencies": {
+		"env-paths": "^3.0.0",
 		"wellcrafted": "catalog:"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

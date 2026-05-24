@@ -1,5 +1,7 @@
 # Epicenter Follows the Homebrew Model
 
+> **Note (2026-05-22)**: This article documents an earlier storage model. Current Epicenter does not store global workspace data under top-level `~/.epicenter/`. Machine auth uses the platform data directory from `env-paths('epicenter')`, daemon runtime files use the OS runtime directory, daemon logs use the platform log directory, and generated workspace data stays under each project at `<projectDir>/.epicenter/`.
+
 Homebrew, Cargo, Docker, and Epicenter all solve the same organizational problem: give users one predictable root directory, put self-contained units inside it, and discover everything with a single directory scan. The convention is old and boring. That's the point.
 
 ## One Root, Self-Contained Units

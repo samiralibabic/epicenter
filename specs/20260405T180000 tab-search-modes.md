@@ -125,7 +125,7 @@ A new file `search-preferences.svelte.ts` exports four persisted states:
 import { type } from 'arktype';
 import { createStorageState } from './storage-state.svelte';
 
-export const searchCaseSensitive = createStorageState('local:search.caseSensitive', {
+export const searchCaseSensitive = createStorageState('local:search.case.sensitive', {
   fallback: false,
   schema: type('boolean'),
 });
@@ -135,7 +135,7 @@ export const searchRegex = createStorageState('local:search.regex', {
   schema: type('boolean'),
 });
 
-export const searchExactMatch = createStorageState('local:search.exactMatch', {
+export const searchExactMatch = createStorageState('local:search.exact.match', {
   fallback: false,
   schema: type('boolean'),
 });

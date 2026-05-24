@@ -14,7 +14,7 @@ epicenter auth login
 bun epicenter auth login http://localhost:8787
 ```
 
-This stores your session (access token + encryption keys) at `~/.epicenter/auth/sessions.json`.
+This stores your credentials at `<dataDir>/auth/<host>.json`, where `dataDir` is the platform user-data directory from `env-paths('epicenter')` (for example, `~/Library/Application Support/epicenter/auth/api.epicenter.so.json` on macOS). See `packages/cli/README.md` for the per-target layout.
 
 ## Usage
 
@@ -22,34 +22,35 @@ Run the workspace:
 
 ```bash
 # Production (syncs from api.epicenter.so)
-bun run playground/opensidian-e2e/epicenter.config.ts
+epicenter daemon up -C playground/opensidian-e2e
 
 # Local dev (syncs from localhost:8787)
 EPICENTER_SERVER=http://localhost:8787 \
-  bun run playground/opensidian-e2e/epicenter.config.ts
+  epicenter daemon up -C playground/opensidian-e2e
 ```
 
-Importing the config opens the handle, which kicks off persistence, sync, markdown materialization, and the SQLite mirror. The process stays alive as long as the sync socket is open; hit Ctrl+C to stop. Leave it running alongside the Opensidian app if you want real-time materialization.
+Daemon startup imports `workspaces/opensidian/daemon.ts`, which kicks off persistence, sync, markdown materialization, and the SQLite mirror. The process stays alive until Ctrl+C or `epicenter daemon down`.
 
 Invoke a defined action:
 
 ```bash
 # Scan a directory for markdown files and inject IDs into frontmatter.
-epicenter run opensidian.markdownActions.prepare '{"directory":"./some/dir"}' \
+epicenter run opensidian.markdown_prepare '{"directory":"./some/dir"}' \
   -C playground/opensidian-e2e
 ```
 
-Inspect workspace data from a script — scripts get the full Table API that's not exposed as defineQuery/defineMutation:
+Inspect workspace data from a script by importing the app workspace package or a script-specific helper. Do not import `workspaces/opensidian/daemon.ts` as a reusable client module; it is the long-lived daemon entrypoint. If this playground needs table-level scripts, first extract the composition into a `script.ts` helper and let both the script and daemon call that helper.
 
 ```ts
 // scripts/list-files.ts
-import { opensidian } from '../playground/opensidian-e2e/epicenter.config';
+import { openOpensidianForScript } from '../playground/opensidian-e2e/script';
 
 try {
+  const opensidian = await openOpensidianForScript();
   await opensidian.whenReady;
   console.log(`files: ${opensidian.tables.files.count()}`);
   for (const row of opensidian.tables.files.getAllValid()) {
-    console.log(`  ${row.id} — ${row.name}`);
+    console.log(`  ${row.id}: ${row.name}`);
   }
 } finally {
   opensidian.dispose();
@@ -64,15 +65,23 @@ bun run scripts/list-files.ts
 
 ```
 playground/opensidian-e2e/
-├── epicenter.config.ts              # Workspace config
-├── .epicenter/
-│   └── persistence/
-│       └── opensidian.db            # SQLite persistence (files table)
-└── data/
-    └── files/
-        ├── my-first-note-abc123.md  # Materialized file
-        └── meeting-notes-def456.md  # Materialized file
+├── workspaces/
+│   └── opensidian/
+│       └── daemon.ts                  # Folder-routed daemon extension
+└── .epicenter/
+    ├── yjs/
+    │   ├── opensidian.db              # Yjs CRDT update log (source of truth)
+    │   └── <contentDocGuid>.db        # One log per file content document
+    ├── sqlite/
+    │   └── opensidian.db              # Queryable SQLite mirror (sqlite3 / FTS5)
+    └── md/
+        └── opensidian/
+            └── files/
+                ├── my-first-note-abc123.md
+                └── meeting-notes-def456.md
 ```
+
+The Yjs log is the source of truth; SQLite and markdown are projections the materializer keeps in sync. See `packages/workspace/src/document/workspace-paths.ts`.
 
 Each `.md` file looks like:
 
@@ -94,16 +103,16 @@ The actual document content from the editor.
 
 ## How it works
 
-The config chains four extensions onto the Opensidian workspace:
+The daemon chains four extensions onto the Opensidian workspace:
 
-1. **Persistence** — workspace-only SQLite. Persists the files table so it survives daemon restarts without re-downloading everything from the server.
+1. **Persistence**: workspace-only SQLite. Persists the files table so it survives daemon restarts without re-downloading everything from the server.
 
-2. **Markdown materializer** — custom one-way projection (Y.Doc → files). Observes the files table; for each file, reads document content via `documents.files.content.open(id)` and writes a `.md` file with frontmatter + body. Document content changes trigger `updatedAt` on the row, which fires the observer and re-materializes.
+2. **Markdown materializer**: custom one-way projection (Y.Doc to files). Observes the files table; for each file, reads document content via `documents.files.content.open(id)` and writes a `.md` file with frontmatter + body. Document content changes trigger `updatedAt` on the row, which fires the observer and re-materializes.
 
-3. **Encryption unlock** — reads encryption keys from the CLI session store so encrypted fields can be decrypted locally.
+3. **Encryption unlock**: reads encryption keys from the CLI session store so encrypted fields can be decrypted locally.
 
-4. **Sync** — WebSocket connection to the Epicenter API for real-time data sync.
+4. **Sync**: WebSocket connection to the Epicenter API for real-time data sync.
 
 ## Running alongside Opensidian
 
-You can run the daemon while Opensidian is open in your browser. Both connect to the same Epicenter API via WebSocket sync, so changes in the app appear as materialized `.md` files within seconds. The daemon is read-only—it doesn't write back to the workspace from disk changes.
+You can run the daemon while Opensidian is open in your browser. Both connect to the same Epicenter API via WebSocket sync, so changes in the app appear as materialized `.md` files within seconds. The daemon is read-only: it doesn't write back to the workspace from disk changes.

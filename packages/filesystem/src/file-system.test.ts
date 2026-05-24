@@ -10,15 +10,17 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { attachTables, createDisposableCache } from '@epicenter/workspace';
+import {
+	attachTables,
+	attachTimeline,
+	createDisposableCache,
+	onLocalUpdate,
+} from '@epicenter/workspace';
 import { Bash } from 'just-bash';
 import * as Y from 'yjs';
-import {
-	createFileContentDoc,
-	type FileContentDocs,
-} from './file-content-docs.js';
+import { fileContentDocGuid } from './file-content-docs.js';
 import { attachYjsFileSystem, type YjsFileSystem } from './file-system.js';
-import type { FileId } from './ids.js';
+import { type FileId, generateFileId } from './ids.js';
 import { filesTable } from './table.js';
 
 function setup() {
@@ -27,15 +29,43 @@ function setup() {
 	const tables = attachTables(ydoc, { files: filesTable });
 	const ws = { id, ydoc, tables };
 	const contentDocs = createDisposableCache(
-		(fileId: FileId) =>
-			createFileContentDoc({
-				fileId,
-				workspaceId: ws.id,
-				filesTable: ws.tables.files,
-			}),
+		(fileId: FileId) => {
+			const contentYdoc = new Y.Doc({
+				guid: fileContentDocGuid({ workspaceId: ws.id, fileId }),
+				gc: true,
+			});
+			onLocalUpdate(contentYdoc, () =>
+				ws.tables.files.update(fileId, { updatedAt: Date.now() }),
+			);
+			return {
+				ydoc: contentYdoc,
+				content: attachTimeline(contentYdoc),
+				whenReady: Promise.resolve(),
+				[Symbol.dispose]() {
+					contentYdoc.destroy();
+				},
+			};
+		},
 		{ gcTime: Number.POSITIVE_INFINITY },
 	);
-	const fs = attachYjsFileSystem(ws.tables.files, contentDocs);
+	const fs = attachYjsFileSystem(ws.ydoc, ws.tables.files, {
+		async read(fileId) {
+			await using handle = contentDocs.open(fileId);
+			await handle.whenReady;
+			return handle.content.read();
+		},
+		async write(fileId, text) {
+			await using handle = contentDocs.open(fileId);
+			await handle.whenReady;
+			handle.content.write(text);
+		},
+		async append(fileId, text) {
+			await using handle = contentDocs.open(fileId);
+			await handle.whenReady;
+			handle.content.appendText(text);
+			return handle.content.read();
+		},
+	});
 	return { fs, ws, contentDocs };
 }
 
@@ -379,6 +409,40 @@ describe('Uint8Array write support', () => {
 	});
 });
 
+describe('ydoc destroy lifecycle', () => {
+	test('destroying ydoc stops observing the table', async () => {
+		const { fs, ws } = setup();
+
+		// Mutation pre-destroy: index reflects it.
+		await fs.writeFile('/before.txt', 'content');
+		expect(await fs.exists('/before.txt')).toBe(true);
+		const beforeId = fs.lookupId('/before.txt');
+		expect(beforeId).toBeDefined();
+
+		// Tear down the ydoc: the observer registered via
+		// ydoc.once('destroy', unobserve) should unregister.
+		ws.ydoc.destroy();
+
+		// Mutate the underlying table directly, bypassing fs (which uses
+		// contentDocs that are now torn down).
+		const now = Date.now();
+		ws.tables.files.set({
+			id: generateFileId(),
+			name: 'after.txt',
+			parentId: null,
+			type: 'file',
+			size: 0,
+			createdAt: now,
+			updatedAt: now,
+			trashedAt: null,
+			_v: 1,
+		});
+
+		// Index did NOT update: the observer is gone.
+		expect(fs.lookupId('/after.txt')).toBeUndefined();
+	});
+});
+
 describe('mv preserves content (no conversion)', () => {
 	test('mv .txt -> .md preserves content exactly', async () => {
 		const { fs } = setup();
@@ -399,7 +463,7 @@ describe('mv preserves content (no conversion)', () => {
 
 function getTimelineLength(
 	fs: YjsFileSystem,
-	contentDocs: FileContentDocs,
+	contentDocs: ReturnType<typeof setup>['contentDocs'],
 	path: string,
 ): number {
 	const id = fs.lookupId(path);
@@ -423,7 +487,7 @@ describe('timeline content storage', () => {
 		await fs.writeFile('/file.dat', 'text v1');
 		expect(getTimelineLength(fs, contentDocs, '/file.dat')).toBe(1);
 
-		// Uint8Array is decoded to text — same mode, overwrites in-place
+		// Uint8Array is decoded to text: same mode, overwrites in-place
 		await fs.writeFile('/file.dat', new Uint8Array([0x48, 0x69])); // "Hi"
 		expect(getTimelineLength(fs, contentDocs, '/file.dat')).toBe(1);
 		expect(await fs.readFile('/file.dat')).toBe('Hi');

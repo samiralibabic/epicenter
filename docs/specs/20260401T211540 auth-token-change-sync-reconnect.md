@@ -4,7 +4,7 @@
 
 After signing in on tab-manager (and honeycrisp, opensidian), the user must manually click "Reconnect" because sync doesn't auto-reconnect.
 
-The sync extension has a designed `onTokenChange` hook for exactly this, but no app wires it. Instead, `onLogin`/`onLogout` manually call `reconnect()`—which either silently fails (if `unlockWithKey` throws first) or has a timing gap.
+The sync extension has a designed `onTokenChange` hook for exactly this, but no app wires it. Instead, `onLogin`/`onLogout` manually call `reconnect()`:which either silently fails (if `unlockWithKey` throws first) or has a timing gap.
 
 ## Fix
 
@@ -21,7 +21,7 @@ onTokenChange(callback: () => void): () => void;
 // Usage:
 createSyncExtension({
   url: ...,
-  getToken: async () => auth.token,
+  loadToken: async () => auth.token,
   onTokenChange: auth.onTokenChange,
 })
 ```
@@ -36,7 +36,7 @@ Before:
 ```typescript
 createSyncExtension({
   url: (workspaceId) => `${serverUrl.current}/workspaces/${workspaceId}`,
-  getToken: async () => auth.token,
+  loadToken: async () => auth.token,
 })
 // ...
 onLogin(session) {
@@ -53,7 +53,7 @@ After:
 ```typescript
 createSyncExtension({
   url: (workspaceId) => `${serverUrl.current}/workspaces/${workspaceId}`,
-  getToken: async () => auth.token,
+  loadToken: async () => auth.token,
   onTokenChange: auth.onTokenChange,
 })
 // ...
@@ -80,4 +80,4 @@ onLogout() {
 - `apps/honeycrisp/src/lib/client.ts` has the same manual `reconnect()` pattern
 - `apps/opensidian/src/lib/client.ts` has the same manual `reconnect()` pattern
 
-Same fix applies to both—can do in a follow-up.
+Same fix applies to both:can do in a follow-up.

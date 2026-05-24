@@ -1,0 +1,453 @@
+/**
+ * Unit-level tests for `epicenter daemon up`.
+ *
+ * These tests run `runUp` in-process against tiny config-routed daemon
+ * fixtures. They never spawn a child or call `process.exit`; each test owns a
+ * temp project and temp runtime root.
+ *
+ * Auth is injected: every test passes a `createAuthClient` factory to
+ * `runUp`. Happy paths return `STUB_AUTH`; the AuthFailed test returns a
+ * factory that throws. The real `createMachineAuthClient` is not exercised
+ * here, by design - it has its own unit tests in
+ * `@epicenter/auth/src/node/machine-auth.test.ts`.
+ *
+ * Key behaviors:
+ * - happy path loads epicenter.config.ts, writes metadata, binds the
+ *   socket, and replies to ping
+ * - startup failures release the daemon lease
+ * - held SQLite leases short-circuit before daemon module import
+ * - orphan socket files are swept and replaced by a fresh daemon
+ */
+
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AuthClient } from '@epicenter/auth';
+import { MachineAuthStorageError } from '@epicenter/auth/node';
+import {
+	claimDaemonLease,
+	metadataPathFor,
+	pingDaemon,
+	socketPathFor,
+	writeMetadata,
+} from '@epicenter/workspace/node';
+import { Err, Ok } from 'wellcrafted/result';
+import { expectErr, expectOk } from 'wellcrafted/testing';
+import { runUp } from './up';
+
+const STUB_AUTH: AuthClient = {
+	state: {
+		status: 'signed-in',
+		localIdentity: {
+			subject: 'user-1',
+			keyring: [
+				{
+					version: 1,
+					subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+				},
+			],
+		},
+	},
+	onStateChange: () => () => {},
+	startSignIn: async () => Ok(undefined),
+	signOut: async () => Ok(undefined),
+	fetch: async () => new Response(null, { status: 404 }),
+	openWebSocket: async () => {
+		throw new Error('STUB_AUTH: openWebSocket not implemented');
+	},
+	[Symbol.dispose]: () => {},
+};
+
+const stubAuthFactory = async () => Ok(STUB_AUTH);
+
+let originalXdg: string | undefined;
+let runtimeRoot: string;
+let workDir: string;
+
+beforeEach(() => {
+	originalXdg = process.env.XDG_RUNTIME_DIR;
+
+	runtimeRoot = mkdtempSync(join(tmpdir(), 'ep-up-'));
+	process.env.XDG_RUNTIME_DIR = runtimeRoot;
+	mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
+
+	workDir = mkdtempSync(join(tmpdir(), 'ep-dir-'));
+});
+
+afterEach(() => {
+	if (originalXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
+	else process.env.XDG_RUNTIME_DIR = originalXdg;
+
+	rmSync(runtimeRoot, { recursive: true, force: true });
+	rmSync(workDir, { recursive: true, force: true });
+});
+
+function markerPath(name: string): string {
+	return join(workDir, `${name}.marker`);
+}
+
+function writeDemoDaemon(source: string): string {
+	const dir = join(workDir, 'workspaces', 'demo');
+	mkdirSync(dir, { recursive: true });
+	const path = join(dir, 'daemon.ts');
+	writeFileSync(path, source);
+	return path;
+}
+
+function writeDemoConfig(): void {
+	writeFileSync(
+		join(workDir, 'epicenter.config.ts'),
+		[
+			"import demo from './workspaces/demo/daemon.ts';",
+			'',
+			'export default { daemon: { routes: { demo } } };',
+			'',
+		].join('\n'),
+	);
+}
+
+function writeConfig(source: string): void {
+	writeFileSync(join(workDir, 'epicenter.config.ts'), source);
+}
+
+function writeRuntimeDaemon({
+	onImportMarker,
+	onDisposeMarker,
+}: {
+	onImportMarker?: string;
+	onDisposeMarker?: string;
+} = {}) {
+	writeDemoDaemon(`
+		import { writeFileSync } from 'node:fs';
+		${onImportMarker ? `writeFileSync(${JSON.stringify(onImportMarker)}, 'imported');` : ''}
+
+		const actions = {};
+		const collaboration = {
+			actions,
+			whenConnected: new Promise(() => {}),
+			status: { phase: 'connected' },
+			onStatusChange: () => () => {},
+			devices: {
+				list: () => [],
+				subscribe: () => () => {},
+			},
+			dispatch: async () => {
+				throw new Error('fixture does not dispatch');
+			},
+		};
+
+		export default {
+			async open() {
+				return {
+					collaboration,
+					async [Symbol.asyncDispose]() {
+						${onDisposeMarker ? `writeFileSync(${JSON.stringify(onDisposeMarker)}, 'disposed');` : ''}
+					},
+				};
+			},
+		};
+	`);
+	writeDemoConfig();
+}
+
+describe('runUp: happy path', () => {
+	test('writes metadata, binds socket, replies to ping', async () => {
+		writeRuntimeDaemon();
+
+		const handle = expectOk(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+		try {
+			expect(existsSync(metadataPathFor(workDir))).toBe(true);
+			expect(handle.metadata.pid).toBe(process.pid);
+			expect(handle.metadata.discoveredAt).toEqual(expect.any(String));
+			expect(handle.runtimes).toHaveLength(1);
+			expect(handle.runtimes[0]?.route).toBe('demo');
+			expect(
+				readFileSync(join(workDir, 'epicenter.config.ts'), 'utf8'),
+			).toContain('routes: { demo }');
+
+			const sockPath = socketPathFor(workDir);
+			expect(existsSync(sockPath)).toBe(true);
+			const ok = await pingDaemon(sockPath, 1000);
+			expect(ok).toBe(true);
+		} finally {
+			await handle.teardown();
+		}
+		expect(existsSync(metadataPathFor(workDir))).toBe(false);
+		expect(existsSync(socketPathFor(workDir))).toBe(false);
+	});
+});
+
+describe('runUp: failure cleanup', () => {
+	test('surfaces the auth error and releases the lease when createAuthClient returns Err', async () => {
+		const error = expectErr(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: async () =>
+					Err(
+						MachineAuthStorageError.NoSavedSession({
+							filePath: '/tmp/fake-auth.json',
+							baseURL: 'https://example.com',
+						}).error,
+					),
+			}),
+		);
+
+		expect(error.name).toBe('NoSavedSession');
+		expect(error.message).toContain('no saved session');
+		const lease = expectOk(claimDaemonLease(workDir));
+		lease.release();
+	});
+
+	test('writes the default config and starts with no routes when config is missing', async () => {
+		mkdirSync(join(workDir, 'workspaces', 'demo'), { recursive: true });
+
+		const handle = expectOk(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		try {
+			expect(handle.runtimes).toEqual([]);
+			expect(readFileSync(join(workDir, 'epicenter.config.ts'), 'utf8')).toBe(
+				"import { defineConfig } from '@epicenter/workspace';\n\nexport default defineConfig({});\n",
+			);
+			expect(
+				readFileSync(join(workDir, '.epicenter', '.gitignore'), 'utf8'),
+			).toBe('sqlite/\nyjs/\nmd/\nlog/\n');
+		} finally {
+			await handle.teardown();
+		}
+	});
+
+	test('does not overwrite an existing config when provisioning project data', async () => {
+		const original = ['export default {};', '', '// keep me', ''].join('\n');
+		writeFileSync(join(workDir, 'epicenter.config.ts'), original);
+		const gitignore = 'custom-rule\n';
+		mkdirSync(join(workDir, '.epicenter'), { recursive: true });
+		writeFileSync(join(workDir, '.epicenter', '.gitignore'), gitignore);
+
+		const handle = expectOk(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		try {
+			expect(readFileSync(join(workDir, 'epicenter.config.ts'), 'utf8')).toBe(
+				original,
+			);
+			expect(
+				readFileSync(join(workDir, '.epicenter', '.gitignore'), 'utf8'),
+			).toBe(gitignore);
+		} finally {
+			await handle.teardown();
+		}
+	});
+
+	test('releases the daemon lease when config loading throws', async () => {
+		writeFileSync(join(workDir, 'epicenter.config.ts'), 'export default {;\n');
+
+		await expect(
+			runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		).rejects.toThrow('loadProjectConfig: failed to load');
+
+		const lease = expectOk(claimDaemonLease(workDir));
+		lease.release();
+	});
+
+	test('releases the daemon lease when workspace startup fails', async () => {
+		writeDemoDaemon(`
+			export default {
+				async open() {
+					throw new Error('route failed');
+				},
+			};
+		`);
+		writeDemoConfig();
+
+		const error = expectErr(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		expect(error.name).toBe('WorkspaceOpenFailed');
+		const lease = expectOk(claimDaemonLease(workDir));
+		lease.release();
+	});
+
+	test('disposes opened sibling routes and leaves no socket or metadata when one route fails', async () => {
+		const goodDir = join(workDir, 'workspaces', 'good');
+		const badDir = join(workDir, 'workspaces', 'bad');
+		mkdirSync(goodDir, { recursive: true });
+		mkdirSync(badDir, { recursive: true });
+		const disposeMarker = markerPath('good-dispose');
+		writeFileSync(
+			join(goodDir, 'daemon.ts'),
+			`
+				import { writeFileSync } from 'node:fs';
+
+				const collaboration = {
+					actions: {},
+					whenConnected: new Promise(() => {}),
+					status: { phase: 'connected' },
+					onStatusChange: () => () => {},
+					devices: {
+						list: () => [],
+						subscribe: () => () => {},
+					},
+					dispatch: async () => {
+						throw new Error('fixture does not dispatch');
+					},
+				};
+
+				export default {
+					async open() {
+						return {
+							collaboration,
+							async [Symbol.asyncDispose]() {
+								writeFileSync(${JSON.stringify(disposeMarker)}, 'disposed');
+							},
+						};
+					},
+				};
+			`,
+		);
+		writeFileSync(
+			join(badDir, 'daemon.ts'),
+			`
+				export default {
+					async open() {
+						throw new Error('bad route failed');
+					},
+				};
+			`,
+		);
+		writeConfig(
+			[
+				"import good from './workspaces/good/daemon.ts';",
+				"import bad from './workspaces/bad/daemon.ts';",
+				'',
+				'export default { daemon: { routes: { good, bad } } };',
+				'',
+			].join('\n'),
+		);
+
+		const error = expectErr(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		expect(error).toMatchObject({
+			name: 'WorkspaceOpenFailed',
+			route: 'bad',
+		});
+		expect(readFileSync(disposeMarker, 'utf8')).toBe('disposed');
+		expect(existsSync(metadataPathFor(workDir))).toBe(false);
+		expect(existsSync(socketPathFor(workDir))).toBe(false);
+		const lease = expectOk(claimDaemonLease(workDir));
+		lease.release();
+	});
+
+	test('returns MetadataWriteFailed and tears down when metadata path is blocked', async () => {
+		writeRuntimeDaemon();
+		mkdirSync(metadataPathFor(workDir));
+
+		const error = expectErr(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		expect(error.name).toBe('MetadataWriteFailed');
+		expect(existsSync(socketPathFor(workDir))).toBe(false);
+		const lease = expectOk(claimDaemonLease(workDir));
+		lease.release();
+	});
+});
+
+describe('runUp: already running', () => {
+	test('does not import workspace daemons when the daemon lease is held', async () => {
+		const lease = expectOk(claimDaemonLease(workDir));
+		const importMarker = markerPath('import');
+		writeRuntimeDaemon({ onImportMarker: importMarker });
+
+		try {
+			const error = expectErr(
+				await runUp({
+					projectDir: workDir,
+					quiet: true,
+					createAuthClient: stubAuthFactory,
+				}),
+			);
+
+			expect(error.name).toBe('AlreadyRunning');
+			expect(existsSync(importMarker)).toBe(false);
+		} finally {
+			lease.release();
+		}
+	});
+});
+
+describe('runUp: orphan path', () => {
+	test('proceeds cleanly when metadata pid is dead and socket is phantom', async () => {
+		const sockPath = socketPathFor(workDir);
+		mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
+
+		writeFileSync(sockPath, '');
+		writeMetadata(workDir, {
+			pid: 99999999,
+			dir: workDir,
+			startedAt: new Date().toISOString(),
+			cliVersion: '0.0.0',
+			discoveredAt: new Date().toISOString(),
+		});
+		writeRuntimeDaemon();
+
+		const handle = expectOk(
+			await runUp({
+				projectDir: workDir,
+				quiet: true,
+				createAuthClient: stubAuthFactory,
+			}),
+		);
+
+		try {
+			expect(handle.metadata.pid).toBe(process.pid);
+			expect(existsSync(socketPathFor(workDir))).toBe(true);
+		} finally {
+			await handle.teardown();
+		}
+	});
+});

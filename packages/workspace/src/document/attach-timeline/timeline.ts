@@ -413,14 +413,14 @@ export function attachTimeline(ydoc: Y.Doc, key = 'timeline'): Timeline {
 						// (kind, width, order, name) and row data. Avoids the lossy CSV
 						// round-trip which hardcodes kind='text' and width='120'.
 						ydoc.transact(() => {
-							const e = new Y.Map();
-							e.set('type', 'sheet');
+							const ymap = new Y.Map();
+							ymap.set('type', 'sheet');
 							const columns = entry.columns.clone();
 							const rows = entry.rows.clone();
-							e.set('columns', columns);
-							e.set('rows', rows);
-							e.set('createdAt', Date.now());
-							timeline.push([e]);
+							ymap.set('columns', columns);
+							ymap.set('rows', rows);
+							ymap.set('createdAt', Date.now());
+							timeline.push([ymap]);
 						});
 						break;
 					}

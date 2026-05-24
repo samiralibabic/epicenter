@@ -3,7 +3,7 @@
 	import { createSubscriber } from 'svelte/reactivity';
 	import type * as Y from 'yjs';
 	import { encodeStateAsUpdate } from 'yjs';
-	import { ydoc } from '@epicenter/skills';
+	import { skills } from '$lib/skills/client';
 	import { skillsState } from '$lib/state/skills-state.svelte';
 
 	/**
@@ -13,7 +13,7 @@
 	 * reactivity system. Reading `.bytes` inside a reactive context (template,
 	 * `$derived`, `$effect`) re-evaluates whenever the document changes.
 	 *
-	 * Follows the canonical Svelte 5 `MediaQuery` getter pattern—`subscribe()`
+	 * Follows the canonical Svelte 5 `MediaQuery` getter pattern: `subscribe()`
 	 * inside a getter links the reactive context to the external event source.
 	 */
 	function createYdocSize(ydoc: Y.Doc) {
@@ -30,15 +30,14 @@
 		};
 	}
 
-	const skillCount = $derived(skillsState.skills.length);
-	const storageSize = createYdocSize(ydoc);
+	const storageSize = createYdocSize(skills.ydoc);
 
 	function formatBytes(bytes: number): string {
 		if (bytes === 0) return '0 B';
-		const k = 1024;
+		const bytesPerUnit = 1024;
 		const units = ['B', 'KB', 'MB', 'GB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return `${parseFloat((bytes / k ** i).toFixed(1))} ${units[i]}`;
+		const unitIndex = Math.floor(Math.log(bytes) / Math.log(bytesPerUnit));
+		return `${parseFloat((bytes / bytesPerUnit ** unitIndex).toFixed(1))} ${units[unitIndex]}`;
 	}
 </script>
 
@@ -47,8 +46,8 @@
 >
 	<Database class="size-3 shrink-0" />
 	<span>
-		{skillCount}
-		{skillCount === 1 ? 'skill' : 'skills'}
+		{skillsState.skills.length}
+		{skillsState.skills.length === 1 ? 'skill' : 'skills'}
 		<span class="text-muted-foreground/60">·</span>
 		{formatBytes(storageSize.bytes)}
 	</span>

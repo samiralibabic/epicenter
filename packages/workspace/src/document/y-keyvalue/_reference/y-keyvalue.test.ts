@@ -16,21 +16,61 @@ import { describe, expect, test } from 'bun:test';
 import * as Y from 'yjs';
 import { YKeyValue, type YKeyValueEntry } from './y-keyvalue';
 
+/**
+ * Create the smallest useful positional KV fixture.
+ *
+ * The production `YKeyValue` class stays the single source of truth. This
+ * helper only removes repeated Y.Doc and Y.Array setup from behavior tests.
+ */
+function setupKv<T = string>() {
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const yarray = ydoc.getArray<YKeyValueEntry<T>>('data');
+	const kv = new YKeyValue(yarray);
+	return { ydoc, yarray, kv };
+}
+
+/**
+ * Create two docs that can exchange Yjs updates.
+ *
+ * The helper owns the repeated two-doc wiring for convergence tests. It does
+ * not encode positional conflict behavior, which remains asserted through the
+ * production `YKeyValue` implementation.
+ */
+function setupSyncedArrays<T = string>(guid = 'shared') {
+	const doc1 = new Y.Doc({ guid });
+	const doc2 = new Y.Doc({ guid });
+	return {
+		doc1,
+		doc2,
+		array1: doc1.getArray<YKeyValueEntry<T>>('data'),
+		array2: doc2.getArray<YKeyValueEntry<T>>('data'),
+	};
+}
+
+/**
+ * Exchange both documents' current Yjs updates.
+ *
+ * Every sync test uses the same update exchange so the only variable under
+ * assertion is the key-value implementation's conflict handling.
+ */
+function syncBoth(doc1: Y.Doc, doc2: Y.Doc): void {
+	const state1 = Y.encodeStateAsUpdate(doc1);
+	const state2 = Y.encodeStateAsUpdate(doc2);
+	Y.applyUpdate(doc2, state1);
+	Y.applyUpdate(doc1, state2);
+}
+
 describe('YKeyValue', () => {
 	describe('Basic Operations', () => {
 		test('set stores value and get retrieves it', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'bar');
 			expect(kv.get('foo')).toBe('bar');
 		});
 
 		test('set overwrites existing value', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'first');
 			kv.set('foo', 'second');
@@ -38,9 +78,7 @@ describe('YKeyValue', () => {
 		});
 
 		test('delete removes value', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'bar');
 			kv.delete('foo');
@@ -49,9 +87,7 @@ describe('YKeyValue', () => {
 		});
 
 		test('has returns false before set and true after set', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			expect(kv.has('foo')).toBe(false);
 			kv.set('foo', 'bar');
@@ -61,9 +97,7 @@ describe('YKeyValue', () => {
 
 	describe('Change Events', () => {
 		test('fires add event when new key is set', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			const events: Array<{ key: string; action: string }> = [];
 			kv.observe((changes) => {
@@ -77,9 +111,7 @@ describe('YKeyValue', () => {
 		});
 
 		test('fires update event when existing key is changed', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'first');
 
@@ -107,9 +139,7 @@ describe('YKeyValue', () => {
 		});
 
 		test('fires delete event when key is removed', () => {
-			const ydoc = new Y.Doc({ guid: 'test' });
-			const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
-			const kv = new YKeyValue(yarray);
+			const { kv } = setupKv();
 
 			kv.set('foo', 'bar');
 
@@ -134,12 +164,7 @@ describe('YKeyValue', () => {
 		 * deterministic based on Yjs's clientID ordering.
 		 */
 		test('concurrent updates: winner is determined by clientID ordering', () => {
-			// Create two separate Y.Docs (simulating two offline clients)
-			const doc1 = new Y.Doc({ guid: 'shared' });
-			const doc2 = new Y.Doc({ guid: 'shared' });
-
-			const array1 = doc1.getArray<YKeyValueEntry<string>>('data');
-			const array2 = doc2.getArray<YKeyValueEntry<string>>('data');
+			const { doc1, doc2, array1, array2 } = setupSyncedArrays();
 
 			const kv1 = new YKeyValue(array1);
 			const kv2 = new YKeyValue(array2);
@@ -150,13 +175,7 @@ describe('YKeyValue', () => {
 			// Client 2 sets value (imagine this is at 10:05am - LATER)
 			kv2.set('doc', 'from-client-2');
 
-			// Now sync: Apply doc1's changes to doc2, then doc2's changes to doc1
-			const state1 = Y.encodeStateAsUpdate(doc1);
-			const state2 = Y.encodeStateAsUpdate(doc2);
-
-			// Apply in order: doc1 → doc2, doc2 → doc1
-			Y.applyUpdate(doc2, state1);
-			Y.applyUpdate(doc1, state2);
+			syncBoth(doc1, doc2);
 
 			// Both docs should now have the same value
 			// The winner is determined by Yjs's clientID-based ordering
@@ -165,21 +184,11 @@ describe('YKeyValue', () => {
 
 			// Both clients should see the same value (convergence)
 			expect(value1).toBe(value2);
-
-			// The key insight: the winner is deterministic based on clientIDs
-			console.log(`Winner: ${value1}`);
 		});
 
 		test('concurrent updates converge to same value across all clients', () => {
-			// Run the sync test multiple times to observe if outcome varies
-			const results: Array<string | undefined> = [];
-
 			for (let i = 0; i < 10; i++) {
-				const doc1 = new Y.Doc({ guid: `shared-${i}` });
-				const doc2 = new Y.Doc({ guid: `shared-${i}` });
-
-				const array1 = doc1.getArray<YKeyValueEntry<string>>('data');
-				const array2 = doc2.getArray<YKeyValueEntry<string>>('data');
+				const { doc1, doc2, array1, array2 } = setupSyncedArrays(`shared-${i}`);
 
 				const kv1 = new YKeyValue(array1);
 				const kv2 = new YKeyValue(array2);
@@ -187,20 +196,11 @@ describe('YKeyValue', () => {
 				kv1.set('key', `value-from-1-iteration-${i}`);
 				kv2.set('key', `value-from-2-iteration-${i}`);
 
-				const state1 = Y.encodeStateAsUpdate(doc1);
-				const state2 = Y.encodeStateAsUpdate(doc2);
-
-				Y.applyUpdate(doc2, state1);
-				Y.applyUpdate(doc1, state2);
+				syncBoth(doc1, doc2);
 
 				// Convergence check: both should have same value
 				expect(kv1.get('key')).toBe(kv2.get('key'));
-
-				results.push(kv1.get('key'));
 			}
-
-			// Log results to observe pattern
-			console.log('Concurrent update winners:', results);
 		});
 
 		test('delete vs update race condition', () => {
@@ -208,11 +208,8 @@ describe('YKeyValue', () => {
 			// Client 2 updates the same key
 			// Who wins after sync?
 
-			const doc1 = new Y.Doc({ guid: 'shared-delete-test' });
-			const doc2 = new Y.Doc({ guid: 'shared-delete-test' });
-
-			const array1 = doc1.getArray<YKeyValueEntry<string>>('data');
-			const array2 = doc2.getArray<YKeyValueEntry<string>>('data');
+			const { doc1, doc2, array1, array2 } =
+				setupSyncedArrays('shared-delete-test');
 
 			// First, establish initial state in both docs
 			const kv1 = new YKeyValue(array1);
@@ -231,12 +228,7 @@ describe('YKeyValue', () => {
 			// Client 2 UPDATES the key (doesn't know about the delete)
 			kv2.set('doc', 'updated-value');
 
-			// Sync both ways
-			const state1 = Y.encodeStateAsUpdate(doc1);
-			const state2 = Y.encodeStateAsUpdate(doc2);
-
-			Y.applyUpdate(doc2, state1);
-			Y.applyUpdate(doc1, state2);
+			syncBoth(doc1, doc2);
 
 			// What's the result?
 			const value1 = kv1.get('doc');
@@ -244,9 +236,6 @@ describe('YKeyValue', () => {
 
 			// Both should converge
 			expect(value1).toBe(value2);
-
-			// Log the outcome
-			console.log(`Delete vs Update result: ${value1 ?? 'DELETED'}`);
 		});
 	});
 
@@ -812,7 +801,7 @@ describe('YKeyValue', () => {
 				});
 
 				// After transaction, observer has fired and cleared pendingDeletes
-				// Verify by setting a new value — if pendingDeletes wasn't cleared,
+				// Verify by setting a new value: if pendingDeletes wasn't cleared,
 				// has() would still return false incorrectly
 				kv.set('foo', 'baz');
 				expect(kv.has('foo')).toBe(true);
@@ -824,7 +813,7 @@ describe('YKeyValue', () => {
 				const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
 				const kv = new YKeyValue(yarray);
 
-				// set then delete in same batch — entry added+deleted from yarray
+				// set then delete in same batch: entry added+deleted from yarray
 				ydoc.transact(() => {
 					kv.set('foo', 'bar');
 					kv.delete('foo');
@@ -860,7 +849,7 @@ describe('YKeyValue', () => {
 				// Sync client 2's update to client 1
 				Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
 
-				// Client 1 should see the remote value — pendingDeletes must not mask it
+				// Client 1 should see the remote value: pendingDeletes must not mask it
 				expect(kv1.has('foo')).toBe(true);
 				expect(kv1.get('foo')).toBe('remote-value');
 			});
@@ -924,7 +913,7 @@ describe('YKeyValue', () => {
 				// After batch: two set() calls in same batch push two entries to yarray.
 				// delete() only removes the first matching entry via findIndex().
 				// The second entry survives, and the observer processes it as an add.
-				// This is a known edge case — the second set's entry "wins".
+				// This is a known edge case: the second set's entry "wins".
 				expect(kv.has('foo')).toBe(true);
 				expect(kv.get('foo')).toBe('second');
 			});
@@ -934,7 +923,7 @@ describe('YKeyValue', () => {
 				const yarray = ydoc.getArray<YKeyValueEntry<string>>('data');
 				const kv = new YKeyValue(yarray);
 
-				// Delete a key that was never set — should not throw
+				// Delete a key that was never set: should not throw
 				kv.delete('never-existed');
 				expect(kv.has('never-existed')).toBe(false);
 				expect(kv.get('never-existed')).toBeUndefined();
@@ -994,7 +983,7 @@ describe('YKeyValue', () => {
 				// Sync client 2's update to client 1
 				Y.applyUpdate(ydoc1, Y.encodeStateAsUpdate(ydoc2));
 
-				// 'a' should still be deleted — the remote add of 'c' should not affect it
+				// 'a' should still be deleted: the remote add of 'c' should not affect it
 				expect(kv1.has('a')).toBe(false);
 				expect(kv1.get('a')).toBeUndefined();
 				// 'c' should be visible

@@ -61,7 +61,7 @@ A reasonable hand-rolled factory for fuji's entry content doc looks like this:
 ```ts
 // apps/fuji/src/lib/entry-content-doc.ts (illustrative — NOT the proposed shape)
 import { APP_URLS } from '@epicenter/constants/vite';
-import { attachIndexedDb, attachRichText, attachSync, toWsUrl } from '@epicenter/document';
+import { attachIndexedDb, attachRichText, attachSync, websocketUrl } from '@epicenter/document';
 import { DateTimeString } from '@epicenter/workspace';
 import * as Y from 'yjs';
 import { auth, workspace } from './client';
@@ -75,7 +75,7 @@ export function openEntryContentDoc(rowId: EntryId) {
   const content = attachRichText(ydoc);
   const idb = attachIndexedDb(ydoc);
   const sync = attachSync(ydoc, {
-    url: (docId) => toWsUrl(`${APP_URLS.API}/docs/${docId}`),
+    url: (docId) => websocketUrl(`${APP_URLS.API}/docs/${docId}`),
     getToken: async () => auth.token,
     waitFor: idb.whenLoaded,
   });
@@ -157,7 +157,7 @@ export const DOCUMENTS_ORIGIN: unique symbol;
 import { APP_URLS } from '@epicenter/constants/vite';
 import {
   attachIndexedDb, attachRichText, attachSync,
-  defineDocument, onLocalUpdate, toWsUrl,
+  defineDocument, onLocalUpdate, websocketUrl,
 } from '@epicenter/document';
 import { DateTimeString } from '@epicenter/workspace';
 import * as Y from 'yjs';
@@ -172,7 +172,7 @@ export const entryContent = defineDocument((rowId: EntryId) => {
   const content = attachRichText(ydoc);
   const idb = attachIndexedDb(ydoc);
   const sync = attachSync(ydoc, {
-    url: (docId) => toWsUrl(`${APP_URLS.API}/docs/${docId}`),
+    url: (docId) => websocketUrl(`${APP_URLS.API}/docs/${docId}`),
     getToken: async () => auth.token,
     waitFor: idb.whenLoaded,
   });

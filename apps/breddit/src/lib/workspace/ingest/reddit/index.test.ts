@@ -21,7 +21,7 @@ function createZip(entries: Record<string, string>): Blob {
 	for (const [name, content] of Object.entries(entries)) {
 		files[name] = new TextEncoder().encode(content);
 	}
-	return new Blob([zipSync(files)]);
+	return new Blob([zipSync(files) as BlobPart]);
 }
 
 function setup() {

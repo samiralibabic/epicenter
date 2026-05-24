@@ -39,10 +39,6 @@
 		"dev": {
 			"cache": false,
 			"persistent": true
-		},
-		"dev:secrets": {
-			"cache": false,
-			"persistent": true
 		}
 	}
 }

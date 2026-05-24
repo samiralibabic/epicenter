@@ -8,14 +8,14 @@ We considered this. It's not worth it.
 
 ## Encryption without identity is a locked diary with the key taped to the cover
 
-The value of encryption comes from who holds the key—not from the act of encrypting. Epicenter's key hierarchy ties encryption to your identity: the server derives a per-user key via HKDF from a secret only it knows, the client derives a per-workspace key from that, and XChaCha20-Poly1305 does the rest. When you sign out, the key is wiped. Nobody—not even someone with full disk access—can read the data without your credentials. That's meaningful protection.
+The value of encryption comes from who holds the key, not from the act of encrypting. Epicenter's key hierarchy ties encryption to your identity: the server derives a per-user key via HKDF from a secret only it knows, the client derives a per-workspace key from that, and XChaCha20-Poly1305 does the rest. When you sign out, the browser runtime reloads and drops the in-memory keyring. Nobody with only the local ciphertext can read the data without your credentials. That's meaningful protection.
 
 A random local key has plaintext of these properties. It exists in the same JavaScript heap as the data it protects. Any attacker who can read IndexedDB through the browser's developer tools, a malicious extension, or a forensic disk image can also read the key from memory or from wherever you stored it. The encryption algorithm is unbreakable from ciphertext alone, but the key is right there next to the ciphertext.
 
 ```
 User-derived key (signed in):
   Server secret → HKDF("user:{id}") → per-user key → HKDF("workspace:{id}") → workspace key
-  Sign out → key wiped → data unrecoverable without server roundtrip
+  Sign out -> runtime reload drops keyring -> local ciphertext stays encrypted
 
 Random local key (not signed in):
   crypto.getRandomValues(32) → stored in sessionStorage → encrypt everything

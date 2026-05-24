@@ -2,9 +2,13 @@
 
 The hard problem with local-first apps is synchronization. If each device has its own SQLite file, how do you keep them in sync? If each device has its own markdown folder, same question.
 
-`@epicenter/workspace` solves that by making Yjs the source of truth. Tables, KV entries, document content, and awareness all live in a `Y.Doc`; persistence, sync, and materializers hang off that core as attachment primitives. Write to the workspace, and everything else reacts.
+`@epicenter/workspace` solves that by making Yjs the source of truth. Tables, KV entries, and document content all live in a `Y.Doc`; persistence, sync, and materializers hang off that core as attachment primitives. Write to the workspace, and everything else reacts.
 
-The public path is a small set of `attach*` primitives that you compose inline around `new Y.Doc`. For apps with many ephemeral Y.Docs (per-row content docs, per-room docs), `createDocumentFactory(build, { gcTime? })` gives you a refcounted cache on top of that same builder shape.
+The public path is a small set of `attach*` primitives that you compose inline
+around `new Y.Doc`. Browser apps with many child Y.Docs use
+`createDisposableCache(...)` to share live child documents. Browser storage
+cleanup stays in app-owned helper functions that already know the parent table
+and child document guid policy.
 
 ## Quick Start
 
@@ -18,10 +22,8 @@ import * as Y from 'yjs';
 import {
 	attachIndexedDb,
 	attachKv,
-	attachSync,
 	attachTables,
 	defineTable,
-	toWsUrl,
 } from '@epicenter/workspace';
 
 const posts = defineTable(
@@ -39,10 +41,6 @@ export function openBlog() {
 	const tables = attachTables(ydoc, { posts });
 	const kv = attachKv(ydoc, {});
 	const idb = attachIndexedDb(ydoc);
-	const sync = attachSync(ydoc, {
-		url: (docId) => toWsUrl(`http://localhost:3913/rooms/${docId}`),
-		waitFor: idb.whenLoaded,
-	});
 
 	return {
 		get id() {
@@ -52,9 +50,7 @@ export function openBlog() {
 		tables,
 		kv,
 		idb,
-		sync,
 		batch: (fn: () => void) => ydoc.transact(fn),
-		whenReady: idb.whenLoaded,
 		[Symbol.dispose]() {
 			ydoc.destroy();
 		},
@@ -65,7 +61,7 @@ export function openBlog() {
 export const blog = openBlog();
 
 async function quickStart() {
-	await blog.whenReady;
+	await blog.idb.whenLoaded;
 
 	blog.tables.posts.set({
 		id: 'welcome',
@@ -88,11 +84,19 @@ That example uses the current public API end to end:
 
 - `defineTable(...)` with a real schema
 - a direct `openBlog()` builder function that owns `new Y.Doc` and returns the bundle
-- `attachTables` / `attachKv` / `attachIndexedDb` / `attachSync` composed inline
+- `attachTables` / `attachKv` / `attachIndexedDb` composed inline
 - direct property access via `blog.tables.posts`
 - `set`, `get`, `update`, `delete`, `getAllValid`, and `observe`
 
-Singleton apps (one workspace per app) call a builder like `openBlog()` once at module scope. Multi-document use cases (per-row content docs, per-room ephemeral docs) wrap the same builder shape with `createDocumentFactory(...)` — that's where ref-counting and `gcTime` grace periods earn their keep. See [Per-row content documents](#per-row-content-documents) below.
+The quick start is local-first: it persists to IndexedDB and works offline.
+Sync is one more line in the builder: add `openCollaboration`. See [Sync](#sync).
+
+Singleton apps (one workspace per app) call a builder like `openBlog()` once at
+module scope. Browser child documents use `createDisposableCache(...)`.
+One-shot Node scripts can open a child document directly for one operation;
+daemon and materializer workloads can opt into `createDisposableCache(...)` when
+same-process reuse matters. See [Per-row content documents](#per-row-content-documents)
+below.
 
 ## Prefix vocabulary
 
@@ -100,46 +104,68 @@ Every exported function in this package falls into one of three verbs. The prefi
 
 | Verb | Side effect | Input | Output | Examples |
 |---|---|---|---|---|
-| `define*` | **None** — pure data | Schemas, defaults | Plain config object | `defineTable`, `defineKv`, `defineMutation`, `defineQuery` |
-| `attach*` | **Mutates a Y.Doc** — binds a slot, registers `ydoc.on('destroy')` | An existing `Y.Doc` + config | Typed handle (non-idempotent — hold the reference) | `attachTable`, `attachTables`, `attachKv`, `attachRichText`, `attachPlainText`, `attachTimeline`, `attachAwareness`, `attachIndexedDb`, `attachSqlite`, `attachBroadcastChannel`, `attachSync`, `attachEncryption` (with `.attachTable` / `.attachTables` / `.attachKv` methods) |
-| `create*` | **Pure construction** — no listeners, no subscriptions, no destroy registration at call time. | Definitions or a builder closure | A usable definition / factory | `createDocumentFactory` |
+| `define*` | **None**: pure data | Schemas, defaults | Plain config object | `defineTable`, `defineKv`, `defineMutation`, `defineQuery` |
+| `attach*` | **Mutates a Y.Doc**: binds a slot, registers `ydoc.on('destroy')` | An existing `Y.Doc` + config | Typed handle, non-idempotent, hold the reference | `attachTable`, `attachTables`, `attachKv`, `attachRichText`, `attachPlainText`, `attachTimeline`, `attachIndexedDb`, `attachYjsLog`, `attachBroadcastChannel`, `attachEncryption` (with `.attachTable` / `.attachTables` / `.attachKv` methods), `attachMarkdownMaterializer`, `attachSqliteMaterializer` |
+| `create*` | **Pure construction**: no listeners, no subscriptions, no destroy registration at call time. | Definitions or a builder closure | A usable definition or cache | `createDisposableCache` |
+| `open*` | **Opens a runtime over a Y.Doc or a local resource**: returns a typed handle with its own teardown. The Y.Doc-bound case (`openCollaboration`) registers `ydoc.on('destroy')` like `attach*` does; the resource case (`openSqliteReader`) takes no Y.Doc and returns a `[Symbol.dispose]()` handle. | Y.Doc + config, or resource config | Typed runtime handle | `openCollaboration`, `openSqliteReader`, `openWriterSqlite` |
 
-`createDocumentFactory(build, opts?)` is the one top-level composition primitive. The user owns `new Y.Doc` and every `attach*` call inside the builder; the cache owns identity (keyed by id), refcount, and the `gcTime` grace period between last-dispose and teardown. `.open(id)` returns a disposable handle.
+`createDisposableCache(build, opts?)` is the refcounted cache primitive. The
+user owns construction; the cache owns identity keyed by id,
+refcounting, and the `gcTime` grace period between last dispose and teardown.
+`.open(id)` returns a disposable handle.
 
 ### Plaintext vs encrypted
 
-Both variants ship from this package. Plaintext (`attachTable`, `attachTables`, `attachKv`) binds a typed helper directly to the Y.Doc. Encrypted — the methods on the `EncryptionAttachment` coordinator returned by `attachEncryption(ydoc)` (`encryption.attachTable`, `encryption.attachTables`, `encryption.attachKv`) — additionally registers its backing store with that coordinator so keys applied via `encryption.applyKeys(...)` flow to every registered store atomically.
+Both variants ship from this package. Plaintext (`attachTable`, `attachTables`, `attachKv`) binds a typed helper directly to the Y.Doc. Encrypted: the methods on the `EncryptionAttachment` coordinator returned by `attachEncryption(ydoc, { keyring })` (`encryption.attachTable`, `encryption.attachTables`, `encryption.attachKv`) additionally register their backing store with that coordinator. The coordinator reads `keyring()` synchronously at each registration site, derives the per-workspace keyring, and activates the store before handing it back. Already-attached encrypted stores keep their derived keyring; same-subject key rotation needs a re-attach to affect those stores.
 
-Don't mix plaintext and encrypted wrappers on the same slot name — Yjs hands both calls the same underlying `Y.Array` and you get a silent plaintext-over-ciphertext race. The verb (`encryption.attachTable` vs plain `attachTable`) is the primary defense; review call sites accordingly. One slot name, one attach site, one intent.
+Don't mix plaintext and encrypted wrappers on the same slot name: Yjs hands both calls the same underlying `Y.Array` and you get a silent plaintext-over-ciphertext race. The verb (`encryption.attachTable` vs plain `attachTable`) is the primary defense; review call sites accordingly. One slot name, one attach site, one intent.
 
-Minimal encrypted workspace — encryption + IndexedDB + cross-tab + sync wired end-to-end:
+Minimal encrypted browser workspace: encryption + subject-scoped IndexedDB + cross-tab + collaboration (sync + presence + dispatch) wired together:
 
 ```typescript
 import {
-	attachAwareness,
-	attachBroadcastChannel,
 	attachEncryption,
-	attachIndexedDb,
-	attachSync,
-	toWsUrl,
+	attachLocalStorage,
+	createInstallationId,
+	openCollaboration,
+	roomWsUrl,
+	wipeLocalStorage,
 } from '@epicenter/workspace';
+import { createSession, type SignedIn } from '@epicenter/svelte';
 import * as Y from 'yjs';
+import { auth } from '$lib/auth';
 import { appTables } from '$lib/workspace/definition';
 
-export function openApp() {
-	const ydoc = new Y.Doc({ guid: 'epicenter.my-app', gc: false });
+export function openApp({
+	signedIn,
+	installationId,
+}: {
+	signedIn: SignedIn;
+	installationId: string;
+}) {
+	const ydoc = new Y.Doc({ guid: 'epicenter.my-app', gc: true });
 
-	const encryption = attachEncryption(ydoc);
-	const tables = encryption.attachTables(ydoc, appTables);
-	const awareness = attachAwareness(ydoc, {});
+	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
+	const tables = encryption.attachTables(appTables);
 
-	const idb = attachIndexedDb(ydoc);
-	attachBroadcastChannel(ydoc);
-	const sync = attachSync(ydoc, {
-		url: (docId) => toWsUrl(`https://api.epicenter.so/workspaces/${docId}`),
+	// Server + owner scoped encrypted IDB + cross-tab BroadcastChannel in one call.
+	const idb = attachLocalStorage(ydoc, {
+		server: signedIn.server,
+		owner: signedIn.owner,
+		keyring: signedIn.keyring,
+	});
+
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl({
+			baseURL: signedIn.auth.baseURL,
+			owner: signedIn.owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		waitFor: idb.whenLoaded,
-		awareness: awareness.raw,
-		requiresToken: true,
+		openWebSocket: signedIn.auth.openWebSocket,
+		onReconnectSignal: signedIn.auth.onStateChange,
+		actions: {},
 	});
 
 	return {
@@ -148,27 +174,41 @@ export function openApp() {
 		},
 		ydoc,
 		tables,
-		awareness,
 		encryption,
 		idb,
-		sync,
+		collaboration,
 		batch: (fn: () => void) => ydoc.transact(fn),
-		whenReady: idb.whenLoaded,
+		async wipe() {
+			ydoc.destroy();
+			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
+			await wipeLocalStorage({
+				server: signedIn.server,
+				owner: signedIn.owner,
+			});
+		},
 		[Symbol.dispose]() {
 			ydoc.destroy();
 		},
 	};
 }
 
-export const workspace = openApp();
-
-// On login:  workspace.encryption.applyKeys(session.encryptionKeys); workspace.sync.setToken(session.token); workspace.sync.reconnect();
-// On logout: workspace.sync.goOffline(); workspace.sync.setToken(null); await workspace.idb.clearLocal();
+export const session = createSession({
+	auth,
+	build: ({ signedIn }) =>
+		openApp({
+			signedIn,
+			installationId: createInstallationId({ storage: localStorage }),
+		}),
+});
 ```
 
-The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`, which becomes the sync room name. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin.
+`attachLocalStorage(ydoc, { server, owner, keyring })` pairs the encrypted IndexedDB store with an owner-scoped BroadcastChannel: two tabs of the same owner share both persisted state and live updates, while two different owners on the same browser profile never see each other's data. On sign-out, call `wipeLocalStorage({ server, owner })` to delete every owner-scoped local database.
 
-For a production-shaped wiring (with auth integration, session transitions, etc.), see `apps/fuji/src/lib/client.svelte.ts`.
+`openCollaboration` is the workspace primitive: it wraps the sync supervisor, mirrors the relay's server-owned presence channel as `collaboration.devices`, and runs inbound dispatch frames against the local action registry. Find an online install with `workspace.collaboration.devices.list().find((d) => d.installationId === installationId)`, then call it with `workspace.collaboration.dispatch(...)`. Content documents use the same primitive with `actions: {}`. See [SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
+
+The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin. Cloud sync targets `/api/users/:userId/rooms/:roomId` (personal) or `/api/rooms/:roomId` (team): build the URL with `roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId })`. A cloud doc is owned by the authenticated `owner`, so the server resolves the DO name `users/${userId}/rooms/${room}` (personal) or `rooms/${room}` (team) from the auth token, with no workspace lookup.
+
+For production-shaped browser wiring, see `apps/fuji/src/lib/browser.ts`. For auth session transitions, see `apps/fuji/src/lib/session.ts`.
 
 ## Core Philosophy
 
@@ -180,7 +220,10 @@ That matters because conflict resolution only has to happen once. Yjs handles me
 
 ### Definitions are pure; builders are live
 
-`defineTable` and `defineKv` are pure. They do not create a `Y.Doc`, open a socket, or touch IndexedDB. The builder function you write — whether you call it directly for a singleton or hand it to `createDocumentFactory` for a refcounted cache — is the boundary where the live bundle appears.
+`defineTable` and `defineKv` are pure. They do not create a `Y.Doc`, open a
+socket, or touch IndexedDB. The builder function you write, whether you call it
+directly for a singleton or from a browser document cache, is the boundary
+where the live bundle appears.
 
 That split is not cosmetic. It lets you share definitions across modules, infer types once, and instantiate different bundles in different runtimes without rewriting the schema layer.
 
@@ -193,26 +236,32 @@ function openBlog() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.blog' });
 	const tables = attachTables(ydoc, { posts });
 	const idb = attachIndexedDb(ydoc);
-	const sync = attachSync(ydoc, { url, waitFor: idb.whenLoaded });
+	const collaboration = openCollaboration(ydoc, {
+		url,
+		waitFor: idb.whenLoaded,
+		openWebSocket,
+		onReconnectSignal,
+		actions: {},
+	});
 	return {
 		get id() { return ydoc.guid; },
-		ydoc, tables, idb, sync,
+		ydoc, tables, idb, collaboration,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
 ```
 
-Ordering is obvious (later `attach*` calls see earlier ones through plain lexical scope) and there is no magic `client.extensions` namespace — each attachment is whatever you named it in the returned bundle.
+Ordering is obvious (later `attach*` and `open*` calls see earlier ones through plain lexical scope) and there is no magic `client.extensions` namespace: each attachment is whatever you named it in the returned bundle.
 
 ### Read-time validation beats write-time ceremony
 
 Tables validate and migrate on read, not on write. `set(...)` writes the row shape TypeScript already approved. `get(...)` is where invalid old data shows up as `{ status: 'invalid' }` and old versions are migrated to the latest schema.
 
-That trade-off is deliberate. It keeps the write path cheap and pushes schema evolution into one place—the table definition.
+That trade-off is deliberate. It keeps the write path cheap and pushes schema evolution into one place:the table definition.
 
 ### Storage scales with active data, not edit history
 
-With Yjs garbage collection enabled, storage tracks the live document much more closely than the number of operations that happened over time. Deleted rows, overwritten values, and old content states collapse down to compact metadata. The workspace grows because you keep more data—not because you clicked save a thousand times.
+With Yjs garbage collection enabled, storage tracks the live document much more closely than the number of operations that happened over time. Deleted rows, overwritten values, and old content states collapse down to compact metadata. The workspace grows because you keep more data:not because you clicked save a thousand times.
 
 ## Architecture Overview
 
@@ -264,7 +313,7 @@ The Y.Doc carries data. Your definition files carry meaning.
 
 ### Multi-Device Sync Topology
 
-Epicenter supports distributed sync where Y.Doc instances replicate across devices via y-websocket:
+Epicenter supports distributed sync where Y.Doc instances replicate across devices over WebSocket through the relay:
 
 ```
    PHONE                   LAPTOP                    DESKTOP
@@ -287,14 +336,21 @@ Yjs supports multiple providers simultaneously. A phone can connect to desktop, 
 ### How It All Fits Together
 
 1. Define tables and KV entries with `defineTable` and `defineKv`.
-2. Write a builder function that constructs `new Y.Doc({ guid })` and composes `attachTables` / `attachKv` / `attachIndexedDb` / `attachSync` / etc. inline, returning the bundle.
-3. For singleton apps: call the builder once at module scope. For per-row / per-room fan-out: wrap it with `createDocumentFactory(build, { gcTime? })` and call `.open(rowId)` per instance.
-4. `await bundle.whenReady` (or `handle.whenReady`) before reading persisted state. `whenReady` is the platform's readiness convention, declared as an optional typed field on `Document`. The cache itself does not read it, but `WorkspaceGate`, the CLI's `run` command, migrations, `@epicenter/filesystem` ops, the sqlite-index materializer, and every editor's `{#await}` block all gate on it. Expose it when the bundle has async initialization the caller should wait on, and compose it from whatever attachment signals make sense: `idb.whenLoaded` for a single barrier, or `Promise.all([persistence.whenLoaded, unlock.whenChecked, sync.whenConnected])` for a multi-step cascade. Because the field is typed `Promise<unknown>`, `Promise.all([...])` is assignable directly (no `.then(() => undefined)` tail required).
-5. Read and write through `bundle.tables`, `bundle.kv`, `bundle.awareness`, and (for per-row content docs) whatever you exposed in the returned bundle.
-6. Use `iterateActions(...)` and each action's metadata (`type`, `title`, `description`, `input`) if you want to build adapters such as HTTP, CLI, or MCP.
-7. Dispose with `bundle[Symbol.dispose]()` (singleton) or `handle.dispose()` / `factory.close(id)` (factory) when you're done.
+2. Write a builder function that constructs `new Y.Doc({ guid })` and composes `attachTables` / `attachKv` / `attachIndexedDb` / `openCollaboration` inline, returning the bundle. Content docs call `openCollaboration` with `actions: {}`.
+3. For singleton apps: call the builder once at module scope. For browser
+   child documents: use `createDisposableCache(...)` and call `.open(rowId)`
+   per instance. For one-shot Node operations: call the child builder directly
+   inside `using`.
+4. Await the right readiness signal before reading persisted state. There are two shapes here, and the choice is load-bearing:
+   - **One subsystem to wait on.** Expose the subsystem (`idb`, `persistence`, ...) on the bundle root and let consumers reach through: `await bundle.idb.whenLoaded`. Do not alias `whenLoaded`/`whenReady` flat at the bundle root just to save a `.idb`; the alias lies about composition.
+   - **Two or more subsystems to compose into one barrier.** Then `whenReady` earns its place: `whenReady: Promise.all([persistence.whenLoaded, unlock.whenChecked, sync.whenConnected])`. Because the field is typed `Promise<unknown>`, `Promise.all([...])` is assignable directly. Consumers `await bundle.whenReady`. The CLI's `run` command, migrations, `@epicenter/filesystem` ops, the sqlite-index materializer, and `{#await}` gates in editors all consume this aggregate.
 
-The architecture stays local-first: the workspace works offline, synchronizes opportunistically, and treats external systems as helpers around the document—not the other way around.
+   See `specs/20260506T020000-expose-attachments-not-aliases.md` for the rule and anti-patterns.
+5. Read and write through `bundle.tables`, `bundle.kv`, `bundle.collaboration.devices` and `bundle.collaboration.dispatch` (for cross-device calls), and (for per-row content docs) whatever you exposed in the returned bundle.
+6. Iterate `Object.entries(bundle.actions)` and read each action's metadata (`type`, `title`, `description`, `input`) if you want to build adapters such as HTTP, CLI, or MCP.
+7. Dispose with `bundle[Symbol.dispose]()` for singletons or `handle[Symbol.dispose]()` for cache handles when you're done. Use `cache[Symbol.dispose]()` to flush every live entry.
+
+The architecture stays local-first: the workspace works offline, synchronizes opportunistically, and treats external systems as helpers around the document, not the other way around.
 
 ## Shared Workspace ID Convention
 
@@ -311,7 +367,11 @@ The ID becomes `ydoc.guid` for the workspace doc, so it is not a throwaway strin
 
 ### Workspaces
 
-A workspace is a `Y.Doc` plus whatever `attach*` handles you bound to it, packaged as a bundle with `{ ydoc, [Symbol.dispose], ... }`. A singleton app returns that bundle from a top-level function like `openBlog()`. A factory-hosted workspace returns the same shape from a `createDocumentFactory((id) => ...)` builder, and `.open(id)` mints a refcounted handle over it.
+A workspace is a `Y.Doc` plus whatever `attach*` handles you bound to it,
+packaged as a bundle with `{ id, ydoc, [Symbol.dispose], ... }`. A browser
+workspace also exposes `wipe()`. A singleton app returns the bundle
+from a top-level function like `openBlog()`. A document cache returns disposable
+handles over child documents keyed by row id.
 
 ### Yjs document
 
@@ -343,11 +403,11 @@ KV entries are for settings and scalar preferences. They are keyed by string and
 
 ### Attachments (the extension system)
 
-"Extensions" in Epicenter are just `attach*` calls inside your builder function. There is no `.withExtension` chain, no extension registry, no priority flag — just lexical scope.
+"Extensions" in Epicenter are just `attach*` calls inside your builder function. There is no `.withExtension` chain, no extension registry, no priority flag: just lexical scope.
 
-- Call the relevant `attach*` function (e.g. `attachIndexedDb`, `attachSync`, `attachSqlite`, `attachEncryption`) inside the builder and include the handle in the returned bundle.
-- Order matters only through lexical scope — later `attach*` calls see earlier handles directly.
-- For per-row content docs, write a **separate** `createDocumentFactory((rowId) => ...)` and `.open(rowId)` it from the main workspace's actions or components.
+- Call the relevant `attach*` or `open*` function (e.g. `attachIndexedDb`, `attachYjsLog`, `attachEncryption`, `openCollaboration`) inside the builder and include the handle in the returned bundle.
+- Order matters only through lexical scope: later `attach*` calls see earlier handles directly.
+- For browser per-row content docs, write a separate `createDisposableCache(...)` and `.open(rowId)` it from the main workspace's actions or components.
 
 ### Actions
 
@@ -355,15 +415,22 @@ Actions are callable functions with metadata.
 
 - `defineQuery(...)` creates a read action
 - `defineMutation(...)` creates a write action
-- Include them in your bundle as `actions: { ... }` (typically via a `createMyAppActions({ tables, batch })` helper defined nearby)
+- Include them in your bundle as `actions: defineActions({...})` (typically via a `createMyAppActions({ tables, batch })` helper defined nearby). The helper enforces snake_case ASCII keys at compile time and runtime; consumers index by string or iterate with `Object.entries`.
 
 Handlers close over `tables`, `kv`, and anything else the builder has in scope through normal JavaScript closure. They do not receive a framework context object.
 
 ### Per-row content documents
 
-For apps where each row has its own rich-text / plain-text / timeline content (files, notes, skills, entries), use `createDocumentFactory((rowId) => ...)` keyed by the row id. The main workspace holds the metadata row; the content factory owns per-row content Y.Docs.
+For browser apps where each row has its own rich-text / plain-text / timeline
+content (files, notes, skills, entries), use
+`createDisposableCache(...)` keyed by the row id. The main workspace holds
+the metadata row; the cache owns live per-row content identity and refcounting.
+App-local helper functions own local browser cleanup.
 
-Each `.open(rowId)` returns a refcounted handle. Multiple consumers (editor, actions, materializer) can share one underlying Y.Doc safely — the cache owns construction, refcounting, and `gcTime`-delayed teardown.
+Each `.open(rowId)` returns a handle. Multiple consumers (editor, actions,
+route transitions) can share one underlying Y.Doc safely; the cache owns
+construction, refcounting, and `gcTime`-delayed teardown through the lower-level
+cache primitive.
 
 ```svelte
 <script lang="ts">
@@ -372,15 +439,15 @@ Each `.open(rowId)` returns a refcounted handle. Multiple consumers (editor, act
   let { fileId }: { fileId: string } = $props();
 
   const handle = $derived(fileContentDocs.open(fileId));
-  $effect(() => () => handle.dispose());
+  $effect(() => () => handle[Symbol.dispose]());
 </script>
 
 <Editor ytext={handle.content} />
 ```
 
-The `$derived` swaps handles when `fileId` changes; the `$effect` cleanup releases the old handle. Refcount→0 arms the factory's `gcTime` timer; a fresh open during the grace window cancels the pending teardown, so rapid navigation doesn't flap persistence or sync.
+The `$derived` swaps handles when `fileId` changes; the `$effect` cleanup releases the old handle. Refcount 0 arms the cache's `gcTime` timer; a fresh open during the grace window cancels the pending teardown, so rapid navigation doesn't flap persistence or sync.
 
-Reference implementations: `packages/filesystem/src/file-content-docs.ts`, `packages/skills/src/skill-instructions-docs.ts`, `apps/fuji/src/lib/entry-content-docs.ts`, `apps/honeycrisp/src/lib/note-body-docs.ts`.
+Reference implementations: `apps/opensidian/src/lib/opensidian/browser.ts`, `apps/skills/src/lib/skills/browser.ts`, `apps/fuji/src/lib/browser.ts`, `apps/honeycrisp/browser.ts`.
 
 ## Schema definition
 
@@ -467,52 +534,38 @@ void sidebarCollapsed;
 
 KV is validate-or-default. There is no migration function.
 
-### Awareness definitions
+### Presence
+
+Presence (which installs are connected right now) is not a client-defined
+schema. The relay owns it: it tracks live WebSocket connections and, on every
+connection change, pushes one `presence` text frame carrying the full list of
+connected installs. `openCollaboration` stores the latest list and exposes it
+as `collaboration.devices`:
 
 ```typescript
-import { type } from 'arktype';
-import * as Y from 'yjs';
-import {
-	attachAwareness,
-	attachTables,
-	defineTable,
-} from '@epicenter/workspace';
+const online = workspace.collaboration.devices.list();
+// -> [{ installationId: 'phone' }, { installationId: 'laptop' }]
 
-const notes = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		_v: '1',
-	}),
-);
-
-function openNotes() {
-	const ydoc = new Y.Doc({ guid: 'epicenter.notes' });
-	const tables = attachTables(ydoc, { notes });
-	const awareness = attachAwareness(ydoc, {
-		name: type('string'),
-		color: type('string'),
-		cursor: type({ line: 'number', column: 'number' }),
-	});
-
-	return {
-		get id() { return ydoc.guid; },
-		ydoc,
-		tables,
-		awareness,
-		[Symbol.dispose]() { ydoc.destroy(); },
-	};
-}
-
-const workspace = openNotes();
-
-workspace.awareness.setLocal({ name: 'Braden', color: '#ff4d4f' });
-workspace.awareness.setLocalField('cursor', { line: 12, column: 3 });
+const unsubscribe = workspace.collaboration.devices.subscribe((devices) => {
+	console.log('online:', devices.map((device) => device.installationId));
+});
 ```
+
+Each entry is a `LiveDevice` (`{ installationId }`); the local install is
+excluded. Product-level data (display name, cursor, capability list) lives in
+app-owned tables, not on the presence wire. See
+[SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
+
+Cursor and selection sync (genuine ephemeral peer-to-peer state) is future
+work; when it lands it will use a dedicated awareness primitive, kept
+separate from this server-owned presence channel.
 
 ### Document-backed tables
 
-Per-row content (one Y.Doc per file/note/entry) is a `createDocumentFactory` call keyed by the row id. The main workspace holds the metadata row; the content factory owns the content Y.Doc. This is how the filesystem, skills, and fuji apps do it.
+Per-row content (one Y.Doc per file/note/entry) is a browser document cache
+keyed by the row id in browser apps. The main workspace holds the metadata row;
+the cache owns live content Y.Docs. App-local helpers own browser cleanup.
+Node one-shot code can open the content document directly for one operation.
 
 ```typescript
 import { type } from 'arktype';
@@ -521,11 +574,12 @@ import {
 	attachIndexedDb,
 	attachPlainText,
 	attachTables,
-	createDocumentFactory,
+	createDisposableCache,
 	defineTable,
 	docGuid,
 	onLocalUpdate,
 } from '@epicenter/workspace';
+import { clearDocument } from 'y-indexeddb';
 
 const files = defineTable(
 	type({
@@ -545,23 +599,26 @@ function openFilesWorkspace() {
 		ydoc,
 		tables,
 		idb,
-		whenReady: idb.whenLoaded,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
 
 export const workspace = openFilesWorkspace();
 
-// Per-row content factory — one Y.Doc per file, keyed by file id.
-export const fileContentDocs = createDocumentFactory((fileId: string) => {
+function fileContentDocGuid(fileId: string) {
+	return docGuid({
+		workspaceId: workspace.id,
+		collection: 'files',
+		rowId: fileId,
+		field: 'content',
+	});
+}
+
+// Browser child-document cache: one Y.Doc per file, keyed by file id.
+export const fileContentDocs = createDisposableCache((fileId: string) => {
 	const ydoc = new Y.Doc({
-		guid: docGuid({
-			workspaceId: workspace.id,
-			collection: 'files',
-			rowId: fileId,
-			field: 'content',
-		}),
-		gc: false,
+		guid: fileContentDocGuid(fileId),
+		gc: true,
 	});
 	const content = attachPlainText(ydoc, 'content');
 	const idb = attachIndexedDb(ydoc);
@@ -575,10 +632,17 @@ export const fileContentDocs = createDocumentFactory((fileId: string) => {
 		ydoc,
 		content,
 		idb,
-		whenReady: idb.whenLoaded,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 });
+
+export async function clearFileContentLocalData() {
+	await Promise.all(
+		workspace.tables.files.getAllValid().map((file) =>
+			clearDocument(fileContentDocGuid(file.id)),
+		),
+	);
+}
 
 async function documentExample() {
 	workspace.tables.files.set({
@@ -588,9 +652,9 @@ async function documentExample() {
 		_v: 1,
 	});
 
-	// Load a content handle for the row. Refcounted — dispose when done.
+	// Load a content handle for the row. Dispose when done.
 	using handle = fileContentDocs.open('file-1');
-	await handle.whenReady;
+	await handle.idb.whenLoaded;
 
 	handle.content.insert(0, '# Hello from a document');
 	console.log(handle.content.toString());
@@ -599,7 +663,7 @@ async function documentExample() {
 void documentExample;
 ```
 
-Opens are refcounted: multiple callers (editor, filesystem actions, materializer) can `.open(fileId)` concurrently and share one Y.Doc. The cache tears the bundle down `gcTime` after the last handle disposes (default `Infinity` — opt into a finite grace window when your app actually churns through rows).
+Opens are refcounted: multiple callers (editor, filesystem actions, materializer) can `.open(fileId)` concurrently and share one Y.Doc. The cache tears the bundle down `gcTime` after the last handle disposes. The default is `5_000` ms.
 
 ## Table Operations
 
@@ -710,7 +774,7 @@ workspace.tables.files.delete('file-1');
 unsubscribe();
 ```
 
-The `origin` argument is whatever the caller passed to `ydoc.transact(fn, origin)` — or `null` for a direct mutation. Treat it as an opt-in channel for callers that want to tag their own writes:
+The `origin` argument is whatever the caller passed to `ydoc.transact(fn, origin)`: or `null` for a direct mutation. Treat it as an opt-in channel for callers that want to tag their own writes:
 
 ```typescript
 const APP_ORIGIN = Symbol('my-app');
@@ -724,34 +788,44 @@ workspace.tables.posts.observe((_ids, origin) => {
 });
 ```
 
-For the common case of "react only to local edits, not to sync/IDB replays," use `onLocalUpdate(ydoc, fn)` — it filters on Yjs's own `transaction.local` invariant and doesn't depend on origin conventions.
+For the common case of "react only to local edits, not to sync/IDB replays," use `onLocalUpdate(ydoc, fn)`: it filters on Yjs's own `transaction.local` invariant and doesn't depend on origin conventions.
 
 ## Attachments
 
-Attachments are the opt-in capabilities you compose inside a builder. They all ship from the package root — there are no `@epicenter/workspace/extensions/*` subpaths.
+Attachments are the opt-in capabilities you compose inside a builder. Browser-safe attachments ship from the package root. Node and Bun-only attachments use explicit subpaths.
 
 ```typescript
 import {
 	attachBroadcastChannel,
 	attachIndexedDb,
-	attachSqlite,
-	attachSync,
 	attachTables,
-	toWsUrl,
+	openCollaboration,
+	roomWsUrl,
 } from '@epicenter/workspace';
+import { attachYjsLog } from '@epicenter/workspace/node';
 ```
 
 ### Persistence
 
-`attachIndexedDb(ydoc)` runs in the browser. `attachSqlite(ydoc, { filePath })` runs on Node/Bun. Both return a handle with `whenLoaded`, `whenDisposed`, and `clearLocal()`.
+Browser apps use `attachIndexedDb(ydoc)` for unauthenticated docs, or `attachLocalStorage(ydoc, { server, owner, keyring })` for an authenticated workspace that needs encrypted persistence plus cross-tab pairing. Bun/Node daemons use `attachYjsLog(ydoc, { filePath })`. All bind to the Y.Doc and tear down on `ydoc.destroy()`.
+
+| Primitive | Runtime | Barrier | Other | Purpose |
+|---|---|---|---|---|
+| `attachIndexedDb(ydoc)` | browser | `whenLoaded`, `whenDisposed` | `clearLocal()` | Local Yjs persistence via `y-indexeddb` |
+| `attachLocalStorage(ydoc, { server, owner, keyring })` | browser | `whenLoaded`, `whenDisposed` | paired BroadcastChannel | Owner-scoped encrypted IDB plus cross-tab pairing |
+| `attachYjsLog(ydoc, { filePath })` | Bun/Node | `whenDisposed` (sync replay; no `whenLoaded` needed) | `clearLocal()` | Append-log SQLite file the daemon writes |
+
+For authenticated apps, call `await wipeLocalStorage({ server, owner })` after disposing the bundle to delete every owner-scoped encrypted IDB database on the current browser profile (sign-out, "delete my local data", account switch).
+
+`attachSqliteMaterializer` and `attachMarkdownMaterializer` are not persistence: they project workspace rows into queryable SQLite tables or `.md` files. See the materializer subsections below.
 
 ```typescript
 import * as Y from 'yjs';
 import {
-	attachSqlite,
 	attachTables,
 	defineTable,
 } from '@epicenter/workspace';
+import { attachYjsLog } from '@epicenter/workspace/node';
 import { type } from 'arktype';
 
 const notes = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
@@ -759,14 +833,13 @@ const notes = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
 function openNotes() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.notes' });
 	const tables = attachTables(ydoc, { notes });
-	const sqlite = attachSqlite(ydoc, { filePath: '/tmp/epicenter/notes.db' });
+	const yjsLog = attachYjsLog(ydoc, { filePath: '/tmp/epicenter/notes.db' });
 
 	return {
 		get id() { return ydoc.guid; },
 		ydoc,
 		tables,
-		sqlite,
-		whenReady: sqlite.whenLoaded,
+		yjsLog,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
@@ -776,30 +849,49 @@ void openNotes;
 
 ### Sync
 
-`attachSync(ydoc, config)` is the websocket transport; compose it with `attachBroadcastChannel(ydoc)` for cross-tab sync.
+One primitive wraps the WebSocket transport: `openCollaboration`. The workspace document passes a real `actions` registry; content documents that only need bytes-on-the-wire pass `actions: {}`. Compose it with `attachBroadcastChannel(ydoc)` for unauthenticated local-only documents. Authenticated browser workspaces use `attachLocalStorage(ydoc, { server, owner, keyring })`, which pairs encrypted IDB with an owner-scoped BroadcastChannel in one call.
 
 ```typescript
 import * as Y from 'yjs';
 import {
 	attachBroadcastChannel,
 	attachIndexedDb,
-	attachSync,
 	attachTables,
+	createInstallationId,
 	defineTable,
-	toWsUrl,
+	openCollaboration,
+	roomWsUrl,
 } from '@epicenter/workspace';
+import type { AuthClient, Owner } from '@epicenter/auth';
 import { type } from 'arktype';
 
 const tabs = defineTable(type({ id: 'string', url: 'string', _v: '1' }));
 
-function openTabs() {
+function openTabs({
+	owner,
+	openWebSocket,
+	onReconnectSignal,
+}: {
+	owner: Owner;
+	openWebSocket: AuthClient['openWebSocket'];
+	onReconnectSignal: AuthClient['onStateChange'];
+}) {
 	const ydoc = new Y.Doc({ guid: 'epicenter.tabs' });
 	const tables = attachTables(ydoc, { tabs });
 	const idb = attachIndexedDb(ydoc);
 	attachBroadcastChannel(ydoc);
-	const sync = attachSync(ydoc, {
-		url: (docId) => toWsUrl(`https://sync.epicenter.so/rooms/${docId}`),
+	const installationId = createInstallationId({ storage: localStorage });
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl({
+			baseURL: 'https://api.epicenter.so',
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		waitFor: idb.whenLoaded,
+		openWebSocket,
+		onReconnectSignal,
+		actions: {},
 	});
 
 	return {
@@ -807,8 +899,7 @@ function openTabs() {
 		ydoc,
 		tables,
 		idb,
-		sync,
-		whenReady: idb.whenLoaded,
+		collaboration,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
@@ -816,20 +907,20 @@ function openTabs() {
 void openTabs;
 ```
 
-Ordering is just lexical: `sync` reads `idb.whenLoaded` as `waitFor` because `idb` is defined first. No builder chain, no priority flag.
+Ordering is just lexical: `collaboration` reads `idb.whenLoaded` as `waitFor` because `idb` is defined first. No builder chain, no priority flag.
 
 ### Markdown materializer
 
-The markdown materializer is exported from `@epicenter/workspace/document/materializer/markdown`. Compose it inside your builder alongside the other attachments — it needs `tables` and `ydoc`, both of which are already in lexical scope.
+The markdown materializer is exported from `@epicenter/workspace/document/materializer/markdown`. Compose it inside your builder alongside the other attachments: it needs `tables` and `ydoc`, both of which are already in lexical scope.
 
 ```typescript
 import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
-	attachSqlite,
 	attachTables,
 	defineTable,
 } from '@epicenter/workspace';
+import { attachYjsLog } from '@epicenter/workspace/node';
 import {
 	attachMarkdownMaterializer,
 	slugFilename,
@@ -842,21 +933,19 @@ const notes = defineTable(
 function openNotes() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.notes' });
 	const tables = attachTables(ydoc, { notes });
-	const sqlite = attachSqlite(ydoc, {
+	const yjsLog = attachYjsLog(ydoc, {
 		filePath: '/tmp/epicenter/notes-workspace.db',
 	});
-	const markdown = attachMarkdownMaterializer(
-		{ ydoc, tables },
-		{ dir: '/tmp/epicenter/markdown' },
-	).table('notes', { filename: slugFilename('title') });
+	const markdown = attachMarkdownMaterializer(ydoc, {
+		dir: '/tmp/epicenter/markdown',
+	}).table(tables.notes, { filename: slugFilename('title') });
 
 	return {
 		get id() { return ydoc.guid; },
 		ydoc,
 		tables,
-		sqlite,
+		yjsLog,
 		markdown,
-		whenReady: sqlite.whenLoaded,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
@@ -872,7 +961,6 @@ The SQLite materializer is exported from `@epicenter/workspace/document/material
 import { Database } from 'bun:sqlite';
 import * as Y from 'yjs';
 import {
-	attachSqlite,
 	attachTables,
 	defineTable,
 } from '@epicenter/workspace';
@@ -892,31 +980,29 @@ const posts = defineTable(
 function openBlog() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.blog' });
 	const tables = attachTables(ydoc, { posts });
-	const sqlite = attachSqlite(ydoc, { filePath: '/tmp/epicenter/blog.db' });
-	const mirror = attachSqliteMaterializer(
-		{ ydoc, tables },
-		{ db: new Database('/tmp/epicenter/blog.db') },
-	).table('posts', { fts: ['title', 'body'] });
+	const db = new Database('/tmp/epicenter/blog.db');
+	ydoc.once('destroy', () => db.close());
+	const mirror = attachSqliteMaterializer(ydoc, { db }).table(tables.posts, {
+		fts: ['title', 'body'],
+	});
 
 	return {
 		get id() { return ydoc.guid; },
 		ydoc,
 		tables,
-		sqlite,
 		mirror,
-		whenReady: sqlite.whenLoaded,
 		[Symbol.dispose]() { ydoc.destroy(); },
 	};
 }
 
-// After whenReady:
+// After mirror.whenFlushed:
 // blog.mirror.search('posts', 'hello');
 // blog.mirror.count('posts');
 // blog.mirror.rebuild('posts');
 void openBlog;
 ```
 
-The `MirrorDatabase` interface is structurally compatible with `bun:sqlite`'s `Database` and `better-sqlite3`'s `Database` — no wrapper needed. Pass your driver directly.
+The `MirrorDatabase` interface is structurally compatible with `bun:sqlite`'s `Database` and `better-sqlite3`'s `Database`: no wrapper needed. Pass your driver directly.
 
 ## Workspace Dependencies
 
@@ -930,9 +1016,7 @@ import { defineMutation } from '@epicenter/workspace';
 
 declare const authWorkspace: {
 	actions: {
-		users: {
-			getById: (input: { id: string }) => { id: string; name: string } | null;
-		};
+		users_get_by_id: (input: { id: string }) => { id: string; name: string } | null;
 	};
 };
 
@@ -958,7 +1042,7 @@ const createPost = defineMutation({
 		authorId: Type.String(),
 	}),
 	handler: ({ id, title, authorId }) => {
-		const author = authWorkspace.actions.users.getById({ id: authorId });
+		const author = authWorkspace.actions.users_get_by_id({ id: authorId });
 		if (!author) return null;
 
 		blogWorkspace.tables.posts.set({
@@ -986,7 +1070,7 @@ They have four important properties:
 1. They are callable functions.
 2. They carry metadata (`type`, `title`, `description`, `input`).
 3. They close over `tables`, `kv`, and friends by normal JavaScript closure.
-4. They are exposed on the bundle returned from your builder (typically as `actions: { ... }`).
+4. They are exposed on the bundle returned from your builder (typically as `actions: defineActions({ ... })`, a flat registry keyed by snake_case ASCII strings).
 
 ### Query actions
 
@@ -998,6 +1082,7 @@ import Type from 'typebox';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	defineActions,
 	defineQuery,
 	defineTable,
 } from '@epicenter/workspace';
@@ -1015,22 +1100,19 @@ function openPosts() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.actions.queries' });
 	const tables = attachTables(ydoc, { posts });
 
-	const actions = {
-		posts: {
-			list: defineQuery({
-				title: 'List Posts',
-				description: 'List all posts.',
-				handler: () => tables.posts.getAllValid(),
-			}),
-
-			getById: defineQuery({
-				title: 'Get Post',
-				description: 'Get one post by ID.',
-				input: Type.Object({ id: Type.String() }),
-				handler: ({ id }) => tables.posts.get(id),
-			}),
-		},
-	};
+	const actions = defineActions({
+		posts_list: defineQuery({
+			title: 'List Posts',
+			description: 'List all posts.',
+			handler: () => tables.posts.getAllValid(),
+		}),
+		posts_get_by_id: defineQuery({
+			title: 'Get Post',
+			description: 'Get one post by ID.',
+			input: Type.Object({ id: Type.String() }),
+			handler: ({ id }) => tables.posts.get(id),
+		}),
+	});
 
 	return {
 		get id() { return ydoc.guid; },
@@ -1042,7 +1124,7 @@ function openPosts() {
 }
 
 const workspace = openPosts();
-const actionType = workspace.actions.posts.list.type;
+const actionType = workspace.actions.posts_list.type;
 void actionType;
 ```
 
@@ -1056,6 +1138,7 @@ import Type from 'typebox';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	defineActions,
 	defineMutation,
 	defineTable,
 	generateId,
@@ -1074,27 +1157,24 @@ function openPosts() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.actions.mutations' });
 	const tables = attachTables(ydoc, { posts });
 
-	const actions = {
-		posts: {
-			create: defineMutation({
-				title: 'Create Post',
-				description: 'Create a new post row.',
-				input: Type.Object({ title: Type.String() }),
-				handler: ({ title }) => {
-					const id = generateId();
-					tables.posts.set({ id, title, published: false, _v: 1 });
-					return { id };
-				},
-			}),
-
-			publish: defineMutation({
-				title: 'Publish Post',
-				description: 'Mark a post as published.',
-				input: Type.Object({ id: Type.String() }),
-				handler: ({ id }) => tables.posts.update(id, { published: true }),
-			}),
-		},
-	};
+	const actions = defineActions({
+		posts_create: defineMutation({
+			title: 'Create Post',
+			description: 'Create a new post row.',
+			input: Type.Object({ title: Type.String() }),
+			handler: ({ title }) => {
+				const id = generateId();
+				tables.posts.set({ id, title, published: false, _v: 1 });
+				return { id };
+			},
+		}),
+		posts_publish: defineMutation({
+			title: 'Publish Post',
+			description: 'Mark a post as published.',
+			input: Type.Object({ id: Type.String() }),
+			handler: ({ id }) => tables.posts.update(id, { published: true }),
+		}),
+	});
 
 	return {
 		get id() { return ydoc.guid; },
@@ -1146,10 +1226,10 @@ void clearCache;
 
 Every action exposes:
 
-- `action.type` — `'query'` or `'mutation'`
-- `action.title` — optional UI-facing label
-- `action.description` — optional adapter-facing description
-- `action.input` — optional TypeBox schema
+- `action.type`: `'query'` or `'mutation'`
+- `action.title`: optional UI-facing label
+- `action.description`: optional adapter-facing description
+- `action.input`: optional TypeBox schema
 
 And the action itself is callable. There is no separate `.handler` property on the returned object.
 
@@ -1158,53 +1238,51 @@ And the action itself is callable. There is no separate `.handler` property on t
 ```typescript
 import Type from 'typebox';
 import {
+	defineActions,
 	defineMutation,
 	defineQuery,
 	isAction,
-	isMutation,
-	isQuery,
-	iterateActions,
-	type Actions,
 } from '@epicenter/workspace';
 
-const actions = {
-	posts: {
-		list: defineQuery({ handler: () => [] as string[] }),
-		create: defineMutation({
-			input: Type.Object({ title: Type.String() }),
-			handler: ({ title }) => ({ title }),
-		}),
-	},
-} satisfies Actions;
+const actions = defineActions({
+	posts_list: defineQuery({ handler: () => [] as string[] }),
+	posts_create: defineMutation({
+		input: Type.Object({ title: Type.String() }),
+		handler: ({ title }) => ({ title }),
+	}),
+});
 
-for (const [action, path] of iterateActions(actions)) {
+for (const [key, action] of Object.entries(actions)) {
 	if (isAction(action)) {
-		console.log(path.join('.'), action.type);
+		console.log(key, action.type);
 	}
 }
 
-const listAction = actions.posts.list;
-if (isQuery(listAction)) {
+const listAction = actions.posts_list;
+if (listAction.type === 'query') {
 	console.log(listAction.type);
 }
 
-const createAction = actions.posts.create;
-if (isMutation(createAction)) {
+const createAction = actions.posts_create;
+if (createAction.type === 'mutation') {
 	console.log(createAction.type);
 }
 ```
 
 ## Package entry points
 
-All attachments, schema definitions, and `createDocumentFactory` live at the package root. The only subpath exports today are the materializers (which pull in heavier dependencies) and a few utility surfaces.
+All attachments, schema definitions, and the `createDisposableCache` primitive
+live at the package root. The only
+subpath exports today are the materializers (which pull in heavier dependencies)
+and a few utility surfaces.
 
 | Import path | What it exports | Public today |
 | --- | --- | --- |
-| `@epicenter/workspace` | `createDocumentFactory`, `defineTable`, `defineKv`, every `attach*` (tables, kv, indexeddb, sqlite, sync, broadcast-channel, awareness, encryption, rich-text, plain-text, timeline), action helpers, `onLocalUpdate`, `docGuid`, ids, dates, types | Yes |
+| `@epicenter/workspace` | `createDisposableCache`, `defineTable`, `defineKv`, browser-safe `attach*` (tables, kv, indexeddb, broadcast-channel, encryption, rich-text, plain-text, timeline), `openCollaboration`, `roomWsUrl`, action helpers, `onLocalUpdate`, `docGuid`, ids, dates, types | Yes |
+| `@epicenter/workspace/node` | Bun/Node `attach*` and `open*` (`attachYjsLog`, `attachYjsLogReader`, `openSqliteReader`, `openWriterSqlite`), daemon helpers, workspace paths | Yes |
 | `@epicenter/workspace/document/materializer/markdown` | `attachMarkdownMaterializer`, serializers | Yes |
 | `@epicenter/workspace/document/materializer/sqlite` | `attachSqliteMaterializer`, `generateDdl`, types | Yes |
 | `@epicenter/workspace/ai` | `actionsToAiTools` (TanStack AI bindings) | Yes |
-| `@epicenter/workspace/shared/crypto` | Lower-level crypto primitives for encryption attachments | Yes |
 
 ## Architecture & Lifecycle
 
@@ -1212,49 +1290,61 @@ All attachments, schema definitions, and `createDocumentFactory` live at the pac
 
 Two composition shapes, one builder contract.
 
-**Singleton** — one workspace per app, instantiated at module scope:
+**Singleton**: one workspace per app, instantiated at module scope:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │ function openApp() {                                      │
 │   const ydoc = new Y.Doc({ guid: 'epicenter.my-app' });  │
-│   const tables = attachTables(ydoc, { ... });            │
-│   const idb    = attachIndexedDb(ydoc);                   │
-│   const sync   = attachSync(ydoc, { waitFor: ... });     │
-│   return { ydoc, tables, idb, sync,                       │
-│            whenReady: idb.whenLoaded,                     │
+│   const tables        = attachTables(ydoc, { ... });     │
+│   const idb           = attachIndexedDb(ydoc);            │
+│   const collaboration = openCollaboration(ydoc, {         │
+│     waitFor: idb.whenLoaded, openWebSocket, onReconnectSignal, │
+│     actions: { ... },                                     │
+│   });                                                     │
+│   return { ydoc, tables, idb, collaboration,              │
 │            [Symbol.dispose]() { ydoc.destroy(); } };     │
 │ }                                                         │
 │ export const workspace = openApp();                       │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Factory** — many workspaces, refcounted by id:
+**Browser document cache**: many child documents, keyed by id:
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ export const fileContentDocs = createDocumentFactory(    │
-│   (fileId: string) => {                                  │
-│     const ydoc = new Y.Doc({ guid: docGuid({ ... }) });  │
-│     const content = attachPlainText(ydoc, 'content');    │
-│     const idb     = attachIndexedDb(ydoc);               │
-│     return { ydoc, content, idb,                          │
-│              whenReady: idb.whenLoaded,                   │
-│              [Symbol.dispose]() { ydoc.destroy(); } };   │
-│   },                                                      │
-│   { gcTime: 30_000 },                                    │
-│ );                                                        │
-│                                                           │
-│ using handle = fileContentDocs.open('file-1'); // refs++ │
-│ await handle.whenReady;                                   │
-└──────────────────────────────────────────────────────────┘
+```typescript
+export const fileContentDocs = createDisposableCache((fileId: string) => {
+	const ydoc = new Y.Doc({ guid: fileContentDocGuid(fileId) });
+	const content = attachPlainText(ydoc, 'content');
+	const idb = attachIndexedDb(ydoc);
+	return {
+		ydoc,
+		content,
+		idb,
+		[Symbol.dispose]() {
+			ydoc.destroy();
+		},
+	};
+});
+
+export async function clearFileContentLocalData() {
+	await Promise.all(
+		workspace.tables.files.getAllValid().map((file) =>
+			clearDocument(fileContentDocGuid(file.id)),
+		),
+	);
+}
+
+using handle = fileContentDocs.open('file-1');
+await handle.idb.whenLoaded;
 ```
 
-The builder shape is identical. The factory adds: `.open(id)` returns a refcounted handle, `handle.dispose()` decrements, refcount→0 arms `gcTime`, and `factory.close(id)` / `factory.closeAll()` force teardown.
+The cache builder names how to build one live child document. The app-local
+cleanup helper names how to clear local browser storage without constructing
+child documents.
 
 ### `batch(fn)`
 
-A `batch(fn)` helper groups mutations into a single Yjs transaction. The framework doesn't inject it — include it in your bundle (`batch: (fn) => ydoc.transact(fn)`), which is what every app in this repo does.
+A `batch(fn)` helper groups mutations into a single Yjs transaction. The framework doesn't inject it: include it in your bundle (`batch: (fn) => ydoc.transact(fn)`), which is what every app in this repo does.
 
 ```typescript
 workspace.batch(() => {
@@ -1265,33 +1355,33 @@ workspace.batch(() => {
 
 Yjs transactions do not roll back on throw. They batch notifications; they are not SQL transactions.
 
-### `whenReady`, `clearLocal`, and teardown
+### Readiness, `clearLocal`, and teardown
 
 | API | What it means |
 | --- | --- |
-| `bundle.whenReady` / `handle.whenReady` | Builder convention — typically `idb.whenLoaded` (or `Promise.all([...])`) |
+| `bundle.idb.whenLoaded` (or `bundle.sqlite.whenLoaded`) | Direct subsystem readiness; the default form |
+| `bundle.whenReady` | Optional aggregate: only when the bundle composes 2+ subsystem signals into `Promise.all([...])` |
 | `bundle.idb.clearLocal()` (or `bundle.sqlite.clearLocal()`) | Wipes persisted local state for that attachment |
-| `bundle[Symbol.dispose]()` | Singleton teardown — your builder calls `ydoc.destroy()` |
-| `handle.dispose()` / `handle[Symbol.dispose]()` | Factory: decrements refcount; last dispose arms `gcTime` |
-| `factory.close(id)` | Force-closes the bundle **now**, even if handles are outstanding |
-| `factory.closeAll()` | Force-closes every open document in this factory |
+| `bundle[Symbol.dispose]()` | Singleton teardown: your builder calls `ydoc.destroy()` |
+| `handle[Symbol.dispose]()` | Cache handle: decrements refcount; last dispose arms `gcTime` |
+| `cache[Symbol.dispose]()` | Flushes every cached entry immediately |
 
-`dispose()` preserves data — it releases the handle. To wipe persisted local state, call `clearLocal()` on the persistence attachment (`bundle.idb` or `bundle.sqlite`) directly.
+Disposal preserves data: it releases the handle. To wipe persisted local state, call `clearLocal()` on the persistence attachment (`bundle.idb` or `bundle.sqlite`) directly.
 
-### Cleanup lifecycle (factory)
+### Cleanup lifecycle (cache)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ handle.dispose() called (or `using` block exits)           │
+│ handle[Symbol.dispose]() called (or `using` block exits)   │
 │    refcount--                                              │
 └─────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ refcount === 0 → arm gcTime timer                          │
+│ refcount === 0: arm gcTime timer                           │
 │    • fresh open() during grace window cancels teardown     │
 │    • gcTime: 0 tears down immediately                      │
-│    • gcTime: Infinity (default) never auto-evicts          │
+│    • gcTime: Infinity never auto-evicts                    │
 └─────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -1299,15 +1389,15 @@ Yjs transactions do not roll back on throw. They batch notifications; they are n
 │ bundle[Symbol.dispose]() fires                             │
 │    • your builder's teardown (ydoc.destroy())              │
 │    • ydoc.destroy() cascades to every attachment via       │
-│      ydoc.on('destroy') — providers close, observers       │
+│      ydoc.on('destroy'): providers close, observers       │
 │      stop, sockets shut down                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`factory.close(id)` / `factory.closeAll()` are synchronous and do **not** wait for async attachment cleanup (IDB `db.close()`, WebSocket onclose) to settle. If a caller needs a real teardown barrier (close-then-reopen in tests, process exit), await a specific attachment-level field:
+`cache[Symbol.dispose]()` is synchronous and does **not** wait for async attachment cleanup (IDB `db.close()`, WebSocket onclose) to settle. If a caller needs a real teardown barrier (close-then-reopen in tests, process exit), await a specific attachment-level field:
 
 ```ts
-factory.close('abc');
+cache[Symbol.dispose]();
 await handle.idb.whenDisposed;
 ```
 
@@ -1317,10 +1407,12 @@ await handle.idb.whenDisposed;
 
 What the package does give you is the raw material a server adapter needs:
 
-- `bundle.actions` (whatever your builder returned)
-- `iterateActions(...)`
+- `bundle.collaboration.actions` (the typed `ActionRegistry` from `openCollaboration`)
+- `defineActions(actions)` to author a flat snake_case registry
+- `toActionMeta(action)` to project an action to its wire-safe metadata
+- iterate with `Object.entries(actions)`
 - action metadata (`type`, `title`, `input`, `description`)
-- direct access to `bundle.tables`, `bundle.kv`, `bundle.awareness`, and per-row content factories
+- direct access to `bundle.tables`, `bundle.kv`, `bundle.collaboration.devices`, `bundle.collaboration.dispatch`, and per-row content factories
 
 If you want HTTP, CLI, or MCP on top, build or import an adapter around those primitives.
 
@@ -1339,43 +1431,51 @@ import { defineKv, defineTable } from '@epicenter/workspace';
 ### Document creation
 
 ```typescript
-import { createDocumentFactory } from '@epicenter/workspace';
+import { createDisposableCache } from '@epicenter/workspace';
 ```
 
-`createDocumentFactory(build, { gcTime? })` returns a refcounted factory. `.open(id)` mints a live handle that prototype-chains to the bundle your builder returned — so `ydoc`, `tables`, `kv`, `awareness`, `sync`, `actions`, `batch`, etc. are all things you explicitly put in the bundle.
+`createDisposableCache(build, { gcTime? })` returns a refcounted id cache.
+`.open(id)` mints a live handle by shallow-spreading the bundle your builder
+returned, so `ydoc`, `content`, `idb`, and any composed `whenReady` are all
+things you explicitly put in the bundle.
 
-For singleton apps, skip the factory entirely and call your builder function once at module scope.
+For singleton apps, call your builder function once at module scope. For Node
+one-shot operations, call the child builder directly inside `using`. Use the
+cache when browser components, daemons, or materializers have a real
+same-process reuse invariant.
 
 ### Typical bundle properties
 
-Everything below is a *convention* — the builder is free to expose more or less. Most epicenter apps return at least:
+Everything below is a *convention*: the builder is free to expose more or less. Most epicenter apps return at least:
 
 - `id` (as `get id() { return ydoc.guid; }`)
 - `ydoc`
 - `tables`
 - `kv`
-- `awareness`
 - `idb` (or `sqlite`)
-- `sync`
+- `collaboration` (from `openCollaboration`)
 - `encryption` (when encrypted)
 - `actions`
 - `batch(fn)`
-- `whenReady`
+- `whenReady` (only when composed from 2+ subsystem signals; otherwise consumers await `idb.whenLoaded` directly)
 - `[Symbol.dispose]()`
 
 ### Document content attachments
 
-Per-row content is just another `attach*` call inside a `createDocumentFactory` builder. Pick the attachment that matches the content shape:
+Per-row content is just another `attach*` call inside a child document builder.
+Pick the attachment that matches the content shape:
 
-- `attachPlainText(ydoc, name)` — binds a `Y.Text`. Editor gets `bundle.content` as `Y.Text`.
-- `attachRichText(ydoc, name)` — binds a `Y.XmlFragment` for prosemirror / tiptap / yrs-xml editors.
-- `attachTimeline(ydoc)` — a polymorphic timeline that can project as text, rich text, or a sheet. Exposes `read() / write(text) / appendText(text) / asText() / asRichText() / asSheet() / currentType / observe(...) / restoreFromSnapshot(binary)`.
+- `attachPlainText(ydoc, name)`: binds a `Y.Text`. Editor gets `bundle.content` as `Y.Text`.
+- `attachRichText(ydoc, name)`: binds a `Y.XmlFragment` for prosemirror / tiptap / yrs-xml editors.
+- `attachTimeline(ydoc)`: a polymorphic timeline that can project as text, rich text, or a sheet. Exposes `read() / write(text) / appendText(text) / asText() / asRichText() / asSheet() / currentType / observe(...) / restoreFromSnapshot(binary)`.
 
-The factory caches these by `rowId`, so multiple consumers share one Y.Doc. Use `factory.open(id) / .close(id) / .closeAll()` to manage lifecycle.
+The browser document cache stores these by `rowId`, so multiple browser
+consumers share one Y.Doc. Use `cache.open(id)` and `handle[Symbol.dispose]()`
+to manage lifecycle.
 
 ### Local-update filter
 
-`onLocalUpdate(ydoc, fn)` registers an `afterTransaction` listener filtered on Yjs's `transaction.local` invariant — `true` for direct mutations, `false` for updates applied via `Y.applyUpdate` (sync transports, IndexedDB replay, broadcast channel). Empty transactions are skipped. Use this to bump a parent row's `updatedAt` when its content doc is edited locally:
+`onLocalUpdate(ydoc, fn)` registers an `afterTransaction` listener filtered on Yjs's `transaction.local` invariant: `true` for direct mutations, `false` for updates applied via `Y.applyUpdate` (sync transports, IndexedDB replay, broadcast channel). Empty transactions are skipped. Use this to bump a parent row's `updatedAt` when its content doc is edited locally:
 
 ```typescript
 onLocalUpdate(ydoc, () => {
@@ -1387,16 +1487,13 @@ onLocalUpdate(ydoc, () => {
 
 ```typescript
 import {
+	defineActions,
 	defineMutation,
 	defineQuery,
 	isAction,
-	isMutation,
-	isQuery,
-	iterateActions,
+	toActionMeta,
 	type Action,
-	type Actions,
-	type Mutation,
-	type Query,
+	type ActionRegistry,
 } from '@epicenter/workspace';
 ```
 
@@ -1449,40 +1546,39 @@ Public KV methods:
 - `observe(key, callback)`
 - `observeAll(callback)`
 
-### Awareness
+### Presence and dispatch
 
 ```typescript
 import {
-	type Awareness,
-	type AwarenessDefinitions,
-	type AwarenessState,
-	type InferAwarenessValue,
+	type Collaboration,
+	DispatchError,
+	type DispatchRequest,
+	type LiveDevice,
+	type TypedDispatch,
+	typedDispatch,
 } from '@epicenter/workspace';
 ```
 
-Public awareness methods:
+`openCollaboration` returns a `Collaboration`. Online devices (relay-owned presence, with each device's `installationId`, `connectedAt`, and published `actions` manifest):
 
-- `setLocal(state)`
-- `setLocalField(key, value)`
-- `getLocal()`
-- `getLocalField(key)`
-- `getAll()`
-- `peers()`
-- `observe(callback)`
-- `raw`
+- `collaboration.devices.list()`: `LiveDevice[]`, the local install excluded
+- `collaboration.devices.subscribe(fn)`: returns an unsubscribe function
+
+Cross-device calls:
+
+- `collaboration.dispatch(req)`: `Promise<Result<unknown, DispatchError>>`
+- `typedDispatch<TActions>(collaboration.dispatch)`: typed overlay for a known target registry
 
 ### Introspection
 
 ```typescript
 import {
-	iterateActions,
 	isAction,
-	isMutation,
-	isQuery,
+	toActionMeta,
 } from '@epicenter/workspace';
 ```
 
-`iterateActions(actions)` flattens a nested action tree into `[action, path]` pairs. Combined with each action's `type`, `title`, `description`, and `input` schema, that's enough to build HTTP, CLI, or MCP adapters without coupling the core package to a transport.
+`Object.entries(actions)` lets you iterate the flat registry. Combined with each action's `type`, `title`, `description`, and `input` schema, that is enough to build HTTP, CLI, or MCP adapters without coupling the core package to a transport. `toActionMeta(action)` projects a single action to its wire-safe metadata if you need to ship it across a transport.
 
 ### IDs and dates
 
@@ -1515,9 +1611,10 @@ These matter when you are writing low-level tooling against raw Yjs structures.
 The core package does not export an MCP server. What it does export is the metadata you need to build one:
 
 - actions with `type`, `title`, `description`, and `input`
-- `iterateActions(...)` to flatten a nested action tree
-- `isAction` / `isQuery` / `isMutation` type guards
-- `@epicenter/workspace/ai` — `actionsToAiTools(...)` for TanStack AI tool bindings
+- `Object.entries(actions)` to iterate the flat registry
+- `isAction` type guard; narrow on `action.type === 'query' | 'mutation'` for the variant
+- `toActionMeta(action)` to project an action to its wire-safe shape
+- `@epicenter/workspace/ai`: `actionsToAiTools(...)` for TanStack AI tool bindings
 
 That is enough to build adapters that expose workspace actions over HTTP, CLI, or MCP without coupling the core package to one transport.
 
@@ -1526,32 +1623,28 @@ That is enough to build adapters that expose workspace actions over HTTP, CLI, o
 ```typescript
 import Type from 'typebox';
 import {
+	defineActions,
 	defineMutation,
 	defineQuery,
-	iterateActions,
-	type Actions,
 } from '@epicenter/workspace';
 
-const actions: Actions = {
-	posts: {
-		list: defineQuery({
-			title: 'List Posts',
-			description: 'List all posts.',
-			handler: () => [] as Array<{ id: string; title: string }>,
-		}),
+const actions = defineActions({
+	posts_list: defineQuery({
+		title: 'List Posts',
+		description: 'List all posts.',
+		handler: () => [] as Array<{ id: string; title: string }>,
+	}),
+	posts_create: defineMutation({
+		title: 'Create Post',
+		description: 'Create a post.',
+		input: Type.Object({ title: Type.String() }),
+		handler: ({ title }) => ({ id: title.toLowerCase() }),
+	}),
+});
 
-		create: defineMutation({
-			title: 'Create Post',
-			description: 'Create a post.',
-			input: Type.Object({ title: Type.String() }),
-			handler: ({ title }) => ({ id: title.toLowerCase() }),
-		}),
-	},
-};
-
-for (const [action, path] of iterateActions(actions)) {
+for (const [key, action] of Object.entries(actions)) {
 	console.log({
-		name: path.join('.'),
+		name: key,
 		type: action.type,
 		title: action.title,
 		description: action.description,
@@ -1588,7 +1681,7 @@ bun test packages/workspace
 
 ## Related Packages
 
-If your app's data model is inherently files and folders — a code editor, a note vault with nested directories, anything where users expect `mkdir` and path resolution — [`@epicenter/filesystem`](../filesystem) builds that abstraction on top of this package. It imports `defineTable` to create a `filesTable`, wraps workspace tables and documents into POSIX-style operations (`writeFile`, `mv`, `rm`, `stat`), and plugs into the same extension system.
+If your app's data model is inherently files and folders: a code editor, a note vault with nested directories, anything where users expect `mkdir` and path resolution: [`@epicenter/filesystem`](../filesystem) builds that abstraction on top of this package. It imports `defineTable` to create a `filesTable`, wraps workspace tables and documents into POSIX-style operations (`writeFile`, `mv`, `rm`, `stat`), and plugs into the same extension system.
 
 Most apps won't need it. If you know the shape of every record upfront, workspace tables are the right default. See [Your Data Is Probably a Table, Not a File](../../docs/articles/your-data-is-probably-a-table-not-a-file.md) for the full decision matrix.
 

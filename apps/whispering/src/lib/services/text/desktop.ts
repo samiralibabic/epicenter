@@ -4,7 +4,7 @@ import { tryAsync } from 'wellcrafted/result';
 import type { TextService } from './types';
 import { TextError } from './types';
 
-export function createTextServiceDesktop(): TextService {
+export function createTextServiceDesktop() {
 	return {
 		readFromClipboard: () =>
 			tryAsync({
@@ -32,5 +32,5 @@ export function createTextServiceDesktop(): TextService {
 				try: () => invoke<void>('simulate_enter_keystroke'),
 				catch: (error) => TextError.SimulateKeystroke({ cause: error }),
 			}),
-	};
+	} satisfies TextService;
 }

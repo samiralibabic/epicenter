@@ -44,7 +44,7 @@ This creates problems:
 
 ```
 packages/workspace/src/extensions/sync/
-  websocket.ts              ← public: createSyncExtension(), toWsUrl(), types
+  websocket.ts              ← public: createSyncExtension(), websocketUrl(), types
   websocket-transport.ts    ← internal: createTransport() — supervisor, backoff, liveness
   broadcast-channel.ts      ← unchanged
 ```
@@ -180,7 +180,7 @@ export function createSyncExtension(config: SyncExtensionConfig) {
 ```
 BEFORE                                              AFTER
 ─────                                               ─────
-import { createSyncExtension, toWsUrl }             import { createSyncExtension, toWsUrl }
+import { createSyncExtension, websocketUrl }             import { createSyncExtension, websocketUrl }
   from '@epicenter/workspace/extensions/             from '@epicenter/workspace/extensions/
          sync/websocket';                                     sync/websocket';
                                                     (identical — no change)

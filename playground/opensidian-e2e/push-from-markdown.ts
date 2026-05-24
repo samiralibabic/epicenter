@@ -9,19 +9,19 @@
 
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { FileContentDocs, FileRow } from '@epicenter/filesystem';
+import type { FileRow } from '@epicenter/filesystem';
 import {
 	convertWikilinksToEpicenterLinks,
 	makeEpicenterLink,
-} from '@epicenter/workspace';
-import { parseMarkdownFile } from '@epicenter/workspace/document/materializer/markdown';
-import type { opensidian } from './epicenter.config';
+} from '@epicenter/workspace/links';
+import { parseMarkdownFile } from '@epicenter/workspace/markdown';
+import type { OpensidianPlaygroundRuntime } from './workspaces/opensidian/daemon';
 
 const MARKDOWN_DIR = join(import.meta.dir, 'data');
 
 export async function pushFromMarkdown(ctx: {
-	tables: (typeof opensidian)['tables'];
-	contentDocs: FileContentDocs;
+	tables: OpensidianPlaygroundRuntime['tables'];
+	writeContent(fileId: FileRow['id'], text: string): Promise<void>;
 	filesDir?: string;
 }): Promise<{ imported: number; skipped: number; errors: string[] }> {
 	const dir = ctx.filesDir ?? join(MARKDOWN_DIR, 'files');
@@ -87,11 +87,7 @@ export async function pushFromMarkdown(ctx: {
 						? makeEpicenterLink('opensidian', 'files', match.id)
 						: null;
 				});
-				await using handle = ctx.contentDocs.open(
-					frontmatter.id as FileRow['id'],
-				);
-				await handle.whenReady;
-				handle.content.write(resolvedBody);
+				await ctx.writeContent(frontmatter.id as FileRow['id'], resolvedBody);
 			} catch (error) {
 				errors.push(`Failed to write content for ${frontmatter.id}: ${error}`);
 			}

@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics.
+description: 'Visual design direction for new or redesigned frontend surfaces: layout, typography, color, motion, and anti-generic aesthetics. Use when designing pages, dashboards, posters, marketing surfaces, or exploratory UI variations.'
 metadata:
   author: epicenter
   version: '1.0'

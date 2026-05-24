@@ -3,7 +3,7 @@
 -->
 
 <script lang="ts">
-	import { cn } from '#/utils.js';
+	import { cn } from '../utils.js';
 	import LoadingDots from './loading-dots.svelte';
 	import type { ChatBubbleMessageProps } from './types';
 

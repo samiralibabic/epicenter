@@ -25,6 +25,10 @@ function createTransformationRuns() {
 	const map = fromTable(whispering.tables.transformationRuns);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/** All transformation runs as a reactive SvelteMap. */
 		get all() {
 			return map;
@@ -95,3 +99,7 @@ function createTransformationRuns() {
 }
 
 export const transformationRuns = createTransformationRuns();
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => transformationRuns[Symbol.dispose]());
+}

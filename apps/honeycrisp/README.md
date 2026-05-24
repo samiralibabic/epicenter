@@ -95,11 +95,7 @@ cd apps/honeycrisp
 bun dev
 ```
 
-By default this runs against a local dev server on port 5175. To run against the production sync server:
-
-```bash
-bun run dev:remote
-```
+This starts the app dev server on port 5175. Auth and sync expect the local API on `localhost:8787`; start it from the repo root with `bun run dev:api`.
 
 ---
 

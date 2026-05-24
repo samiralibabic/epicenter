@@ -6,7 +6,7 @@
  * invalid or missing values return the default value from the KV definition.
  *
  * For encrypted storage, call `encryption.attachKv` on the coordinator
- * returned by `attachEncryption(ydoc)`.
+ * returned by `attachEncryption(ydoc, { keyring })`.
  */
 
 import type { StandardSchemaV1 } from '@standard-schema/spec';
@@ -57,37 +57,9 @@ export type KvDefinitions = Record<
 /**
  * Dictionary-style typed handle over a KV store.
  */
-export type Kv<TKvDefinitions extends KvDefinitions> = {
-	get<K extends keyof TKvDefinitions & string>(
-		key: K,
-	): InferKvValue<TKvDefinitions[K]>;
-
-	set<K extends keyof TKvDefinitions & string>(
-		key: K,
-		value: InferKvValue<TKvDefinitions[K]>,
-	): void;
-
-	delete<K extends keyof TKvDefinitions & string>(key: K): void;
-
-	observe<K extends keyof TKvDefinitions & string>(
-		key: K,
-		callback: (
-			change: KvChange<InferKvValue<TKvDefinitions[K]>>,
-			origin?: unknown,
-		) => void,
-	): () => void;
-
-	observeAll(
-		callback: (
-			changes: Map<keyof TKvDefinitions & string, KvChange<unknown>>,
-			origin?: unknown,
-		) => void,
-	): () => void;
-
-	getAll(): {
-		[K in keyof TKvDefinitions & string]: InferKvValue<TKvDefinitions[K]>;
-	};
-};
+export type Kv<TKvDefinitions extends KvDefinitions> = ReturnType<
+	typeof createKv<TKvDefinitions>
+>;
 
 /**
  * Bind a record of KV definitions to a Y.Doc and return a typed Kv.
@@ -101,7 +73,7 @@ export function attachKv<TKvDefinitions extends KvDefinitions>(
 ): Kv<TKvDefinitions> {
 	const yarray = ydoc.getArray<YKeyValueLwwEntry<unknown>>(KV_KEY);
 	const ykv = new YKeyValueLww<unknown>(yarray);
-	ydoc.on('destroy', () => ykv.dispose());
+	ydoc.once('destroy', () => ykv[Symbol.dispose]());
 	return createKv(ykv, definitions);
 }
 
@@ -113,9 +85,11 @@ export function attachKv<TKvDefinitions extends KvDefinitions>(
 export function createKv<TKvDefinitions extends KvDefinitions>(
 	ykv: ObservableKvStore<unknown>,
 	definitions: TKvDefinitions,
-): Kv<TKvDefinitions> {
+) {
 	return {
-		get(key) {
+		get<K extends keyof TKvDefinitions & string>(
+			key: K,
+		): InferKvValue<TKvDefinitions[K]> {
 			const definition = definitions[key]!;
 			const raw = ykv.get(key);
 			if (raw === undefined) return definition.defaultValue;
@@ -128,15 +102,24 @@ export function createKv<TKvDefinitions extends KvDefinitions>(
 			return result.value;
 		},
 
-		set(key, value) {
+		set<K extends keyof TKvDefinitions & string>(
+			key: K,
+			value: InferKvValue<TKvDefinitions[K]>,
+		): void {
 			ykv.set(key, value);
 		},
 
-		delete(key) {
+		delete<K extends keyof TKvDefinitions & string>(key: K): void {
 			ykv.delete(key);
 		},
 
-		observe(key, callback) {
+		observe<K extends keyof TKvDefinitions & string>(
+			key: K,
+			callback: (
+				change: KvChange<InferKvValue<TKvDefinitions[K]>>,
+				origin?: unknown,
+			) => void,
+		): () => void {
 			const definition = definitions[key]!;
 
 			const handler = (
@@ -177,10 +160,10 @@ export function createKv<TKvDefinitions extends KvDefinitions>(
 
 		observeAll(
 			callback: (
-				changes: Map<string, KvChange<unknown>>,
-				origin: unknown,
+				changes: Map<keyof TKvDefinitions & string, KvChange<unknown>>,
+				origin?: unknown,
 			) => void,
-		) {
+		): () => void {
 			const handler = (
 				changes: Map<string, KvStoreChange<unknown>>,
 				origin: unknown,
@@ -203,18 +186,27 @@ export function createKv<TKvDefinitions extends KvDefinitions>(
 						}
 					}
 				}
-				if (parsed.size > 0) callback(parsed, origin);
+				if (parsed.size > 0)
+					callback(
+						parsed as Map<keyof TKvDefinitions & string, KvChange<unknown>>,
+						origin,
+					);
 			};
 			ykv.observe(handler);
 			return () => ykv.unobserve(handler);
 		},
 
-		getAll() {
-			const result: Record<string, unknown> = {};
+		getAll(): {
+			[K in keyof TKvDefinitions & string]: InferKvValue<TKvDefinitions[K]>;
+		} {
+			const result = {} as {
+				[K in keyof TKvDefinitions & string]: InferKvValue<TKvDefinitions[K]>;
+			};
 			for (const key of Object.keys(definitions)) {
-				result[key] = this.get(key);
+				const typedKey = key as keyof TKvDefinitions & string;
+				result[typedKey] = this.get(typedKey);
 			}
 			return result;
 		},
-	} as Kv<TKvDefinitions>;
+	};
 }

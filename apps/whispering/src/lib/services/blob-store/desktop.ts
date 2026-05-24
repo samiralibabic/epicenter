@@ -13,7 +13,7 @@ import { createBlobStoreWeb } from './web';
  *
  */
 
-export function createBlobStoreDesktop(): BlobStore {
+export function createBlobStoreDesktop() {
 	const fileSystemDb = createFileSystemBlobStore();
 	const indexedDb = createBlobStoreWeb();
 
@@ -70,8 +70,7 @@ export function createBlobStoreDesktop(): BlobStore {
 
 		ensurePlaybackUrl: async (key) => {
 			// DUAL READ: Check file system first, fallback to IndexedDB
-			const fsResult =
-				await fileSystemDb.ensurePlaybackUrl(key);
+			const fsResult = await fileSystemDb.ensurePlaybackUrl(key);
 
 			// If found in file system, return it
 			if (fsResult.data) {
@@ -117,5 +116,5 @@ export function createBlobStoreDesktop(): BlobStore {
 
 			return Ok(undefined);
 		},
-	};
+	} satisfies BlobStore;
 }

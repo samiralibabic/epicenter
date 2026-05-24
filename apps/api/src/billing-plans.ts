@@ -21,21 +21,6 @@ export const PLAN_IDS = {
 	maxAnnual: 'max_annual',
 } as const;
 
-/** Main plan IDs in display order (monthly). */
-export const MAIN_PLAN_IDS = [
-	PLAN_IDS.free,
-	PLAN_IDS.pro,
-	PLAN_IDS.ultra,
-	PLAN_IDS.max,
-] as const;
-
-/** Annual plan IDs in display order. */
-export const ANNUAL_PLAN_IDS = [
-	PLAN_IDS.proAnnual,
-	PLAN_IDS.ultraAnnual,
-	PLAN_IDS.maxAnnual,
-] as const;
-
 export const PLANS = {
 	[PLAN_IDS.free]: {
 		name: 'Free',

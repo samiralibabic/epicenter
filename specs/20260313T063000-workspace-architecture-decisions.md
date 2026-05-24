@@ -4,6 +4,8 @@
 **Status**: Draft — amended 2026-03-13 (HTTP architecture, editor choice, self-contained workspace extensions)
 **Supersedes**: Aspects of `20260225T210000-workspace-apps-orchestrator.md` (centralized model) and `20260312T211500-headless-workspace-runner.md` (runner-specific decisions)
 
+> **Path note (2026-05-22):** The centralized `~/.epicenter/workspaces/` architecture in this draft is superseded. Do not copy its global workspace registry, install, or discovery paths into new work. Current generated workspace data is project-local under `<projectDir>/.epicenter/`; machine auth and daemon runtime files have separate platform/runtime path owners.
+
 ### Revision: Centralized Workspace Model (2026-03-13)
 
 Simplified from "per-folder anywhere + discovery cache" to "all workspaces live in `~/.epicenter/workspaces/`." Key changes:

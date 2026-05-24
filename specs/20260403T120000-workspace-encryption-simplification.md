@@ -100,7 +100,7 @@ The wrapper doesn't change between tiers. Only the key source changes. This spec
 | 2 | Key persistence | Delegated to the app's auth layer | Auth session already caches via Better Auth client. No separate UserKeyStore needed. |
 | 3 | Encrypted wrapper | Always present on all stores | No birth-time ternary. Passthrough when no key (zero overhead). Encrypt after keys applied. |
 | 4 | Plaintext→encrypted transition | One-way. `applyEncryptionKeys()` re-encrypts plaintext entries. No going back. | Once data has been encrypted, it should never be plaintext again. Logout → `clearLocalData()` → fresh start. |
-| 5 | Re-encryption scope | Re-encrypt plaintext entries only. Leave old-version ciphertext alone. | Plaintext must be encrypted before sync connects (security). Old-version ciphertext is already safe—decrypt with version-directed key lookup, lazily re-encrypt on next write. |
+| 5 | Re-encryption scope | Re-encrypt plaintext entries and decryptable old-version ciphertext. | Plaintext must be encrypted before sync connects. Old-version ciphertext must also converge to the current key during activation, so a rotation actually upgrades at-rest data instead of waiting for a future write that may never happen. |
 | 6 | Sync connection | Explicit. App calls `sync.connect()` after applying keys. | No implicit coupling between encryption and sync. App controls ordering. Simplest possible sync extension. |
 | 6a | Boot sequencing | Composed by app, not by library. App runs persistence + auth in parallel, then applies keys synchronously. | Fastest boot (parallel), zero gap (sync apply), no coupling (library doesn't know about auth). WorkspaceGate is a generic promise gate—app passes any promise. |
 | 7 | Dual-cache in wrapper | Remove. Decrypt on read (~0.01ms per value). | Eliminates ~200 lines of cache sync, diffAndEmit, rebuildMap, transaction-gap fallback. XChaCha20-Poly1305 is fast enough. |
@@ -211,7 +211,7 @@ applyEncryptionKeys() called?
       Mixed content handling (during/after transition):
       ├─ Entry is EncryptedBlob (current version) → decrypt with current key
       ├─ Entry is EncryptedBlob (old version)     → decrypt with version-directed key
-      ├─ Entry is plaintext                       → return as-is (will be re-encrypted on next write)
+      ├─ Entry is plaintext                       → return as-is during reads; activation rewrites it as ciphertext
       └─ Entry fails to decrypt                   → skip, log warning, increment failedDecryptCount
 ```
 
@@ -230,15 +230,16 @@ applyEncryptionKeys(keys: EncryptionKeys): void {
   for (const store of allStores) {
     store.activateEncryption(keyring);
     // → sets the one-way "encrypted" flag
-    // → re-encrypts any PLAINTEXT entries (security: prevent plaintext sync)
-    // → leaves old-version ciphertext alone (already safe, lazy migration on write)
+    // → re-encrypts plaintext entries (security: prevent plaintext sync)
+    // → re-encrypts decryptable old-version ciphertext with the current key
+    // → leaves blobs with missing key versions unreadable and unchanged
   }
 }
 ```
 
 **One-way flag**: Once `activateEncryption()` is called on a store, the store permanently refuses plaintext writes. `set()` without an active keyring throws `EncryptionLockedError`. This prevents the bug where `deactivateEncryption()` allows plaintext passthrough after data has been encrypted.
 
-**Re-encryption scope**: Only plaintext entries are re-encrypted. Old-version ciphertext entries are left as-is—they're already encrypted, just with an older key. On the next `set()` for that key, the entry will be encrypted with the current version. This is lazy migration—pragmatic, no wasted work.
+**Re-encryption scope**: Plaintext entries and decryptable old-version ciphertext are re-encrypted during activation. Current-version ciphertext is skipped. Ciphertext whose key version is missing from the keyring is left unreadable and unchanged, because there is no safe key to decrypt it with yet.
 
 ## How apps use this
 
@@ -309,7 +310,7 @@ Salt stored as an unencrypted entry in the Y.Doc (syncs automatically, not secre
 - [ ] **1.1** Remove the dual-cache (`map`) from `y-keyvalue-lww-encrypted.ts`. Reads decrypt on the fly.
 - [ ] **1.2** Remove `diffAndEmit()`, `rebuildMap()`, and the transaction-gap fallback.
 - [ ] **1.3** Add one-way flag: once `activateEncryption()` is called, passthrough is permanently disabled. `set()` without keyring throws `EncryptionLockedError`.
-- [ ] **1.4** In `activateEncryption()`: only re-encrypt plaintext entries. Leave old-version ciphertext alone.
+- [ ] **1.4** In `activateEncryption()`: re-encrypt plaintext entries and decryptable old-version ciphertext. Leave only missing-key ciphertext alone.
 - [ ] **1.5** Remove `deactivateEncryption()` as a public method. The only way to "reset" is `clearLocalData()`.
 - [ ] **1.6** Observer: decrypt each entry on the fly, emit plaintext. No cache.
 - [ ] **1.7** Update tests to match simplified behavior.

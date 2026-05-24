@@ -1,7 +1,7 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "api",
-	"main": "src/app.ts",
+	"main": "src/index.ts",
 	"compatibility_date": "2026-03-06",
 	"compatibility_flags": ["nodejs_compat"],
 	"send_metrics": false,
@@ -36,20 +36,21 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"name": "WORKSPACE_ROOM",
-				"class_name": "WorkspaceRoom"
-			},
-			{
-				"name": "DOCUMENT_ROOM",
-				"class_name": "DocumentRoom"
+				"name": "ROOM",
+				"class_name": "Room"
 			}
 		]
 	},
-	// SQLite-backed DO — persistent storage survives hibernation.
+	// SQLite-backed DO: persistent storage survives hibernation.
 	"migrations": [
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["WorkspaceRoom", "DocumentRoom"]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["Room"],
+			"deleted_classes": ["WorkspaceRoom", "DocumentRoom"]
 		}
 	],
 	// --- Secrets (set via `wrangler secret put`, typed via `wrangler types`) ---
@@ -62,7 +63,6 @@
 			"ENCRYPTION_SECRETS",
 			"GOOGLE_CLIENT_SECRET",
 			"OPENAI_API_KEY",
-			"ANTHROPIC_API_KEY",
 			"AUTUMN_SECRET_KEY",
 			"GEMINI_API_KEY"
 		]

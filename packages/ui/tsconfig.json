@@ -1,12 +1,8 @@
 {
-	"extends": ["../../tsconfig.base.lib.json"],
+	"extends": "../../tsconfig.dom.json",
 	"compilerOptions": {
-		"lib": ["ESNext", "DOM", "DOM.Iterable"],
-		"rootDir": "src",
-		"paths": {
-			"#/*": ["./src/*"]
-		}
-	},
-	"include": ["src/**/*"],
-	"exclude": ["dist", "node_modules"]
+		"types": ["bun"],
+		"noUnusedLocals": true,
+		"noUnusedParameters": true
+	}
 }

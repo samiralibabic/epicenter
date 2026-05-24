@@ -9,13 +9,7 @@
 	import { createMutation, createQuery } from '@tanstack/svelte-query';
 	import { toast } from 'svelte-sonner';
 	import { extractErrorMessage } from 'wellcrafted/error';
-	import {
-		balanceQuery,
-		billingKeys,
-		plansQuery,
-		previewUpgradeMutation,
-		upgradePlanMutation,
-	} from '$lib/query/billing';
+	import { billing, billingKeys } from '$lib/query/billing';
 	import { queryClient } from '$lib/query/client';
 
 	/** Visible plan IDs in display order. Free is NOT shown as a card. */
@@ -86,8 +80,8 @@
 		currency?: string;
 	} | null>(null);
 
-	const balance = createQuery(() => balanceQuery.options);
-	const plans = createQuery(() => plansQuery.options);
+	const balance = createQuery(() => billing.balance.options);
+	const plans = createQuery(() => billing.plans.options);
 
 	const currentPlanId = $derived(
 		balance.data?.subscriptions?.find((s) => !s.addOn)?.planId ?? 'free',
@@ -119,9 +113,9 @@
 		),
 	);
 
-	const previewMutation = createMutation(() => previewUpgradeMutation.options);
+	const previewMutation = createMutation(() => billing.previewUpgrade.options);
 
-	const upgradeMutation = createMutation(() => upgradePlanMutation.options);
+	const upgradeMutation = createMutation(() => billing.upgradePlan.options);
 
 	async function handleUpgradeClick(planId: string, planName: string) {
 		confirmDialog = { planId, planName };

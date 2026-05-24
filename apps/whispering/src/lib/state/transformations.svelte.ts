@@ -34,6 +34,10 @@ function createTransformations() {
 	);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/**
 		 * All transformations as a reactive SvelteMap.
 		 *
@@ -87,6 +91,10 @@ function createTransformations() {
 }
 
 export const transformations = createTransformations();
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => transformations[Symbol.dispose]());
+}
 
 /**
  * Generate a default transformation with sensible defaults.

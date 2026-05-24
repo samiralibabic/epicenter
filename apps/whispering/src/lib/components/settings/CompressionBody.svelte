@@ -66,7 +66,6 @@
 	);
 
 	const isFfmpegInstalled = $derived(ffmpegQuery.data ?? false);
-	const isFfmpegCheckLoading = $derived(ffmpegQuery.isPending);
 
 	// Show recommended badge if compression is recommended
 	const showRecommendedBadge = $derived(isCompressionRecommended());
@@ -190,7 +189,7 @@
 	{/if}
 
 	<!-- FFmpeg Installation Warning -->
-	{#if !isFfmpegInstalled && !isFfmpegCheckLoading}
+	{#if !isFfmpegInstalled && !ffmpegQuery.isPending}
 		<Alert.Root variant="warning">
 			<AlertTriangle class="size-4" />
 			<Alert.Title>FFmpeg Required</Alert.Title>

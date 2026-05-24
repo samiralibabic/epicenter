@@ -228,6 +228,3 @@ export const WhisperCppTranscriptionServiceLive = {
 		return result;
 	},
 };
-
-export type WhisperCppTranscriptionService =
-	typeof WhisperCppTranscriptionServiceLive;

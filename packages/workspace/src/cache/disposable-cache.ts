@@ -1,59 +1,147 @@
 /**
- * `createDisposableCache` — refcounted cache for disposable resources.
+ * `createDisposableCache`: refcounted cache for disposable resources.
  *
- * Same id → same instance shared across consumers; teardown is debounced after
- * the last consumer leaves. Solves three coupled problems:
+ * ## What it does
  *
- * 1. **Concurrent consumers of the same id must share ONE instance.** Otherwise
- *    local state diverges — two editors mounted on the same Y.Doc would only
- *    see each other's edits after a sync round-trip.
+ * Maps an id to a single shared instance, tracks how many consumers are
+ * currently using it, and tears it down (calls `[Symbol.dispose]()` on the
+ * underlying value) a configurable grace period after the last consumer
+ * leaves.
+ *
+ * Same id, same underlying instance. Different handles, shared state.
+ *
+ * ## Why it exists
+ *
+ * Three coupled problems show up whenever a resource is expensive to build,
+ * stateful, and shared across UI surfaces:
+ *
+ * 1. **Concurrent consumers of the same id must share ONE instance.**
+ *    Otherwise local state diverges. Two editors mounted on the same Y.Doc
+ *    would only see each other's edits after a sync round-trip. A media
+ *    player and a waveform view of the same audio file would each hold a
+ *    decoder and double the memory.
+ *
  * 2. **Sequential mount/unmount shouldn't rebuild expensive resources.**
- *    Route swaps, HMR, conditional rendering, split-pane close-then-reopen all
- *    produce rapid open→close→open sequences. `gcTime` keeps the instance
- *    alive briefly so the next `open` can reuse it.
+ *    Route swaps, hot module reload, conditional rendering, split-pane
+ *    close-then-reopen all produce rapid open/close/open sequences within
+ *    milliseconds. `gcTime` keeps the instance alive briefly so the next
+ *    `open` reuses it.
+ *
  * 3. **Page exit / workspace teardown needs explicit disposal.** The cache
- *    itself is `Disposable`; `cache[Symbol.dispose]()` flushes every entry.
+ *    itself is `Disposable`; `cache[Symbol.dispose]()` flushes every entry
+ *    synchronously.
  *
- * The value type is opaque — anything `Disposable`. Y.Docs are the most common
- * case in this codebase; audio decoders, worker connections, MediaStreams, and
- * native window handles fit the same shape and should use this primitive
- * rather than reinventing refcount+grace.
+ * Y.Docs are the most common case in this codebase. Audio decoders, worker
+ * connections, MediaStreams, and native window handles fit the same shape
+ * and should use this primitive rather than reinventing refcount + grace.
  *
- * ## Usage
+ * ## Quick mental model
  *
  * ```ts
  * const cache = createDisposableCache(
- *   (id: string) => buildExpensiveThing(id),
+ *   (id: string) => {
+ *     const ydoc = new Y.Doc({ guid: id });
+ *     return {
+ *       ydoc,
+ *       [Symbol.dispose]() { ydoc.destroy(); },
+ *     };
+ *   },
  *   { gcTime: 5_000 },
  * );
  *
- * // Two concurrent consumers of the same id share one instance.
- * const a = cache.open('thing-1');
- * const b = cache.open('thing-1');
- * // a and b are different handles, but a.value === b.value
+ * const a = cache.open('doc-1');     // build runs; refcount 0 to 1
+ * const b = cache.open('doc-1');     // cache hit; refcount 1 to 2
  *
- * a[Symbol.dispose]();  // refcount: 2 → 1
- * b[Symbol.dispose]();  // refcount: 1 → 0; teardown armed for 5s
+ * // a and b are different handle objects, but they share the same
+ * // underlying state via nested references:
+ * a.ydoc === b.ydoc                  // true
  *
- * // Reactive pattern: open in $effect, dispose in cleanup. Re-opening within
- * // 5s cancels the pending teardown.
+ * a[Symbol.dispose]();               // refcount 2 to 1
+ * b[Symbol.dispose]();               // refcount 1 to 0; 5s grace timer armed
+ *
+ * // Within 5s, cache.open('doc-1') cancels the timer and reuses the
+ * // same Y.Doc. After 5s with no reopen, the Y.Doc is destroyed and
+ * // removed from the cache.
+ *
+ * cache[Symbol.dispose]();           // force-flush everything
+ * ```
+ *
+ * Disposing the same handle twice is a no-op. If `build` throws, no entry
+ * is stored and the next `open(sameId)` retries cleanly.
+ *
+ * ## How to use it from a UI framework
+ *
+ * The intended pattern: instantiate the cache once at module level, then
+ * open in your reactive effect and dispose in cleanup. The cache handles
+ * deduplication, grace periods, and teardown for you. Two components
+ * mounting on the same id share one underlying value, so mutations made
+ * through one component's handle are immediately visible through the other.
+ *
+ * ```ts
+ * // Svelte 5
  * $effect(() => {
- *   const handle = cache.open(id);
+ *   const handle = cache.open(documentId);
  *   return () => handle[Symbol.dispose]();
  * });
  *
- * // Workspace teardown — flush everything immediately.
- * cache[Symbol.dispose]();
+ * // React
+ * useEffect(() => {
+ *   const handle = cache.open(documentId);
+ *   return () => handle[Symbol.dispose]();
+ * }, [documentId]);
+ *
+ * // Vue 3
+ * watchEffect((onCleanup) => {
+ *   const handle = cache.open(documentId);
+ *   onCleanup(() => handle[Symbol.dispose]());
+ * });
+ * ```
+ *
+ * Outside reactive contexts, `using` syntax is the cleanest match for the
+ * `Disposable` shape. `open()` is synchronous:
+ *
+ * ```ts
+ * function readDoc(id: string) {
+ *   using handle = cache.open(id);
+ *   return handle.ydoc.getMap('root').toJSON();
+ * }
+ * // handle disposed at scope exit; grace timer armed
+ * ```
+ *
+ * If the returned value exposes readiness, await that field after opening:
+ * `using handle = cache.open(id); await handle.whenReady;`.
+ *
+ * ## Constraint: `T` must be a plain object
+ *
+ * The handle is built by spreading the value's own enumerable properties:
+ * `{ ...value, [Symbol.dispose]: ... }`. Spread doesn't copy prototype
+ * methods, so a class instance returned directly will lose every method
+ * that lives on its prototype.
+ *
+ * ```ts
+ * // BAD: methods on Y.Doc.prototype (transact, getMap, on, ...) are LOST
+ * createDisposableCache((id) => new Y.Doc({ guid: id }));
+ * // handle.transact === undefined
+ *
+ * // GOOD: nest the class instance as a named field
+ * createDisposableCache((id) => {
+ *   const ydoc = new Y.Doc({ guid: id });
+ *   return {
+ *     ydoc,
+ *     [Symbol.dispose]() { ydoc.destroy(); },
+ *   };
+ * });
+ * // handle.ydoc.transact(() => { ... }) works
  * ```
  *
  * ## What this primitive does NOT do
  *
- * - **No async builder.** Construction is synchronous. If your `T` needs async
- *   readiness, expose a `whenReady: Promise<unknown>` field on it; the cache
- *   stays sync, readiness is a value-level concern.
+ * - **No async builder.** Construction is synchronous. If your `T` needs
+ *   async readiness, expose a `whenReady: Promise<unknown>` field on it;
+ *   the cache stays sync, readiness is a value-level concern.
  * - **No max size / LRU eviction.** Out of scope; add when needed.
- * - **No per-id force-close.** One way to release a handle: dispose it. Two
- *   ways means call sites that mismatch open/close.
+ * - **No per-id force-close.** One way to release a handle: dispose it.
+ *   Two ways means call sites that mismatch open/close.
  * - **No subscriptions / change events.** Just construct, share, dispose.
  *
  * @module
@@ -80,26 +168,16 @@ export const DisposableCacheError = defineErrors({
 export type DisposableCacheError = InferErrors<typeof DisposableCacheError>;
 
 /**
- * Refcounted cache returned by `createDisposableCache`. Itself `Disposable` —
+ * Refcounted cache returned by `createDisposableCache`. Itself `Disposable`:
  * `cache[Symbol.dispose]()` flushes every entry immediately.
  */
-export interface DisposableCache<Id, T> extends Disposable {
-	/**
-	 * Open a handle. Increments the refcount for `id`. The returned handle
-	 * prototype-chains to the underlying `T`, plus its own `[Symbol.dispose]`
-	 * that decrements *this handle's* refcount — it does NOT destroy the
-	 * underlying `T` directly. The underlying `T[Symbol.dispose]()` is called
-	 * once, by the cache, when the refcount reaches zero after `gcTime`.
-	 *
-	 * Each call returns a distinct handle. N opens require N disposes.
-	 */
-	open(id: Id): T & Disposable;
-	/** Whether an instance is currently held (refcounted or in grace window). */
-	has(id: Id): boolean;
-}
+export type DisposableCache<
+	TId extends string | number,
+	TValue extends Disposable,
+> = ReturnType<typeof createDisposableCache<TId, TValue>>;
 
-type CacheEntry<T extends Disposable> = {
-	value: T;
+type CacheEntry<TValue extends Disposable> = {
+	value: TValue;
 	openCount: number;
 	gcTimer: ReturnType<typeof setTimeout> | null;
 	disposed: boolean;
@@ -108,9 +186,9 @@ type CacheEntry<T extends Disposable> = {
 /**
  * Create a refcounted cache for disposable resources.
  *
- * @param build - Closure invoked on cache miss. Returns a `T extends Disposable`.
+ * @param build - Closure invoked on cache miss. Returns a disposable value.
  *                Runs synchronously; if it throws, the cache is unchanged
- *                (next `open(sameId)` re-runs the closure — no poisoned entry).
+ *                (next `open(sameId)` re-runs the closure; no poisoned entry).
  * @param opts  - `gcTime` (default `5_000`ms): milliseconds to wait after the
  *                refcount reaches zero before tearing down the underlying value.
  *                `0` = synchronous teardown, no timer. `Infinity` = never
@@ -119,18 +197,18 @@ type CacheEntry<T extends Disposable> = {
  *                teardown.
  */
 export function createDisposableCache<
-	Id extends string | number,
-	T extends Disposable,
+	TId extends string | number,
+	TValue extends Disposable,
 >(
-	build: (id: Id) => T,
+	build: (id: TId) => TValue,
 	{
 		gcTime = 5_000,
 		log = createLogger('createDisposableCache'),
 	}: { gcTime?: number; log?: Logger } = {},
-): DisposableCache<Id, T> {
-	const entries = new Map<Id, CacheEntry<T>>();
+) {
+	const entries = new Map<TId, CacheEntry<TValue>>();
 
-	function disposeEntry(id: Id, entry: CacheEntry<T>): void {
+	function disposeEntry(id: TId, entry: CacheEntry<TValue>): void {
 		entry.disposed = true;
 		if (entry.gcTimer !== null) {
 			clearTimeout(entry.gcTimer);
@@ -148,12 +226,24 @@ export function createDisposableCache<
 		}
 	}
 
-	const cache: DisposableCache<Id, T> = {
-		open(id) {
+	const cache = {
+		/**
+		 * Open a handle. Increments the refcount for `id`. The returned handle is
+		 * a fresh object built by spreading the underlying `T`'s own enumerable
+		 * properties, plus its own `[Symbol.dispose]` that decrements *this
+		 * handle's* refcount. It does NOT destroy the underlying `T` directly.
+		 * The underlying `T[Symbol.dispose]()` is called once, by the cache, when
+		 * the refcount reaches zero after `gcTime`.
+		 *
+		 * Each call returns a distinct handle (so `a !== b`), but their nested
+		 * fields share references (so `a.ydoc === b.ydoc`). N opens require N
+		 * disposes.
+		 */
+		open(id: TId) {
 			let entry = entries.get(id);
 			if (entry === undefined) {
 				// User closure runs synchronously. If it throws, we DON'T insert
-				// into the cache — next `open(sameId)` re-runs the closure (no
+				// into the cache; next `open(sameId)` re-runs the closure (no
 				// poisoned entry). The caller sees the thrown error.
 				const value = build(id);
 				entry = { value, openCount: 0, gcTimer: null, disposed: false };
@@ -188,18 +278,35 @@ export function createDisposableCache<
 				}, gcTime);
 			};
 
-			// Prototype-chain shallow wrapper. Reads of `T`'s properties fall
-			// through to the underlying value; writes to the handle don't leak
-			// between consumers; `[Symbol.dispose]` is shadowed to call the
-			// per-handle dispose, not the underlying value's destroy.
+			// Spread shallow wrapper. Each handle is a new object with the
+			// underlying value's own enumerable properties copied onto it.
+			// Writes to top-level fields stay on the handle (each handle has
+			// its own slot), but nested objects are shared by reference (so
+			// e.g. every handle's `.ydoc` is the same Y.Doc). `[Symbol.dispose]`
+			// is shadowed to call the per-handle dispose, not the underlying
+			// value's destroy.
 			return {
 				...entry.value,
 				[Symbol.dispose]: dispose,
-			} as T & Disposable;
+			} as TValue;
 		},
 
-		has(id) {
+		/** Whether an instance is currently held (refcounted or in grace window). */
+		has(id: TId) {
 			return entries.has(id);
+		},
+
+		/**
+		 * Iterate the live underlying values (refcounted or in the grace
+		 * window). Yields the instance `build` constructed, not a per-handle
+		 * spread wrapper, so callers must not dispose what they receive.
+		 * Intended for cross-cutting sweeps such as reconnecting every cached
+		 * child sync after an auth-state change.
+		 */
+		*values(): IterableIterator<TValue> {
+			for (const entry of entries.values()) {
+				yield entry.value;
+			}
 		},
 
 		[Symbol.dispose]() {

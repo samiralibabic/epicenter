@@ -21,7 +21,7 @@
 Add two capabilities, one PR:
 
 1. **PR-D side**: each device publishes its action manifest into Yjs awareness, alongside a per-installation deviceId.
-2. **PR-E side**: any device can call any peer's actions type-safely via `peer<T>(workspace, deviceId).path.to.action(input)`.
+2. **PR-E side**: any device can call any peer's actions type-safely via `peer<T>(sync, deviceId).path.to.action(input)`.
 
 Plus an opportunistic collapse to `attachSync`'s API (`actions:` data instead of `dispatch:` callback), and a CLI cleanup that drops the now-unused fuzzy peer matching.
 
@@ -46,7 +46,7 @@ export type SimpleStorage = {
   setItem(key: string, value: string): void;
 };
 
-const KEY = 'epicenter:deviceId';
+const KEY = 'epicenter.device.id';
 
 /** Read or create a per-installation deviceId nanoid. Idempotent. */
 export function getOrCreateDeviceId(storage: SimpleStorage): string {

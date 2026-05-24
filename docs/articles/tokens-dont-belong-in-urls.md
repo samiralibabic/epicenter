@@ -88,4 +88,4 @@ if (offered?.split(',').map((s) => s.trim()).includes('your-app-protocol')) {
 return new Response(null, { status: 101, webSocket: pair[0], headers: responseHeaders });
 ```
 
-That's the whole trick. Two lines on the client, a prefix extraction on the server, and a protocol echo on the upgrade response. If you want to see it in context, the Epicenter code is here: [app.ts](https://github.com/braden-w/epicenter/blob/main/apps/api/src/app.ts) and [base-sync-room.ts](https://github.com/braden-w/epicenter/blob/main/apps/api/src/base-sync-room.ts). Fork it, adapt it, ship your own version.
+That's the whole trick. Two lines on the client, a prefix extraction on the server, and a protocol echo on the upgrade response. If you want to see it in context, the Epicenter code is here: [app.ts](https://github.com/braden-w/epicenter/blob/main/apps/api/src/app.ts) and [room.ts](https://github.com/braden-w/epicenter/blob/main/apps/api/src/room.ts). Fork it, adapt it, ship your own version.

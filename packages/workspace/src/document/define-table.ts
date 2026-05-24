@@ -29,11 +29,7 @@
  */
 
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type {
-	BaseRow,
-	LastSchema,
-	TableDefinition,
-} from './attach-table.js';
+import type { BaseRow, LastSchema, TableDefinition } from './attach-table.js';
 import { createUnionSchema } from './schema-union.js';
 import type { CombinedStandardSchema } from './standard-schema.js';
 
@@ -85,7 +81,7 @@ export function defineTable<TSchema extends CombinedStandardSchema<BaseRow>>(
 		return {
 			schema,
 			migrate: (row: unknown) => row as BaseRow,
-		} as unknown as TableDefinition<[TSchema]>;
+		} as TableDefinition<[TSchema]>;
 	}
 
 	const versions = args as CombinedStandardSchema[];
@@ -97,7 +93,7 @@ export function defineTable<TSchema extends CombinedStandardSchema<BaseRow>>(
 				migrate: fn,
 			};
 		},
-	} as unknown as {
+	} as {
 		migrate(
 			fn: (row: unknown) => unknown,
 		): TableDefinition<CombinedStandardSchema<BaseRow>[]>;

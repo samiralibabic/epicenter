@@ -2,7 +2,7 @@
 	Installed from @ieedan/shadcn-svelte-extras
 */
 
-import * as Avatar from '#/avatar';
+import * as Avatar from '../avatar/index.js';
 import Bubble from './chat-bubble.svelte';
 import BubbleAvatar from './chat-bubble-avatar.svelte';
 import BubbleMessage from './chat-bubble-message.svelte';

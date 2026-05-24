@@ -5,7 +5,7 @@
  * (libSQL WASM). Provides SQL queries, full-text search, and fast
  * lookups against file metadata and content.
  *
- * The SQLite database is **never** the source of truth—it's a derived,
+ * The SQLite database is **never** the source of truth: it is a derived,
  * rebuildable cache. On every page load the index is rebuilt from Yjs.
  * Ongoing mutations are picked up via a debounced table observer.
  *
@@ -16,11 +16,9 @@
  * ```typescript
  * const ydoc = new Y.Doc({ guid: 'app' });
  * const tables = attachTables(ydoc, { files: filesTable });
- * const fileContentDocs = createFileContentDocs({
- *   workspaceId: 'app',
- *   filesTable: tables.files,
- * });
- * const sqliteIndex = createSqliteIndex(fileContentDocs)({ tables });
+ * const sqliteIndex = createSqliteIndex({
+ *   readContent: fileContent.read,
+ * })({ tables });
  * await sqliteIndex.exports.whenReady;
  * const results = await sqliteIndex.exports.search('meeting notes');
  * ```
@@ -28,11 +26,11 @@
  * @module
  */
 
+import { debounce } from '@epicenter/util';
 import type { Table } from '@epicenter/workspace';
 import type { Client, InStatement } from '@libsql/client-wasm';
 import { createClient } from '@libsql/client-wasm';
 
-import type { FileContentDocs } from '../../file-content-docs.js';
 import type { FileId } from '../../ids.js';
 import type { FileRow } from '../../table.js';
 
@@ -99,13 +97,13 @@ export type SqliteIndexExports = {
 	whenReady: Promise<void>;
 };
 
-/** The raw extension factory return — exports plus lifecycle metadata. */
+/** The raw extension factory return: exports plus lifecycle metadata. */
 export type SqliteIndex = {
 	exports: SqliteIndexExports;
 	/** Readiness signal (same promise as `exports.whenReady`). */
 	init: Promise<void>;
 	/** Dispose observers and close the SQLite database. */
-	dispose: () => void;
+	[Symbol.dispose]: () => void;
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -137,30 +135,27 @@ type SqliteIndexContext = {
  * const ydoc = new Y.Doc({ guid: 'app' });
  * const tables = attachTables(ydoc, { files: filesTable });
  * attachIndexedDb(ydoc);
- * const sqliteIndex = createSqliteIndex(fileContentDocs)({ tables });
+ * const sqliteIndex = createSqliteIndex({ readContent })({ tables });
  * ```
  */
 export function createSqliteIndex(
-	contentDocs: FileContentDocs,
+	{
+		readContent,
+	}: {
+		readContent(fileId: FileId): Promise<string>;
+	},
 	{ debounceMs = 100 }: SqliteIndexOptions = {},
 ) {
 	return (context: SqliteIndexContext): SqliteIndex => {
 		const filesTable = context.tables.files;
 
-		async function readFileContent(id: FileId): Promise<string> {
-			await using handle = contentDocs.open(id);
-			await handle.whenReady;
-			return handle.content.read();
-		}
-
 		const client = createClient({ url: ':memory:' });
-		let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 		let pendingIds = new Set<string>();
 		let unobserve: (() => void) | null = null;
 
 		// ── Async initialization ──────────────────────────────────────
 		const whenReady = (async () => {
-			// WAL mode — no-op for in-memory but documents intent
+			// WAL mode: no-op for in-memory but documents intent
 			await client.execute('PRAGMA journal_mode = WAL');
 
 			await client.execute(FILES_DDL);
@@ -168,7 +163,7 @@ export function createSqliteIndex(
 				await client.execute(idx);
 			}
 
-			// FTS5 virtual table — standalone (not external-content)
+			// FTS5 virtual table: standalone (not external-content)
 			await client.execute(FILES_FTS);
 
 			// Initial rebuild from Yjs
@@ -179,15 +174,15 @@ export function createSqliteIndex(
 		})();
 
 		// ── Debounced sync ────────────────────────────────────────────
+		const syncAfterDebounce = debounce(() => {
+			const ids = pendingIds;
+			pendingIds = new Set();
+			void syncRows(ids);
+		}, debounceMs);
+
 		function scheduleSync(changedIds: ReadonlySet<string>) {
 			for (const id of changedIds) pendingIds.add(id);
-			if (syncTimeout) clearTimeout(syncTimeout);
-			syncTimeout = setTimeout(() => {
-				syncTimeout = null;
-				const ids = pendingIds;
-				pendingIds = new Set();
-				void syncRows(ids);
-			}, debounceMs);
+			syncAfterDebounce();
 		}
 
 		// ── Full rebuild ──────────────────────────────────────────
@@ -203,7 +198,7 @@ export function createSqliteIndex(
 					continue;
 				}
 				try {
-					const text = await readFileContent(row.id);
+					const text = await readContent(row.id);
 					contentMap.set(row.id, text || null);
 				} catch {
 					contentMap.set(row.id, null);
@@ -238,7 +233,7 @@ export function createSqliteIndex(
 					],
 				});
 
-				// Insert into FTS — use empty string for null content
+				// Insert into FTS: use empty string for null content
 				// so the file name is still searchable
 				statements.push({
 					sql: 'INSERT INTO files_fts (file_id, name, content) VALUES (?, ?, ?)',
@@ -354,7 +349,7 @@ export function createSqliteIndex(
 
 				let fileContent: string | null = null;
 				try {
-					const text = await readFileContent(row.id);
+					const text = await readContent(row.id);
 					fileContent = text || null;
 				} catch {
 					fileContent = null;
@@ -431,7 +426,7 @@ export function createSqliteIndex(
 					snippet: row.snippet as string,
 				}));
 			} catch {
-				// Invalid FTS5 query syntax — return empty rather than throw
+				// Invalid FTS5 query syntax: return empty rather than throw
 				return [];
 			}
 		}
@@ -445,8 +440,8 @@ export function createSqliteIndex(
 				whenReady,
 			},
 			init: whenReady,
-			dispose() {
-				if (syncTimeout) clearTimeout(syncTimeout);
+			[Symbol.dispose]() {
+				syncAfterDebounce.cancel();
 				unobserve?.();
 				client.close();
 			},
@@ -461,7 +456,7 @@ export function createSqliteIndex(
 /**
  * Compute materialized POSIX paths for all rows by walking parentId chains.
  *
- * Memoized per-call — each path is computed once and cached. Handles
+ * Memoized per-call: each path is computed once and cached. Handles
  * cycles (via visited-set) and orphans (fallback to root `/name`).
  */
 function computePaths(rows: FileRow[]): Map<string, string> {
@@ -490,7 +485,7 @@ function computePaths(rows: FileRow[]): Map<string, string> {
 
 		const parentPath = getPath(row.parentId, visited);
 		if (parentPath === null) {
-			// Orphan or cycle — treat as root-level
+			// Orphan or cycle: treat as root-level
 			const path = `/${row.name}`;
 			paths.set(id, path);
 			return path;
@@ -537,7 +532,7 @@ function computePathForRow(
 
 		const parentPath = walk(row.parentId);
 		if (parentPath === null) {
-			// Orphan or cycle — treat as root-level
+			// Orphan or cycle: treat as root-level
 			return `/${row.name}`;
 		}
 

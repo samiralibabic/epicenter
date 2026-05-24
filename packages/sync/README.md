@@ -63,7 +63,6 @@ The design shows up in a few places:
 
 - `encodeSyncStep1`, `encodeSyncStep2`, and `encodeSyncUpdate` only deal with Yjs payloads.
 - `encodeSyncRequest` and `decodeSyncRequest` collapse the WebSocket handshake into a binary HTTP request/response format.
-- `encodeSyncStatus` uses an echoed version counter for save-state UX; the server can relay the payload unchanged.
 - RPC framing is separate from RPC behavior. The package defines request/response bytes and shared error variants, not the transport policy around retries or timeouts.
 
 If you want lifecycle helpers for a WebSocket server, this package is the protocol layer under them—not the server itself.
@@ -76,7 +75,7 @@ Main exports from `src/index.ts`:
 - Sync encode/decode: `encodeSyncStep1`, `encodeSyncStep2`, `encodeSyncUpdate`, `decodeSyncMessage`, `handleSyncPayload`
 - Awareness helpers: `encodeAwareness`, `encodeAwarenessStates`, `encodeQueryAwareness`
 - HTTP sync helpers: `encodeSyncRequest`, `decodeSyncRequest`
-- Save-status helpers: `encodeSyncStatus`, `decodeSyncStatus`, `stateVectorsEqual`
+- State helpers: `stateVectorsEqual`
 - RPC helpers: `encodeRpcRequest`, `encodeRpcResponse`, `decodeRpcMessage`, `decodeRpcPayload`
 - RPC types and guards: `DecodedRpcMessage`, `RpcError`, `isRpcError`
 

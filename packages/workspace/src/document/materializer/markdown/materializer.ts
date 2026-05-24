@@ -1,42 +1,31 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import Type from 'typebox';
 import {
 	defineErrors,
 	extractErrorMessage,
 	type InferErrors,
 } from 'wellcrafted/error';
+import { createLogger, type Logger } from 'wellcrafted/logger';
 import { tryAsync } from 'wellcrafted/result';
 import type * as Y from 'yjs';
-import { defineMutation } from '../../../shared/actions.js';
-import { createLogger, type Logger } from 'wellcrafted/logger';
+import { convertEpicenterLinksToWikilinks } from '../../../links.js';
+import { assembleMarkdown } from '../../../markdown/assemble-markdown.js';
+import { parseMarkdownFile } from '../../../markdown/parse-markdown-file.js';
 import type { MaybePromise } from '../../../shared/types.js';
 import type { Kv } from '../../attach-kv.js';
-import {
-	type BaseRow,
-	type Table,
-	type TableParseError,
-} from '../../attach-table.js';
-import type { SerializeResult } from './markdown.js';
-import { assembleMarkdown } from './markdown.js';
-import { parseMarkdownFile } from './parse-markdown-file.js';
+import type { BaseRow, Table, TableParseError } from '../../attach-table.js';
 
 // ════════════════════════════════════════════════════════════════════════════
 // PUSH ERROR + EVENT TYPES
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * Errors produced during `push` that aren't already covered by
- * `TableParseError`. Filename / tableName provenance lives on the
- * emitted `PushEvent`, not inside the error — the error knows its
- * layer, the event carries external context.
- */
-/**
  * Errors produced by the background write-observer (table row → .md file,
  * KV state → serialized file). These run inside `.catch(...)` of a detached
  * async task, so they ship to the logger, not through a Result to the caller.
+ * File-local: never crosses the module boundary.
  */
-export const MaterializerWriteError = defineErrors({
+const MaterializerWriteError = defineErrors({
 	TableWriteFailed: ({
 		tableName,
 		cause,
@@ -53,7 +42,6 @@ export const MaterializerWriteError = defineErrors({
 		cause,
 	}),
 });
-export type MaterializerWriteError = InferErrors<typeof MaterializerWriteError>;
 
 export const MaterializerPushError = defineErrors({
 	/** Reading the file from disk failed. */
@@ -76,7 +64,7 @@ export type MaterializerPushError = InferErrors<typeof MaterializerPushError>;
  * - **`skipped`**: the file couldn't be parsed as markdown-with-frontmatter
  *   (no `---` delimiters, empty delimiters, or frontmatter that doesn't
  *   decode to an object). The three cases collapse at the parser boundary
- *   into a single "not a note" decision — no discriminator needed.
+ *   into a single "not a note" decision; no discriminator needed.
  * - **`error`**: something failed. `error.name` discriminates between
  *   `ReadFailed` / `FromMarkdownCallbackFailed` (materializer errors) and
  *   `ValidationFailed` / `MigrationFailed` / `AsyncSchemaNotSupported`
@@ -84,7 +72,7 @@ export type MaterializerPushError = InferErrors<typeof MaterializerPushError>;
  *
  * `path` is the relative path from the materializer's base `dir` (e.g.,
  * `"posts/hello.md"` for a file under `config.dir: 'posts'`). Not the
- * bare filename — two tables writing the same filename would be
+ * bare filename: two tables writing the same filename would be
  * indistinguishable otherwise.
  */
 export type PushEvent =
@@ -112,7 +100,7 @@ type AnyTable = Table<any>;
 
 /**
  * Symmetric shape of a parsed markdown file. `toMarkdown` produces it,
- * `fromMarkdown` consumes it — `Parameters<fromMarkdown>[0]` ≡ `ReturnType<toMarkdown>`.
+ * `fromMarkdown` consumes it: `Parameters<fromMarkdown>[0]` ≡ `ReturnType<toMarkdown>`.
  */
 export type MarkdownShape = {
 	frontmatter: Record<string, unknown>;
@@ -132,12 +120,15 @@ type TableConfig<TRow extends BaseRow> = {
 
 type KvConfig = {
 	/** Serialize the full KV state to a single file. Default: `kv.json` with JSON.stringify. */
-	serialize?: (data: Record<string, unknown>) => SerializeResult;
+	serialize?: (data: Record<string, unknown>) => {
+		filename: string;
+		content: string;
+	};
 };
 
 type RegisteredTable = {
 	table: AnyTable;
-	// biome-ignore lint/suspicious/noExplicitAny: internal storage — variance across heterogeneous row types
+	// biome-ignore lint/suspicious/noExplicitAny: internal storage, variance across heterogeneous row types
 	config: TableConfig<any>;
 	unsubscribe?: () => void;
 };
@@ -152,10 +143,11 @@ type RegisteredKv = {
 const defaultFilename = (row: BaseRow): string => `${row.id}.md`;
 
 /** Default toMarkdown: dump row as frontmatter, no body. */
-const defaultToMarkdown = (row: BaseRow): MarkdownShape => ({
-	frontmatter: { ...row },
-	body: undefined,
-});
+const defaultToMarkdown = (row: BaseRow) =>
+	({
+		frontmatter: { ...row },
+		body: undefined,
+	}) satisfies MarkdownShape;
 
 /** Default fromMarkdown: treat frontmatter as the row. */
 const defaultFromMarkdown = (parsed: MarkdownShape): BaseRow =>
@@ -165,7 +157,7 @@ const defaultFromMarkdown = (parsed: MarkdownShape): BaseRow =>
  * Default KV serializer: pretty-printed JSON in `kv.json`. Used whenever a
  * registered kv's `config.serialize` isn't provided.
  */
-const defaultKvSerialize = (data: Record<string, unknown>): SerializeResult => ({
+const defaultKvSerialize = (data: Record<string, unknown>) => ({
 	filename: 'kv.json',
 	content: JSON.stringify(data, null, 2),
 });
@@ -173,8 +165,10 @@ const defaultKvSerialize = (data: Record<string, unknown>): SerializeResult => (
 /**
  * Compose a row into the full on-disk artifact: filename + content string.
  *
- * Resolves the per-slot defaults (`filename`, `toMarkdown`) and runs them
- * through `assembleMarkdown`. Pure except for awaiting caller-supplied promises.
+ * Resolves the per-slot defaults (`filename`, `toMarkdown`), rewrites
+ * `epicenter://` body links to `[[wikilinks]]` so on-disk notes stay
+ * portable, and runs the result through `assembleMarkdown`. Pure except for
+ * awaiting caller-supplied promises.
  */
 async function rowToMarkdownFile<TRow extends BaseRow>(
 	row: TRow,
@@ -184,7 +178,11 @@ async function rowToMarkdownFile<TRow extends BaseRow>(
 	const toMarkdownFn = config.toMarkdown ?? defaultToMarkdown;
 	const filename = await filenameFn(row);
 	const shape = await toMarkdownFn(row);
-	const content = assembleMarkdown(shape.frontmatter, shape.body);
+	const body =
+		shape.body !== undefined
+			? convertEpicenterLinksToWikilinks(shape.body)
+			: undefined;
+	const content = assembleMarkdown(shape.frontmatter, body);
 	return { filename, content };
 }
 
@@ -213,13 +211,13 @@ async function writeMarkdownFile(
  * in a single KV mirror. Nothing materializes by default.
  *
  * Exposes three mutations:
- * - `push`    — disk → workspace. Import .md files as rows (additive).
- * - `pull`    — workspace → disk. Write every row as .md file (additive).
- * - `rebuild` — workspace → disk, destructive. Clear output dir then rewrite
+ * - `push`: disk → workspace. Import .md files as rows (additive).
+ * - `pull`: workspace → disk. Write every row as .md file (additive).
+ * - `rebuild`: workspace → disk, destructive. Clear output dir then rewrite
  *   all rows. Use for orphan cleanup or after config changes.
  *   Matches the sqlite materializer's `rebuild` for cross-materializer parity.
  *
- * Teardown is hooked to the ydoc via `ydoc.once('destroy', ...)` — callers
+ * Teardown is hooked to the ydoc via `ydoc.once('destroy', ...)`; callers
  * never call a dispose method; destroying the ydoc cascades.
  *
  * @example
@@ -235,7 +233,7 @@ async function writeMarkdownFile(
  * })
  *   .table(tables.posts, {
  *     filename: slugFilename('title'),
- *     // Inline toMarkdown / fromMarkdown callbacks when needed —
+ *     // Inline toMarkdown / fromMarkdown callbacks when needed:
  *     // most real tables split metadata (on the row) from body
  *     // content (in a separate content-doc via createDisposableCache).
  *   })
@@ -253,7 +251,8 @@ export function attachMarkdownMaterializer(
 		dir: string | (() => MaybePromise<string>);
 		/**
 		 * Gate: the materializer awaits this before the initial filesystem flush.
-		 * Matches the `waitFor` convention used by `attachSync`. Omit for no gate.
+		 * Matches the `waitFor` convention used by `openCollaboration`. Omit for
+		 * no gate.
 		 */
 		waitFor?: Promise<unknown>;
 		/**
@@ -268,12 +267,13 @@ export function attachMarkdownMaterializer(
 	let isDisposed = false;
 	/**
 	 * Closed once `initialize()` commits (past `await waitFor`). Any `.table()`
-	 * / `.kv()` call after this throws — the materializer is past the point
+	 * / `.kv()` call after this throws: the materializer is past the point
 	 * where late registrations would be picked up for initial flush.
 	 */
 	let isRegistrationOpen = true;
 
-	const resolveDir = async () => (typeof dir === 'function' ? await dir() : dir);
+	const resolveDir = async () =>
+		typeof dir === 'function' ? await dir() : dir;
 
 	// ── Per-table materialization ───────────────────────────────
 
@@ -292,7 +292,7 @@ export function attachMarkdownMaterializer(
 			filenames.set(row.id, filename);
 		}
 
-		// Sequential writes inside the observer avoid rename races — a parallel
+		// Sequential writes inside the observer avoid rename races; a parallel
 		// approach (Promise.allSettled) could delete a file another write needs.
 		return table.observe((changedIds) => {
 			void (async () => {
@@ -412,7 +412,7 @@ export function attachMarkdownMaterializer(
 			for (const filename of files) {
 				if (!filename.endsWith('.md')) continue;
 
-				// Relative to the materializer's base dir — disambiguates two
+				// Relative to the materializer's base dir; disambiguates two
 				// tables writing files with the same name.
 				const path = join(subdir, filename);
 
@@ -433,7 +433,7 @@ export function attachMarkdownMaterializer(
 					continue;
 				}
 
-				// 3. Run user's fromMarkdown (or default) — capture throws as errors
+				// 3. Run user's fromMarkdown (or default), capture throws as errors
 				const fromMarkdown: (p: MarkdownShape) => MaybePromise<BaseRow> =
 					entry.config.fromMarkdown ?? defaultFromMarkdown;
 				const { data: row, error: callbackError } = await tryAsync({
@@ -468,9 +468,19 @@ export function attachMarkdownMaterializer(
 		let skipped = 0;
 		let errored = 0;
 		for (const event of events) {
-			if (event.kind === 'imported') imported++;
-			else if (event.kind === 'skipped') skipped++;
-			else errored++;
+			switch (event.kind) {
+				case 'imported':
+					imported++;
+					break;
+				case 'skipped':
+					skipped++;
+					break;
+				case 'error':
+					errored++;
+					break;
+				default:
+					event satisfies never;
+			}
 		}
 
 		return { imported, skipped, errored, events };
@@ -494,7 +504,7 @@ export function attachMarkdownMaterializer(
 
 		if (tableName !== undefined && targets.length === 0) {
 			throw new Error(
-				`Cannot rebuild "${tableName}" — not in the materialized table set.`,
+				`Cannot rebuild "${tableName}": not in the materialized table set.`,
 			);
 		}
 
@@ -510,12 +520,15 @@ export function attachMarkdownMaterializer(
 					deleted++;
 				}
 			} catch {
-				// Directory doesn't exist yet — fine.
+				// Directory doesn't exist yet. Fine.
 			}
 
 			await mkdir(directory, { recursive: true });
 			for (const row of entry.table.getAllValid()) {
-				const { filename, content } = await rowToMarkdownFile(row, entry.config);
+				const { filename, content } = await rowToMarkdownFile(
+					row,
+					entry.config,
+				);
 				await writeMarkdownFile(directory, filename, content);
 				written++;
 			}
@@ -534,47 +547,40 @@ export function attachMarkdownMaterializer(
 		return { deleted, written };
 	}
 
+	// ── Pull (workspace → disk, additive) ────────────────────────
+
+	async function pullMarkdownFiles(): Promise<{ written: number }> {
+		const baseDir = await resolveDir();
+		let written = 0;
+		for (const entry of registered.values()) {
+			const directory = join(baseDir, entry.config.dir ?? entry.table.name);
+			await mkdir(directory, { recursive: true });
+			for (const row of entry.table.getAllValid()) {
+				const { filename, content } = await rowToMarkdownFile(
+					row,
+					entry.config,
+				);
+				await writeMarkdownFile(directory, filename, content);
+				written++;
+			}
+		}
+		return { written };
+	}
+
 	// ── Builder ──────────────────────────────────────────────────
 
 	const api = {
 		whenFlushed,
-		push: defineMutation({
-			title: 'Push markdown to workspace',
-			description:
-				'Read markdown files from disk and import rows into registered tables',
-			input: Type.Object({}),
-			handler: pushMarkdownFiles,
-		}),
-		pull: defineMutation({
-			title: 'Pull workspace to markdown',
-			description:
-				'Re-serialize all valid rows from registered tables to markdown files on disk',
-			input: Type.Object({}),
-			handler: async () => {
-				const baseDir = await resolveDir();
-				let written = 0;
-				for (const entry of registered.values()) {
-					const directory = join(baseDir, entry.config.dir ?? entry.table.name);
-					await mkdir(directory, { recursive: true });
-					for (const row of entry.table.getAllValid()) {
-						const { filename, content } = await rowToMarkdownFile(
-							row,
-							entry.config,
-						);
-						await writeMarkdownFile(directory, filename, content);
-						written++;
-					}
-				}
-				return { written };
-			},
-		}),
-		rebuild: defineMutation({
-			title: 'Rebuild markdown files',
-			description:
-				'Delete existing .md files in registered table directories and re-serialize all valid rows. Destructive — removes orphan files left by deleted rows or stale configs.',
-			input: Type.Object({ table: Type.Optional(Type.String()) }),
-			handler: ({ table }) => rebuildMarkdownFiles(table),
-		}),
+		/** Read markdown files from disk and import rows into registered tables. */
+		push: pushMarkdownFiles,
+		/** Re-serialize all valid rows from registered tables to markdown files on disk. */
+		pull: pullMarkdownFiles,
+		/**
+		 * Delete existing `.md` files in registered table directories and
+		 * re-serialize all valid rows. Destructive: removes orphan files left by
+		 * deleted rows or stale configs.
+		 */
+		rebuild: rebuildMarkdownFiles,
 	};
 
 	type MaterializerBuilder = typeof api & {

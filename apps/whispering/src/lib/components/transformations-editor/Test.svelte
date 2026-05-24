@@ -62,7 +62,7 @@
 	<Button
 		onclick={() =>
 			transformInput.mutate(
-				{ input, transformation, steps },
+				{ input, transformation },
 				{
 					onSuccess: (o) => {
 						if (o) {

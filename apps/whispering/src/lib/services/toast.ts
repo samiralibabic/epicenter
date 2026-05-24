@@ -17,16 +17,23 @@ export const ToastServiceLive = {
 	/**
 	 * Show a toast with the specified options
 	 */
-	show(options: UnifiedNotificationOptions): string {
-		const toastId = options.id ?? nanoid();
+	show({
+		id,
+		variant,
+		title,
+		description,
+		action,
+		persist,
+	}: UnifiedNotificationOptions): string {
+		const toastId = id ?? nanoid();
 
 		// Use the appropriate Sonner method based on variant
-		sonnerToast[options.variant](options.title, {
+		sonnerToast[variant](title, {
 			id: toastId,
-			description: options.description,
+			description,
 			descriptionClass: 'line-clamp-6',
-			duration: getDuration(options),
-			action: convertActionToSonner(options.action),
+			duration: getDuration({ action, persist, variant }),
+			action: convertActionToSonner(action),
 		});
 
 		return toastId;
@@ -41,13 +48,17 @@ export const ToastServiceLive = {
 };
 
 // Helper to determine toast duration
-function getDuration(options: UnifiedNotificationOptions): number {
+function getDuration({
+	action,
+	persist,
+	variant,
+}: Pick<UnifiedNotificationOptions, 'action' | 'persist' | 'variant'>): number {
 	// Persistent toasts use Infinity duration
-	if (options.persist) return Number.POSITIVE_INFINITY;
+	if (persist) return Number.POSITIVE_INFINITY;
 
-	if (options.variant === 'loading') return 5000;
-	if (options.variant === 'error' || options.variant === 'warning') return 5000;
-	if (options.action) return 4000;
+	if (variant === 'loading') return 5000;
+	if (variant === 'error' || variant === 'warning') return 5000;
+	if (action) return 4000;
 	return 3000;
 }
 
@@ -80,5 +91,3 @@ function convertActionToSonner(action: UnifiedNotificationOptions['action']) {
 			};
 	}
 }
-
-export type ToastService = typeof ToastServiceLive;

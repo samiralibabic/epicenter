@@ -6,6 +6,8 @@
 **Related**: ~~`20260222T195800-server-side-api-key-management.md`~~ (superseded — key store removed, see `20260223T102844-remove-key-store-simplify-api-key-resolution.md`)
 
 > **Note (2026-02-23)**: The `/api/provider-keys` endpoints referenced in this spec have been removed along with the encrypted key store. API keys are now resolved from environment variables. The security model for auth, sync, and proxy endpoints still applies, but key management endpoints no longer exist.
+>
+> **Path note (2026-05-22):** The `~/.epicenter/server/config.json` examples are stale. Do not copy them into new local-server config or auth work.
 
 ## Overview
 

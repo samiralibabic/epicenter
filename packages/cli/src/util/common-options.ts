@@ -1,32 +1,18 @@
 /**
- * Shared yargs option specs + argv readers for the flags every command
- * uses. `--dir` / `-C` mirrors `git -C`, `cargo --manifest-path`,
- * `pnpm --dir`, `bun --cwd`. `--workspace` / `-w` disambiguates when
- * `epicenter.config.ts` exports more than one opened handle.
+ * Shared project-root option for commands that address a local daemon.
+ *
+ * By default commands discover the nearest Epicenter project from the
+ * current working directory. `-C <dir>` changes the discovery start point.
  */
 
+import { findProjectRoot } from '@epicenter/workspace/node';
 import type { Options } from 'yargs';
 
-export const dirOption: Options = {
+export const projectOption = {
 	type: 'string',
-	alias: 'C',
-	default: '.',
-	description: 'Directory containing epicenter.config.ts',
-};
-
-export function dirFromArgv(argv: Record<string, unknown>): string {
-	return typeof argv.dir === 'string' ? argv.dir : '.';
-}
-
-export const workspaceOption: Options = {
-	type: 'string',
-	alias: 'w',
 	description:
-		'Config entry name (required when epicenter.config.ts exports multiple workspaces)',
-};
-
-export function workspaceFromArgv(
-	argv: Record<string, unknown>,
-): string | undefined {
-	return typeof argv.workspace === 'string' ? argv.workspace : undefined;
-}
+		'Project root (or any directory under it; discovery walks up to the nearest `epicenter.config.ts`).',
+	default: () => process.cwd(),
+	defaultDescription: 'current working directory',
+	coerce: findProjectRoot,
+} satisfies Options;

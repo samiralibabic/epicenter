@@ -1,248 +1,128 @@
 # @epicenter/cli
 
-> Introspect and invoke `defineQuery` / `defineMutation` actions in your `epicenter.config.ts`, either locally or on a peer that's online right now.
+> Introspect and invoke `defineQuery` / `defineMutation` actions exposed by configured daemon routes, locally or on a peer that's online right now.
 
-The surface is two verbs × two scopes, plus a pre-workspace session command:
+Each verb is a one-line shell shortcut for one workspace primitive:
 
 ```
-               Local            Remote
-             ┌─────────┬─────────────────────────────┐
- Enumerate   │  list   │  list --peer / list --all   │
- Invoke      │  run    │  run --peer                 │
-             └─────────┴─────────────────────────────┘
+                 +--------+---------------------------------------------+
+                 | Verb   | Workspace primitive                         |
+                 +--------+---------------------------------------------+
+   Enumerate     | list   | Object.entries(collaboration.actions)       |
+   Invoke        | run    | actions[key](input) or dispatch(peer, ...)  |
+   Presence      | peers  | collaboration.devices.list()                |
+                 +--------+---------------------------------------------+
 
- Presence:    peers (who's online — separate from capability)
- Cross-cutting: auth (server session, pre-workspace)
+ Supporting systems: auth (machine session), daemon (process lifecycle)
 ```
 
-`list` is the single command for inspecting actions anywhere — local by
-default, remote with `--peer <deviceId>`, or self + every connected peer
-with `--all`. `peers` answers a different question: who's reachable right
-now, regardless of what they offer.
+## Targeting an environment
 
-Every command earns its place against that grid. Anything bigger — bulk operations, exports, ad-hoc transforms — is a user-authored `.ts` script that imports the config and runs under `bun run`. The config self-loads at import time, so there is nothing for the CLI to bootstrap.
+When you iterate on `apps/api`, you want CLI commands hitting your local server, not prod. The CLI reads `EPICENTER_API_URL` from the environment; named scripts wrap the two real workflows so the target is always explicit.
 
-## Installation
+| I want to... | I run... |
+| --- | --- |
+| Develop against my local API server | `bun run cli:local auth login` |
+| Run from source against prod (rare: bug repro, demos) | `bun run cli auth login` |
+| Use the published binary (end user) | `epicenter auth login` |
+| Override the target anywhere | `EPICENTER_API_URL=https://staging.example.com bun run cli auth login` |
 
-Inside this monorepo:
+Tokens are stored per API target so prod and local sessions coexist. Each target writes one file at `<dataDir>/auth/<host>.json`, where `<dataDir>` is the platform user-data directory from `env-paths('epicenter')` and `<host>` is the API host with `:` replaced by `_`. A fresh `cli:local auth login` will not overwrite your prod session. When `EPICENTER_API_URL` is set, the CLI prints `Using API at <url>.` to stderr once per process. The daemon freezes its target at boot; to retarget, `daemon down` then `daemon up` again.
 
-```json
-{
-    "dependencies": {
-        "@epicenter/cli": "workspace:*"
-    }
-}
-```
+`EPICENTER_DATA_DIR=<path>` overrides `<dataDir>` itself (the user-data directory above; today the only user-global state stored there is cached credentials). Escape hatch for Nix, snap, ephemeral homes, and the test suite.
 
-The package exposes the `epicenter` binary via `src/bin.ts`.
+The same env var and scripts apply to every command that talks to the API, including `daemon`, not just `auth`.
 
-## The four commands
+## Commands
+
+`epicenter daemon up` opens every route listed in the project's `epicenter.config.ts`. `list`, `run`, and `peers` dispatch to that local daemon over its Unix socket.
 
 ```bash
-# auth — server session (pre-workspace; no --dir or --workspace)
-epicenter auth login                              # defaults to https://api.epicenter.so
-epicenter auth login https://self-hosted.example  # self-hosted override
-epicenter auth status                             # most recent session
-epicenter auth logout                             # most recent session
+epicenter auth login
 
-# list — what actions are exposed (local by default; --peer / --all for remote)
-epicenter list                                      # local: every export + full tree
-epicenter list tabManager.savedTabs                 # local subtree
-epicenter list tabManager.savedTabs.create          # local action detail with JSON input shape
-epicenter list --peer 0xabc                         # remote: that peer's full tree
-epicenter list --peer 0xabc tabManager.savedTabs    # remote subtree on that peer
-epicenter list --all                                # self + every connected peer
-epicenter list --all tabManager.savedTabs.create    # who offers this action?
+epicenter daemon up -C ~/vault
+epicenter daemon ps
+epicenter daemon logs -C ~/vault
+epicenter daemon down -C ~/vault
 
-# run — do one (locally, or on a remote peer with --peer)
-epicenter run tabManager.savedTabs.list
-epicenter run tabManager.savedTabs.create '{"title":"Hi","url":"https://..."}'
-epicenter run tabManager.savedTabs.create @payload.json
-cat payload.json | epicenter run tabManager.savedTabs.create
-epicenter run tabManager.savedTabs.list --peer 0xabc
+epicenter list -C ~/vault
+epicenter list fuji.entries_update -C ~/vault
 
-# peers — who's online right now (presence snapshot; no offers)
-epicenter peers
-epicenter peers -w tabManager
+epicenter run fuji.entries_update '{"id":"entry_1","tags":["triaged"]}' -C ~/vault
+epicenter run fuji.entries_update '{"id":"entry_1","tags":["triaged"]}' --peer user-1 -C ~/vault
+
+epicenter peers -C ~/vault
 ```
 
-`run` resolves the first path segment against the named exports of `epicenter.config.ts`; everything after walks into the underlying document handle until it hits a branded `defineQuery` / `defineMutation` node.
+`-C` is a start directory for project discovery. Discovery walks upward until it finds `epicenter.config.ts`, then the daemon starts every route in that config.
 
-### Local vs. remote
+## Daemon Extensions
 
-`list` defaults to the local config — the fast, deterministic view of what your code exposes. Add `--peer <deviceId>` to read another peer's published manifest, or `--all` to fan out across self plus every connected peer. `--peer` and `--all` are mutually exclusive (`--all` already includes everyone). `peers` is a separate, presence-only command: who's reachable right now, regardless of what (if anything) they offer. `run` is local by default and remote when `--peer <deviceId>` is set; the verb and schema are unchanged, only the dispatch target moves.
+`epicenter.config.ts` owns route identity. The daemon module path is only an import chosen by the project, and one daemon process can host every route in the map.
 
-Peer presence has a ~30s liveness window (inherited from Yjs awareness): a peer that crashed recently may still appear; a peer that just connected may take a beat to show up. `run --peer` polls for the target until it resolves or `--wait <ms>` expires (default 5000). `list --peer` and `list --all` poll up to `--wait <ms>` (default 500 — the awareness burst usually lands in the same write window as the sync handshake; the small grace covers concurrent peer joins). `peers` defaults to `--wait 500` for the same reason; pass `--wait 0` for a true one-shot snapshot.
-
-### Common flags
-
-| Flag | Alias | Commands | Purpose |
-| ---- | ----- | -------- | ------- |
-| `--dir` | `-C` | `list`, `run`, `peers` | Directory containing `epicenter.config.ts` (default `.`). Mirrors `git -C`. |
-| `--workspace` | `-w` | `list`, `run`, `peers` | Narrow to one export when the config has multiple workspaces. |
-| `--peer` | — | `list`, `run` | Address a remote peer by `deviceId`. On `list`, sources the action manifest from that peer's awareness; on `run`, dispatches the invocation over the sync room's RPC channel. |
-| `--all` | — | `list` | Source from self plus every connected peer in one invocation. Mutually exclusive with `--peer`. |
-| `--wait` | — | `list --peer` / `list --all` (default 500), `run --peer` (default 5000), `peers` (default 500) | Ms to wait for awareness to populate. `0` = one-shot snapshot. On `run --peer`, covers peer resolution *and* the RPC call. |
-| `--format` | — | `list`, `run`, `peers` | `json` or `jsonl`. Pretty-prints on TTY, compact when piped. Without it, commands emit their human-readable shape (tree / value / table). |
-
-`auth` intentionally takes no workspace flags — it manages server sessions, not workspace state. The server URL is a positional with a default of `https://api.epicenter.so`; self-hosters pass their own URL.
-
-### Exit codes
-
-Scripts can distinguish these cases without parsing stderr:
-
-| Code | Meaning |
-| ---- | ------- |
-| `1` | Usage or setup error — unknown command, bad flag, missing config, action path doesn't exist, workspace name doesn't match. |
-| `2` | Runtime error — local action returned `Err`, or a remote RPC completed with a failure (ActionFailed, Timeout, PeerOffline, Disconnected). |
-| `3` | Peer miss — `--peer <target>` did not resolve within `--wait`. Distinct from `2` so scripts can retry or re-enumerate peers. |
-
-## What your `epicenter.config.ts` must export
-
-An **opened workspace** — call your `openX()` factory at module top-level so the export is already constructed (Y.Doc made, attachments wired, sync ready to connect). No framework wrapper, no `.open()` step — just a plain function the CLI consumes via the export.
+```
+my-vault/
+├── epicenter.config.ts
+├── workspaces/
+│   └── fuji/
+│       ├── daemon.ts
+│       └── workspace.ts
+└── .epicenter/
+```
 
 ```ts
-// epicenter.config.ts
-import * as Y from 'yjs';
-import {
-    defineTable,
-    attachTables,
-    defineQuery,
-    defineMutation,
-} from '@epicenter/workspace';
-import Type from 'typebox';
-import { type } from 'arktype';
+import { defineConfig } from '@epicenter/workspace';
+import fuji from './workspaces/fuji/daemon.ts';
 
-const SavedTab = defineTable(type({ id: 'string', title: 'string', url: 'string', _v: '1' }));
-
-function openTabManager() {
-    const ydoc = new Y.Doc({ guid: 'epicenter.tab-manager' });
-    const tables = attachTables(ydoc, { savedTabs: SavedTab });
-
-    return {
-        ydoc,
-        tables,
-
-        // Actions live beside the data they operate on.
-        // Only the operations you wrap with defineQuery/defineMutation
-        // show up in `epicenter list`.
-        savedTabs: {
-            list: defineQuery({
-                description: 'List all saved tabs',
-                handler: () => tables.savedTabs.getAllValid(),
-            }),
-            delete: defineMutation({
-                input: Type.Object({ id: Type.String() }),
-                description: 'Delete a saved tab by id',
-                handler: ({ id }) => tables.savedTabs.delete(id),
-            }),
-        },
-
-        [Symbol.dispose]() { ydoc.destroy(); },
-    };
-}
-
-// The opened workspace is what the CLI and scripts consume.
-export const tabManager = openTabManager();
+export default defineConfig({
+	daemon: {
+		routes: {
+			fuji,
+		},
+	},
+});
 ```
 
-## Exposing operations via CLI
-
-There is no auto-expose for `attachTable` / `attachKv` methods. If you want an operation available at `epicenter run`, wrap it in `defineQuery` or `defineMutation` inside your bundle. Expose only what you actually want available from the CLI — everything else stays as an in-process method on the Table/Kv helper, usable from `scripts/*.ts`.
-
-This is deliberate. Auto-exposing CRUD would put methods nobody asked for in your CLI tree, and the curated set would either be too narrow for some apps or too wide for others. Explicit wrapping keeps the CLI surface intentional and small.
-
-The convention is to group related actions into a nested object named after the domain they operate on:
+The imported module exports a route-agnostic daemon workspace definition. The route name comes from the `daemon.routes` object key (for multi-route configs) or from the project directory's basename (for single-workspace configs).
 
 ```ts
-return {
-    ydoc,
-    tables,
+import { defineWorkspace } from '@epicenter/workspace';
 
-    savedTabs: {                                       // domain
-        list: defineQuery({ ... }),                    // action
-        delete: defineMutation({ ... }),
-    },
-    bookmarks: {
-        list: defineQuery({ ... }),
-    },
-
-    // Cross-cutting actions live at the top
-    importBackup: defineMutation({ ... }),
-
-    [Symbol.dispose]() { ydoc.destroy(); },
-};
+export default defineWorkspace({
+	async open({ keyring, openWebSocket, projectDir, route, owner, installationId, yDocClientId }) {
+		// Open the long-lived local runtime.
+		// `route` was supplied by epicenter.config.ts (or derived from the
+		// project directory's basename in single-workspace projects).
+		// Return { collaboration, [Symbol.asyncDispose] }.
+	},
+});
 ```
 
-CLI paths: `tabManager.savedTabs.list`, `tabManager.bookmarks.list`, `tabManager.importBackup`.
+The route key is the CLI route prefix. The same daemon module can be mounted under a different key, and the CLI follows that key. In the example above, Fuji actions are exposed as `fuji.<action_key>` because the project config includes the module under `fuji`.
 
-The framework doesn't mandate this shape — `iterateActions` walks the whole bundle and finds anything branded, no matter where it sits. Two other placements work if you prefer them:
+`workspaces/` is an organization convention for source files. It is not scanned, and it does not enable routes by itself. A small project can import daemon modules from any path as long as `epicenter.config.ts` registers them.
 
-- A dedicated `actions:` slot — adds one path segment (`tabManager.actions.savedTabs.list`) in exchange for visual separation between data and operations.
-- Flat at the top — shortest path (`tabManager.listSavedTabs`) but action names have to encode the domain, and the top level becomes a grab-bag.
-
-Domain-nested is the recommended convention because it reads naturally and co-locates each action with the data it uses.
-
-## Naming your exports
-
-Every workspace handle is a **named export**. The export name becomes the first segment of every CLI dot-path. A config with a single workspace can use any name — `tabManager`, `tm`, `w` — but once you add a second workspace, the prefix disambiguates them, so a readable name ages better than a one-letter one.
-
-There is no default-export shorthand. Even a config with one workspace uses a named export. This keeps paths stable when you later add a second workspace: `tabManager.savedTabs.list` on day 1 is still `tabManager.savedTabs.list` on day 180 after you add a second workspace. A default-export shortcut would silently invalidate every script, doc, and CI job using the old path the moment you grew past one workspace.
-
-```ts
-// epicenter.config.ts
-export const tabManager = openTabManager();
-export const fuji       = openFuji();
-// epicenter run tabManager.savedTabs.list
-// epicenter run fuji.entries.list
-```
-
-The Y.Doc GUID (set inside `openX()` via `new Y.Doc({ guid: ... })`) and the export name serve **different purposes**:
-
-- `'epicenter.tab-manager'` — the Y.Doc's GUID. Controls persistence file, sync room, CRDT identity. Don't change this on a workspace with real data.
-- `tabManager` — the JS binding name. Controls the CLI path prefix. Safe to rename any time.
-
-You can rename the export freely without touching any persistent data. If you decide the prefix is too verbose six months in, rename `tabManager` → `tm` and every sync/persistence artifact stays exactly where it is.
+`.epicenter/` holds generated project data such as SQLite materializers, Yjs update logs, markdown materializers, and its generated `.gitignore`. It is not a registry. Runtime files live outside the project: sockets and daemon metadata use the OS runtime directory, while daemon logs use the platform log directory from `env-paths`.
 
 ## Scripting
 
-Skip the CLI entirely for anything non-trivial:
+Use scripts for anything beyond one-shot CLI calls:
 
 ```ts
-// scripts/export-tabs.ts
-import { tabManager } from '../epicenter.config';
-import { writeFile } from 'node:fs/promises';
+import { connectDaemonActions } from '@epicenter/workspace/node';
+import type { createFujiActions } from '@epicenter/fuji';
 
-try {
-    await tabManager.whenReady;
-    const tabs = tabManager.tables.savedTabs.getAllValid();
-    await writeFile('./tabs.json', JSON.stringify(tabs, null, 2));
-} finally {
-    tabManager.dispose();
-}
+const fuji = await connectDaemonActions<ReturnType<typeof createFujiActions>>({
+	route: 'fuji',
+});
+
+await fuji.entries_update({ id, tags: ['triaged'] });
 ```
 
-```bash
-bun run scripts/export-tabs.ts
-```
-
-Scripts are strictly more powerful than the CLI: you get the full Table/Kv APIs, arbitrary control flow, and any npm dependency. Reach for the CLI for one-shot invocations of things you've deliberately exposed; reach for scripts for everything else.
+Scripts get normal TypeScript control flow. The CLI stays small: list, run, peers, and daemon lifecycle.
 
 ## Public API
 
 ```ts
-import {
-    createCLI,              // binary entry (used by bin.ts)
-    loadConfig,             // { entries: [{ name, handle }], dispose() }
-    createSessionStore,     // device-code session persistence
-    createAuthApi,          // typed Better Auth client
-    epicenterPaths,         // home, authSessions, persistence(id)
-    attachSessionUnlock,    // apply stored encryption keys to an EncryptionAttachment
-} from '@epicenter/cli';
+import { createCLI } from '@epicenter/cli';
 ```
-
-## Design docs
-
-- `specs/20260421T155436-cli-scripting-first-redesign.md` — base surface (`auth`, `list`, `run`) and the scripting-first rationale; why 11 commands collapsed to the current grid.
-- `specs/20260423T174126-cli-remote-peer-rpc.md` — the remote column: `peers` + `run --peer` over the sync room's RPC channel.
-- `specs/20260423T010000-cli-json-only-input.md` — `run` takes JSON only; no schema-to-flags bridge.

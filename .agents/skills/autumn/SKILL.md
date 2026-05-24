@@ -1,6 +1,6 @@
 ---
 name: autumn
-description: Integrate Autumn billing—define features/plans in autumn.config.ts, use autumn-js SDK for credit checks/tracking, manage the atmn CLI for push/pull. Use when working on billing, pricing, credits, plan gating, or metered usage.
+description: 'Autumn billing in Epicenter: `autumn.config.ts`, `autumn-js` credit checks, `atmn` CLI, plan gates, and metered AI usage. Use when changing billing, pricing, credits, plan access, refunds, or usage events.'
 metadata:
   author: epicenter
   version: '1.2'
@@ -25,6 +25,13 @@ Use this when you need to:
 - Gate API endpoints behind billing (free tier limits, paid plan access).
 - Push/pull billing config with the `atmn` CLI.
 - Debug billing issues (insufficient credits, customer sync, refunds).
+
+## Domain Model Checks
+
+- Use Autumn's current nouns precisely: Feature, Entitlement, Product, ProductItem, Price, Customer, and CustomerProduct.
+- Validate ProductItem shapes before pushing config. Most failures come from invalid interval combinations, missing linked features, or price/reset variants that do not match the feature type.
+- Decide fail-open versus fail-closed behavior for `check()` errors at each endpoint. AI credit charging should fail closed before expensive provider calls.
+- If Stripe webhooks or CustomerProduct state transitions are touched, make the handler idempotent around retries.
 
 ---
 
@@ -223,8 +230,8 @@ Use when the operation fails after credits were already deducted (e.g., AI strea
 ### Setup
 
 ```bash
-bunx atmn login        # OAuth login, saves keys to .env
-bunx atmn env          # Verify org and environment
+bun x atmn login       # OAuth login, saves keys to .env
+bun x atmn env         # Verify org and environment
 ```
 
 ### Config File
@@ -238,20 +245,20 @@ import { feature, item, plan } from 'atmn';
 ### Push/Pull
 
 ```bash
-bunx atmn preview      # Dry run — shows what would change
-bunx atmn push         # Push to sandbox (interactive confirmation)
-bunx atmn push --prod  # Push to production
-bunx atmn push --yes   # Auto-confirm (for CI/CD)
-bunx atmn pull         # Pull remote config, generate SDK types
+bun x atmn preview     # Dry run, shows what would change
+bun x atmn push        # Push to sandbox (interactive confirmation)
+bun x atmn push --prod # Push to production
+bun x atmn push --yes  # Auto-confirm (for CI/CD)
+bun x atmn pull        # Pull remote config, generate SDK types
 ```
 
 ### Data Inspection
 
 ```bash
-bunx atmn customers    # Browse customers
-bunx atmn plans        # Browse plans
-bunx atmn features     # Browse features
-bunx atmn events       # Browse usage events
+bun x atmn customers   # Browse customers
+bun x atmn plans       # Browse plans
+bun x atmn features    # Browse features
+bun x atmn events      # Browse usage events
 ```
 
 ---
@@ -267,7 +274,7 @@ Use the **same key name** in both environments. Let your secrets manager (Infisi
 
 For Cloudflare Workers: `wrangler secret put AUTUMN_SECRET_KEY`
 
-For local dev with Infisical: secrets are auto-injected via `infisical run --path=/api -- wrangler dev`
+For local dev with Infisical: secrets are auto-injected via `infisical run --env=dev --path=/api -- wrangler dev`
 
 ---
 

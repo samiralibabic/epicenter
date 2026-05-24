@@ -85,11 +85,11 @@ We use `@noble/ciphers` for the implementation because it's synchronous and Cure
 
 | Mode | Key source | Server can decrypt? |
 |---|---|---|
-| Cloud | Server derives from BETTER_AUTH_SECRET | Yes |
-| Self-hosted | User password → PBKDF2 → key | No (zero-knowledge) |
+| Cloud | Server derives from `ENCRYPTION_SECRETS` | Yes |
+| Self-hosted | Server derives from your `ENCRYPTION_SECRETS` | Only your server |
 | Local / no encryption | No key → passthrough | N/A |
 
-This single code path handles every trust model Epicenter supports. In the cloud, the server derives the key from a secret, enabling features like AI and search. For self-hosted users, the key is derived from their password via PBKDF2, ensuring the developer never sees the plaintext. The application logic doesn't care where the key came from—it just sees a key and encrypts.
+This single code path handles every trust model Epicenter supports today. In the hosted cloud, Epicenter infrastructure owns `ENCRYPTION_SECRETS`, so Epicenter sits inside the trust boundary. In a self-hosted deployment, you own that secret and the server that uses it. The mechanism stays the same; the trust boundary moves to your infrastructure.
 
 ## Related
 

@@ -9,6 +9,3 @@ export const OpenRouterCompletionServiceLive =
 			'X-Title': 'Whispering',
 		},
 	});
-
-export type OpenRouterCompletionService =
-	typeof OpenRouterCompletionServiceLive;

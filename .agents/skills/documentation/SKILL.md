@@ -1,6 +1,6 @@
 ---
 name: documentation
-description: In-code documentation, folder READMEs, and code comments. Use when the user says "document this", "add JSDoc", "write a README", "explain this code", or when writing README.md files, JSDoc comments, or code organization docs.
+description: 'In-code documentation, folder READMEs, code comments. Use when: "document this", "add JSDoc", "write a README", "explain this code", or writing README.md/JSDoc.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -9,6 +9,7 @@ metadata:
 # Documentation
 
 Follow [writing-voice](../writing-voice/SKILL.md) for tone.
+For architecture walkthroughs, folder mental models, or newcomer explanations, use [notebook-explanation](../notebook-explanation/SKILL.md) for the shape.
 
 Documentation explains **why**, not **what**. Users can read code to see what it does. They need you to explain the reasoning.
 
@@ -24,6 +25,25 @@ Use this pattern when you need to:
 ## Folder READMEs
 
 Primary job: explain **why** this folder exists and the mental model.
+
+Notebook style is often the clearest README opening:
+
+```txt
+Question:
+  Why does this folder exist?
+
+Model:
+  file group = responsibility
+  boundary = owner
+
+Flow:
+  input
+    -> module
+    -> output
+
+Rule:
+  when adding code here, preserve this boundary
+```
 
 ### Can Include
 

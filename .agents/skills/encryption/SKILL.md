@@ -1,6 +1,6 @@
 ---
 name: encryption
-description: Encryption patterns for HKDF key derivation, XChaCha20-Poly1305 symmetric encryption, encrypted blob formats, key hierarchy, and key rotation. Use when the user says "encrypt this", "add encryption", "key management", or when working with crypto primitives, encrypted CRDT values, or the EncryptedBlob type.
+description: 'Encryption: HKDF, XChaCha20-Poly1305, blob formats, key hierarchy/rotation. Use for "encrypt this", "key management", crypto primitives, EncryptedBlob.'
 ---
 
 # Encryption Patterns
@@ -9,13 +9,13 @@ description: Encryption patterns for HKDF key derivation, XChaCha20-Poly1305 sym
 
 When working with encryption, consult these repositories for patterns and documentation:
 
-- [noble-ciphers](https://github.com/paulmillr/noble-ciphers) — Audited JS implementation of ChaCha, Salsa, AES (our crypto primitive library)
-- [libsodium](https://github.com/jedisct1/libsodium) — Crypto primitives, secretbox/AEAD patterns, XChaCha20-Poly1305
-- [Signal Protocol (libsignal)](https://github.com/signalapp/libsignal) — Key hierarchy, HKDF usage, Double Ratchet, message encryption
-- [Vault Transit](https://developer.hashicorp.com/vault/docs/secrets/transit) — Key versioning, rotation, ciphertext format (`vault:v1:base64`)
-- [Bitwarden](https://github.com/bitwarden/server) — Client-side vault encryption, key hierarchy (master key -> org key -> cipher key)
-- [AWS KMS](https://docs.aws.amazon.com/kms/) — Envelope encryption patterns, key rotation lifecycle
-- [age](https://github.com/FiloSottile/age) — Simple file encryption design philosophy
+- [noble-ciphers](https://github.com/paulmillr/noble-ciphers) : Audited JS implementation of ChaCha, Salsa, AES (our crypto primitive library)
+- [libsodium](https://github.com/jedisct1/libsodium) : Crypto primitives, secretbox/AEAD patterns, XChaCha20-Poly1305
+- [Signal Protocol (libsignal)](https://github.com/signalapp/libsignal) : Key hierarchy, HKDF usage, Double Ratchet, message encryption
+- [Vault Transit](https://developer.hashicorp.com/vault/docs/secrets/transit) : Key versioning, rotation, ciphertext format (`vault:v1:base64`)
+- [Bitwarden](https://github.com/bitwarden/server) : Client-side vault encryption, key hierarchy (master key -> org key -> cipher key)
+- [AWS KMS](https://docs.aws.amazon.com/kms/) : Envelope encryption patterns, key rotation lifecycle
+- [age](https://github.com/FiloSottile/age) : Simple file encryption design philosophy
 
 ### What We Borrow From Each
 
@@ -67,11 +67,11 @@ ENCRYPTION_SECRETS="1:base64Secret"
 
 ### Key Delivery Best Practices
 
-**Prefer inline key delivery over separate endpoints.** If the session already authenticates the user, derive and embed key material in the session response. HKDF-SHA256 derivation adds <0.1ms—the optimization of splitting key delivery from session delivery costs more in complexity (version-tracking state, extra round-trips, duplicated callbacks) than it saves in compute.
+**Prefer inline key delivery over separate endpoints.** If the session already authenticates the user, derive and embed key material in the session response. HKDF-SHA256 derivation adds <0.1ms:the optimization of splitting key delivery from session delivery costs more in complexity (version-tracking state, extra round-trips, duplicated callbacks) than it saves in compute.
 
-**Make unlock operations idempotent.** Calling `unlock()` with the same key twice should be a no-op, and calling it with a different key should cleanly replace the active key. This eliminates client-side version tracking—the client receives the key, calls unlock, done. No mutable `lastVersion` state, no conditional fetches.
+**Make unlock operations idempotent.** Calling `unlock()` with the same key twice should be a no-op, and calling it with a different key should cleanly replace the active key. This eliminates client-side version tracking:the client receives the key, calls unlock, done. No mutable `lastVersion` state, no conditional fetches.
 
-**Embed key version in the ciphertext, not in application logic.** The blob header (`blob[1]`) carries the version that encrypted it. Decryption reads the version from the blob and selects the matching key from the keyring. Clients never need to track which version they’re using—the data is self-describing.
+**Embed key version in the ciphertext, not in application logic.** The blob header (`blob[1]`) carries the version that encrypted it. Decryption reads the version from the blob and selects the matching key from the keyring. Clients never need to track which version they’re using:the data is self-describing.
 
 **Minimize client-side key state.** Ideally zero mutable state. The session carries the key, the client passes it to `unlock()`, the workspace derives per-workspace keys internally. No caches to invalidate, no version comparisons, no separate fetch methods.
 
@@ -92,6 +92,7 @@ AES-256-GCM via WebCrypto uses hardware AES-NI and is faster, but it's async. We
 - Uses Web Crypto HKDF with SHA-256 hash
 - Empty salt (acceptable for HKDF when input key material has high entropy)
 - Info strings are domain-separation labels, NOT version identifiers
+- Treat HKDF info strings as protocol strings. Document their allowed shape, keep them stable, and require a migration or format boundary when they change.
 - `user:{userId}` for per-user keys, `workspace:{wsId}` for per-workspace keys
 - Different secrets with the same info string produce cryptographically independent keys (RFC 5869)
 
@@ -158,3 +159,22 @@ encrypted wrapper's error containment.
 ### AAD (Additional Authenticated Data)
 
 When encrypting workspace values, the entry key is bound as AAD to prevent ciphertext transplant attacks (moving an encrypted value from one key to another).
+
+Authenticate every piece of metadata that changes plaintext interpretation. If ciphertext can cross workspace, table, row, or entry boundaries, bind those identifiers as AAD too.
+
+## Version Boundaries
+
+Keep these concepts separate:
+
+- Blob format version: binary layout and algorithm.
+- Key version: which secret encrypted a blob.
+- Protocol or serialization version: how plaintext is interpreted before encryption.
+
+Do not use one version number to stand in for another.
+
+## Test Vectors And Operational Gates
+
+- Add fixed test vectors for HKDF labels, blob packing, version-byte parsing, AAD mismatch, tampering, unknown key version, and old-key decrypt.
+- Define server visibility plainly: what the server can decrypt, what it only stores, and what metadata remains visible.
+- Bulk or account-level rotation should validate the encrypted object set before committing the rotation.
+- Keep auth secrets, encryption secrets, recovery flows, and session invalidation separate. Rotating or invalidating one should not silently imply another.

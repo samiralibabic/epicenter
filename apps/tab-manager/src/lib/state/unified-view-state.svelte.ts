@@ -2,36 +2,25 @@
  * Reactive unified view state for the side panel.
  *
  * Manages section expansion (open tabs, saved for later, bookmarks) and
- * derives a single flat item array from {@link browserState},
- * {@link savedTabState}, and {@link bookmarkState}. The flat array feeds
- * a single VList that renders all sections in one scrollable view.
+ * derives a single flat item array from browser state plus the session-owned
+ * saved tab and bookmark states. The flat array feeds a single VList that
+ * renders all sections in one scrollable view.
  *
  * Section expand/collapse works identically to how window expand/collapse
- * already works in the original `FlatTabList`—a `SvelteSet` tracks expanded
+ * already works in the original `FlatTabList`: a `SvelteSet` tracks expanded
  * sections, and `$derived` flatItems includes or excludes child items.
  *
- * @example
- * ```svelte
- * <script>
- *   import { unifiedViewState } from '$lib/state/unified-view-state.svelte';
- * </script>
- *
- * <VList data={unifiedViewState.flatItems}>
- *   {#snippet children(item)}
- *     {#if item.kind === 'section-header'}...{/if}
- *   {/snippet}
- * </VList>
- * ```
+ * Components read this through `workspace.state.unifiedView`.
  */
 
 import { SvelteSet } from 'svelte/reactivity';
-import { bookmarkState } from '$lib/state/bookmark-state.svelte';
+import type { BookmarkState } from '$lib/state/bookmark-state.svelte';
 import type {
 	BrowserTab,
 	BrowserWindow,
 } from '$lib/state/browser-state.svelte';
 import { browserState } from '$lib/state/browser-state.svelte';
-import { savedTabState } from '$lib/state/saved-tab-state.svelte';
+import type { SavedTabState } from '$lib/state/saved-tab-state.svelte';
 import {
 	searchCaseSensitive,
 	searchExactMatch,
@@ -58,7 +47,13 @@ export type FlatItem =
 // State Factory
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createUnifiedViewState() {
+export function createUnifiedViewState({
+	bookmarks,
+	savedTabs,
+}: {
+	bookmarks: BookmarkState;
+	savedTabs: SavedTabState;
+}) {
 	/** Which top-level sections are expanded. All expanded by default. */
 	const expandedSections = new SvelteSet<SectionId>([
 		'open-tabs',
@@ -69,14 +64,13 @@ function createUnifiedViewState() {
 	/**
 	 * Which windows are expanded within the open tabs section.
 	 *
-	 * Starts empty because this singleton initializes at import time—before
-	 * {@link browserState.whenReady} resolves. The focused window is seeded
-	 * once browser data is available (see `whenReady.then` below).
+	 * Starts empty because the session creates this before browser state is
+	 * ready. The focused window is seeded once browser data is available.
 	 */
 	const expandedWindows = new SvelteSet<number>();
 
 	// Seed focused window(s) once browser data is available.
-	// Runs exactly once—after this, the user controls expansion via toggleWindow.
+	// Runs exactly once: after this, the user controls expansion via toggleWindow.
 	void browserState.whenReady.then(() => {
 		for (const w of browserState.windows) {
 			if (w.focused) expandedWindows.add(w.id);
@@ -92,7 +86,7 @@ function createUnifiedViewState() {
 	/**
 	 * Pre-compiled regex for the current search query.
 	 * Null when regex mode is off, query is empty, or the pattern is invalid.
-	 * Computed once per reactive change—avoids recompiling per tab.
+	 * Computed once per reactive change: avoids recompiling per tab.
 	 */
 	const compiledRegex = $derived.by(() => {
 		if (!searchRegex.current || !isFiltering) return null;
@@ -142,11 +136,11 @@ function createUnifiedViewState() {
 		}
 
 		// Default: substring includes
-		const q = searchCaseSensitive.current
+		const queryText = searchCaseSensitive.current
 			? searchQuery
 			: searchQuery.toLowerCase();
-		const v = searchCaseSensitive.current ? value : value.toLowerCase();
-		return v.includes(q);
+		const valueText = searchCaseSensitive.current ? value : value.toLowerCase();
+		return valueText.includes(queryText);
 	}
 
 	/** Match against title and/or URL based on current search preferences. */
@@ -156,21 +150,21 @@ function createUnifiedViewState() {
 	): boolean {
 		if (!isFiltering) return true;
 
-		const t = title ?? '';
-		const u = url ?? '';
+		const titleText = title ?? '';
+		const urlText = url ?? '';
 
 		switch (searchField.current) {
 			case 'title':
-				return testField(t, 'title');
+				return testField(titleText, 'title');
 			case 'url':
-				return testField(u, 'url');
+				return testField(urlText, 'url');
 			case 'all':
-				return testField(t, 'title') || testField(u, 'url');
+				return testField(titleText, 'title') || testField(urlText, 'url');
 		}
 	}
 
 	/**
-	 * Flat item array derived from browserState + savedTabState + bookmarkState.
+	 * Flat item array derived from browserState, saved tabs, and bookmarks.
 	 *
 	 * Respects section expansion, window expansion, and search filtering.
 	 * When filtering is active, all sections and windows auto-expand and
@@ -232,10 +226,10 @@ function createUnifiedViewState() {
 		}
 
 		// ── Saved for Later section ──
-		const savedTabs = savedTabState.tabs;
+		const savedTabItems = savedTabs.tabs;
 
 		if (isFiltering) {
-			const matchingSaved = savedTabs.filter((tab) =>
+			const matchingSaved = savedTabItems.filter((tab) =>
 				matchesFilter(tab.title, tab.url),
 			);
 			if (matchingSaved.length > 0) {
@@ -254,17 +248,17 @@ function createUnifiedViewState() {
 				kind: 'section-header',
 				section: 'saved',
 				label: 'Saved for Later',
-				count: savedTabs.length,
+				count: savedTabItems.length,
 			});
 			if (expandedSections.has('saved')) {
-				for (const savedTab of savedTabs) {
+				for (const savedTab of savedTabItems) {
 					items.push({ kind: 'saved-tab', savedTab });
 				}
 			}
 		}
 
 		// ── Bookmarks section ──
-		const allBookmarks = bookmarkState.bookmarks;
+		const allBookmarks = bookmarks.bookmarks;
 
 		if (isFiltering) {
 			const matchingBookmarks = allBookmarks.filter((b) =>
@@ -385,5 +379,3 @@ function createUnifiedViewState() {
 		},
 	};
 }
-
-export const unifiedViewState = createUnifiedViewState();

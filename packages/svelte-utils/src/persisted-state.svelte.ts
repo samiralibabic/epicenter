@@ -64,7 +64,7 @@ type PersistedStateOptions<TSchema extends StandardSchemaV1> = {
 	syncTabs?: boolean;
 	/**
 	 * Called when a value read from storage fails to parse or validate.
-	 * Fire-and-forget — `defaultValue` is used as the fallback regardless.
+	 * Fire-and-forget. `defaultValue` is used as the fallback regardless.
 	 */
 	onError?: (error: PersistedError) => void;
 	/**
@@ -94,7 +94,7 @@ type PersistedStateOptions<TSchema extends StandardSchemaV1> = {
  * theme.current;           // 'dark' (reactive)
  * theme.current = 'light';  // persists to localStorage
  *
- * // Imperative read (sync — localStorage is immediate):
+ * // Imperative read (sync: localStorage is immediate):
  * const value = theme.get();
  * ```
  */
@@ -155,11 +155,13 @@ export function createPersistedState<TSchema extends StandardSchemaV1>({
 	}
 
 	let value = $state(readFromStorage());
+	let disposed = false;
 	const listeners = new Set<
 		(value: StandardSchemaV1.InferOutput<TSchema>) => void
 	>();
 
 	function setValue(nextValue: StandardSchemaV1.InferOutput<TSchema>) {
+		if (disposed) return;
 		if (Object.is(value, nextValue)) return;
 		value = nextValue;
 		for (const listener of listeners) {
@@ -168,6 +170,7 @@ export function createPersistedState<TSchema extends StandardSchemaV1>({
 	}
 
 	function setAndPersist(nextValue: StandardSchemaV1.InferOutput<TSchema>) {
+		if (disposed) return;
 		setValue(nextValue);
 		try {
 			storageApi.setItem(key, JSON.stringify(nextValue));
@@ -178,23 +181,29 @@ export function createPersistedState<TSchema extends StandardSchemaV1>({
 
 	// Cross-tab sync: `storage` event fires when ANOTHER tab writes to localStorage.
 	// sessionStorage doesn't fire cross-tab events, so enabling this is harmless.
+	const handleStorage = (e: StorageEvent) => {
+		if (disposed) return;
+		if (e.key !== key) return;
+		setValue(parseRawValue(e.newValue));
+	};
+
+	const handleFocus = () => {
+		if (disposed) return;
+		setValue(readFromStorage());
+	};
+
 	if (syncTabs) {
-		window.addEventListener('storage', (e) => {
-			if (e.key !== key) return;
-			setValue(parseRawValue(e.newValue));
-		});
+		window.addEventListener('storage', handleStorage);
 	}
 
 	// Same-tab sync: catches DevTools edits and writes from other libraries.
-	window.addEventListener('focus', () => {
-		setValue(readFromStorage());
-	});
+	window.addEventListener('focus', handleFocus);
 
 	return {
 		/**
 		 * Reactive value for Svelte template bindings and `$derived` blocks.
 		 *
-		 * For localStorage-backed stores this is always the real value—localStorage
+		 * For localStorage-backed stores this is always the real value. localStorage
 		 * is synchronous, so `.current` is accurate at import time. Use `.get()`
 		 * in imperative code (boot scripts, closures) for API parity with async stores.
 		 */
@@ -205,7 +214,7 @@ export function createPersistedState<TSchema extends StandardSchemaV1>({
 			setAndPersist(newValue);
 		},
 		/**
-		 * Authoritative read—returns the current value synchronously.
+		 * Authoritative read: returns the current value synchronously.
 		 *
 		 * localStorage is synchronous, so this is always the real value.
 		 * Use this in imperative code (boot scripts, closures, event handlers)
@@ -224,14 +233,24 @@ export function createPersistedState<TSchema extends StandardSchemaV1>({
 		},
 		/**
 		 * Method-form setter for `{ get, set, watch }` consumers. Equivalent to
-		 * assigning `.current` — both set the reactive value and persist.
+		 * assigning `.current`: both set the reactive value and persist.
 		 */
 		set: setAndPersist,
 		watch(listener: (value: StandardSchemaV1.InferOutput<TSchema>) => void) {
+			if (disposed) return () => {};
 			listeners.add(listener);
 			return () => {
 				listeners.delete(listener);
 			};
+		},
+		[Symbol.dispose]() {
+			if (disposed) return;
+			disposed = true;
+			if (syncTabs) {
+				window.removeEventListener('storage', handleStorage);
+			}
+			window.removeEventListener('focus', handleFocus);
+			listeners.clear();
 		},
 	};
 }

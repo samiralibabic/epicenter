@@ -772,18 +772,18 @@ The current API passes the full client object to factories. This phase introduce
   	TId extends string = string,
   	TTableDefinitions extends TableDefinitions = Record<string, never>,
   	TKvDefinitions extends KvDefinitions = Record<string, never>,
-  	TAwarenessDefinitions extends AwarenessDefinitions = Record<string, never>,
+  	TAwarenessSchema extends AwarenessSchema = Record<string, never>,
   > = {
   	id: TId;
   	ydoc: Y.Doc;
   	definitions: {
   		tables: TTableDefinitions;
   		kv: TKvDefinitions;
-  		awareness: TAwarenessDefinitions;
+  		awareness: TAwarenessSchema;
   	};
   	tables: Tables<TTableDefinitions>;
   	kv: KeyValueStore<TKvDefinitions>;
-  	awareness: AwarenessHelper<TAwarenessDefinitions>;
+  	awareness: AwarenessAttachment<TAwarenessSchema>;
   	batch: (fn: () => void) => void;
   };
   ```
@@ -1127,7 +1127,7 @@ type ExtensionContext<WorkspaceExtensionClient> = {
 		definitions: { tables; kv; awareness };
 		tables: Tables;
 		kv: KeyValueStore;
-		awareness: AwarenessHelper;
+		awareness: AwarenessAttachment;
 		batch: (fn) => void;
 	};
 	whenReady: Promise<void>;

@@ -2,9 +2,9 @@
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import * as Table from '@epicenter/ui/table';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { modelsQuery } from '$lib/query/billing';
+	import { billing } from '$lib/query/billing';
 
-	const models = createQuery(() => modelsQuery.options);
+	const models = createQuery(() => billing.models.options);
 
 	/** Sorted model entries: cheapest first, then alphabetical. */
 	const sortedModels = $derived(
@@ -16,8 +16,7 @@
 
 	/**
 	 * Extract provider from model name heuristic.
-	 * Models starting with 'gpt'/'o' are OpenAI, 'claude' is Anthropic,
-	 * 'gemini' is Google, 'grok' is xAI.
+	 * Models starting with 'gpt'/'o' are OpenAI, 'gemini' is Google, 'grok' is xAI.
 	 */
 	function getProvider(model: string): string {
 		if (
@@ -30,7 +29,6 @@
 			model.startsWith('codex')
 		)
 			return 'OpenAI';
-		if (model.startsWith('claude')) return 'Anthropic';
 		if (model.startsWith('gemini')) return 'Google';
 		if (model.startsWith('grok')) return 'xAI';
 		return 'Unknown';

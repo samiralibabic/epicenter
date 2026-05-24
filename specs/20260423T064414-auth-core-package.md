@@ -5,31 +5,52 @@ status: shipped
 
 # Extract framework-agnostic auth core into `packages/auth`
 
+## Current Reconciliation (2026-05-07)
+
+The shipped notes below are historically useful but stale in two important
+ways. `packages/auth/src` now has tests for the auth factories, auth contract,
+machine auth, machine session storage, and session normalization. The old
+"step 5 did not land" follow-up is no longer accurate.
+
+The remaining follow-up from this lineage is not "add auth tests from scratch."
+It is narrower:
+
+1. Add targeted tests only when changing the current contract.
+2. Keep the boot-cache storage invariant: storage loads an initial bearer
+   session or cookie identity, then auth state flows from Better Auth.
+3. Prefer changing the current `createCookieAuth` and `createBearerAuth`
+   surfaces directly. Do not revive the old `AuthCore`, `onSessionChange`,
+   `onLogin`, or `onLogout` API from this spec body.
+
 ## Shipped notes (2026-04-25)
 
-This spec was originally marked `queued`. The migration actually landed on the `drop-document-factory` branch across ~24 commits. `packages/auth/` and `packages/auth-svelte/` exist with the full `AuthCore` surface; all six apps consume `@epicenter/auth-svelte` and use `auth.onSessionChange(...)` in place of the old `applySession` Svelte-effect bridge. Steps 1–8 of the migration plan landed; **step 5 (unit tests) did not** and remains the highest-leverage follow-up.
+This spec was originally marked `queued`. The migration actually landed on the `drop-document-factory` branch across ~24 commits. `packages/auth/` and `packages/auth-svelte/` exist with the full `AuthCore` surface; all six apps consume `@epicenter/auth-svelte` and use `auth.onSessionChange(...)` in place of the old `applySession` Svelte-effect bridge. Steps 1---8 of the migration plan landed. Historical note: the 2026-04-25 shipped note said **step 5 (unit tests) did not** land, but that follow-up has since been superseded by the current auth test files.
 
 ### Divergences from the spec as written
 
-1. **`signOut` returns `Result<undefined, AuthError>` instead of `Promise<void>`** (commit `e2f7ed3c9`). Improvement — gives consumers a consistent error contract across all auth ops.
+1. **`signOut` returns `Result<undefined, AuthError>` instead of `Promise<void>`** (commit `e2f7ed3c9`). Improvement --- gives consumers a consistent error contract across all auth ops.
 
 2. **HMR pattern only calls `auth[Symbol.dispose]()`**, not the spec's `unsubscribeSession() + auth[Symbol.dispose]()` two-step. `Symbol.dispose` clears all subscriber registries via `.clear()`, so the Set is dropped and the old core becomes unreachable on the next module evaluation. Spec was over-cautious; shipped form is functionally equivalent and one line shorter per app.
 
 3. **Per-doc rotation uses `getToken: () => auth.getToken()` (live read at connect time), not `auth.onTokenChange(token => sync.setToken(token))` (subscription per handle)**. Documented in `apps/fuji/src/lib/entry-content-docs.ts:53-56`. The supervisor in `attach-sync.ts:451-454` calls `getToken()` before every connect attempt, so natural reconnects pick up rotations without per-doc subscriptions to leak. Per-doc factories now register **zero** subscribers; they take `Pick<AuthCore, 'getToken'>` only. Strictly simpler than the spec.
 
-4. **Field-level session writer partition** (commits `e3b2a38b8`, `d11ae8e00`, `ff852c3c2`) — `onSuccess` interceptor owns token writes; `useSession.subscribe` owns user/keys writes. Not in the original spec; added to fix a real race where BA's async `useSession` refetch would clobber a token the `onSuccess` interceptor had just rotated. Inline JSDoc explains the partition. Working *with* better-auth, not fighting it.
+4. **Field-level session writer partition** (commits `e3b2a38b8`, `d11ae8e00`, `ff852c3c2`) --- `onSuccess` interceptor owns token writes; `useSession.subscribe` owns user/keys writes. Not in the original spec; added to fix a real race where BA's async `useSession` refetch would clobber a token the `onSuccess` interceptor had just rotated. Inline JSDoc explains the partition. Working *with* better-auth, not fighting it.
 
-### Out-of-scope follow-ups — status
+### Out-of-scope follow-ups --- status
 
 | Follow-up | Status |
 |---|---|
-| `attachSync` redesign (replace `setToken`/`requiresToken` with `url:` callback) | **partially done** — `setToken` removed, `getToken` callback added on `attachSync`, `requiresToken` is now internal (derived from presence of `getToken`). The unified `url: () => string \| null` closure was rejected in favor of separate `url` (string) + `getToken` (callback). |
+| `attachSync` redesign (replace `setToken`/`requiresToken` with `url:` callback) | **partially done** --- `setToken` removed, `getToken` callback added on `attachSync`, `requiresToken` is now internal (derived from presence of `getToken`). The unified `url: () => string \| null` closure was rejected in favor of separate `url` (string) + `getToken` (callback). |
 | Removing `sync.setToken` / `sync.reconnect` | `setToken` gone; `reconnect()` retained at 4 app `client.ts` call sites where session-change forces a workspace-doc reconnect. Marginal value remaining; keep. |
-| Collapsing `applySession` into `onLogin`/`onLogout` | **Not done.** All apps still use a single `onSessionChange` with `if (next === null)` / `if (previous?.token !== next.token)` branching. The `onLogin`/`onLogout` API exists on `AuthCore` but has zero call sites — candidate for either deletion or a sweeping migration. |
+| Collapsing `applySession` into `onLogin`/`onLogout` | **Not done.** All apps still use a single `onSessionChange` with `if (next === null)` / `if (previous?.token !== next.token)` branching. The `onLogin`/`onLogout` API exists on `AuthCore` but has zero call sites --- candidate for either deletion or a sweeping migration. |
 
-### Open follow-up worth doing
+### Historical follow-up, now superseded
 
-**Land the unit tests from step 5.** The spec lists 8 specific invariants (replay-on-subscribe semantics, firing order, isBusy counter under overlapping ops, subscriber-error isolation, etc.). Zero are guarded today. This is the highest-leverage cleanup before further auth changes — refactors against an untested contract drift silently.
+The original follow-up was: **land the unit tests from step 5.** That is no
+longer the right action item. Current `packages/auth/src` contains auth factory,
+contract, machine auth, machine session storage, and normalization tests. Add
+new tests at the specific seam touched by future auth changes instead of
+backfilling the old `AuthCore` test matrix.
 
 ---
 
@@ -43,7 +64,7 @@ That has two direct consequences:
 
    ```svelte
    $effect(() => {
-     auth.session;         // touched, not used — wake signal
+     auth.session;         // touched, not used --- wake signal
      workspace.applySession(auth.session);
    });
    ```
@@ -54,7 +75,7 @@ Both are symptoms of the same root cause: **the publisher (auth) exposes reactiv
 
 The fix is to build a framework-agnostic `createAuth` in its own `packages/auth`, with imperative `on*` callbacks, and make the Svelte layer a thin projection over it.
 
-This spec covers the auth extraction only. A companion spec (to be written after this lands) will rework `attachSync` to replace `setToken` / `requiresToken` with a single `url: (docId) => string | null` closure — that work is only clean *after* the auth core exists.
+This spec covers the auth extraction only. A companion spec (to be written after this lands) will rework `attachSync` to replace `setToken` / `requiresToken` with a single `url: (docId) => string | null` closure --- that work is only clean *after* the auth core exists.
 
 ## Non-goals
 
@@ -67,23 +88,23 @@ This spec covers the auth extraction only. A companion spec (to be written after
 
 ### Package layout
 
-Two packages from day one. Yjs precedent: `yjs` core stays framework-agnostic; every framework/provider binding (`y-prosemirror`, `y-quill`, `y-websocket`, `y-indexeddb`) ships as a separate package. Same rationale here — zero mandatory dependencies, no optional-peer machinery, package boundary enforces isolation without a lint rule.
+Two packages from day one. Yjs precedent: `yjs` core stays framework-agnostic; every framework/provider binding (`y-prosemirror`, `y-quill`, `y-websocket`, `y-indexeddb`) ships as a separate package. Same rationale here --- zero mandatory dependencies, no optional-peer machinery, package boundary enforces isolation without a lint rule.
 
 ```
 packages/auth/
-├── package.json               # @epicenter/auth, zero svelte
-├── tsconfig.json              # extends tsconfig.base.json (no DOM)
-└── src/
-    ├── index.ts               # barrel: createAuth, AuthCore, AuthSession, StoredUser, EncryptionKeys re-exports
-    ├── create-auth.ts         # framework-agnostic core
-    └── auth-types.ts          # moved from svelte-utils
+-------- package.json               # @epicenter/auth, zero svelte
+-------- tsconfig.json              # extends tsconfig.base.json (no DOM)
+--------- src/
+    -------- index.ts               # barrel: createAuth, AuthCore, AuthSession, StoredUser, EncryptionKeys re-exports
+    -------- create-auth.ts         # framework-agnostic core
+    --------- auth-types.ts          # moved from svelte-utils
 
 packages/auth-svelte/
-├── package.json               # @epicenter/auth-svelte, depends on @epicenter/auth
-├── tsconfig.json              # extends tsconfig.base.dom.json
-└── src/
-    ├── index.ts               # barrel
-    └── create-auth.svelte.ts
+-------- package.json               # @epicenter/auth-svelte, depends on @epicenter/auth
+-------- tsconfig.json              # extends tsconfig.base.dom.json
+--------- src/
+    -------- index.ts               # barrel
+    --------- create-auth.svelte.ts
 ```
 
 ```json
@@ -100,9 +121,9 @@ packages/auth-svelte/
 }
 ```
 
-Non-Svelte consumers (future CLI, workers, server tooling) `import { createAuth } from '@epicenter/auth'` — svelte never enters the dep tree. Svelte apps `import { createAuth } from '@epicenter/auth-svelte'`.
+Non-Svelte consumers (future CLI, workers, server tooling) `import { createAuth } from '@epicenter/auth'` --- svelte never enters the dep tree. Svelte apps `import { createAuth } from '@epicenter/auth-svelte'`.
 
-### Core API — `packages/auth/src/create-auth.ts`
+### Core API --- `packages/auth/src/create-auth.ts`
 
 ```ts
 export type AuthCore = {
@@ -134,37 +155,35 @@ export type AuthCore = {
 
 export type CreateAuthConfig = {
   baseURL: string | (() => string);
-  session: SessionStore;                    // { get(), set(value), watch(fn) } — imperative, not Svelte-specific
+  session: SessionStore;                    // historical shape, superseded by SessionStorage load/save
   socialTokenProvider?: () => Promise<SocialTokenPayload>;
 };
 
 export function createAuth(config: CreateAuthConfig): AuthCore;
 ```
 
-Internally, `createAuth` wraps `better-auth/client` exactly like the current svelte one does — the wrapping is framework-agnostic; only the *exposure* was Svelte-shaped. The subscribers work through plain `Set<Fn>` registries that `signIn`/`signUp`/`signOut`/`onSuccess`-interceptor/`useSession.subscribe` all call through.
+Internally, `createAuth` wraps `better-auth/client` exactly like the current svelte one does --- the wrapping is framework-agnostic; only the *exposure* was Svelte-shaped. The subscribers work through plain `Set<Fn>` registries that `signIn`/`signUp`/`signOut`/`onSuccess`-interceptor/`useSession.subscribe` all call through.
 
-### `SessionStore` contract
+### Historical `SessionStore` contract
 
-The caller passes in a synchronous-read store. Formal shape:
+This early plan used a synchronous observable store. Current auth storage is a boot cache with `load()` and `save()` only.
 
 ```ts
 export type SessionStore = {
-  get(): AuthSession | null;
-  set(value: AuthSession | null): void;
-  watch(fn: (next: AuthSession | null) => void): () => void;
+  load(): AuthSession | null;
+  save(value: AuthSession | null): void;
 };
 ```
 
-Invariants:
+Superseded invariants:
 
-- All three methods are synchronous.
-- `watch` fires for every state change, including local writes via `set()`. (Some stores fire only on external change; those need a wrapper that fans out local writes to watchers.)
-- `set()` is fire-and-forget: it may persist asynchronously, but subsequent `get()` returns the new value immediately.
+- Storage loads the last known session at boot.
+- Runtime auth changes flow through Better Auth and auth snapshot listeners.
+- `save()` is fire-and-forget for durable persistence.
 
 Adapters land alongside the stores that need them (not in `@epicenter/auth`):
 
-- `createPersistedState` (localStorage, `packages/svelte-utils/src/persisted-state.svelte.ts`): adapter strips the reactive `.current` getter and exposes `get/set/watch` wrapping the existing `watch`. Local writes already fire watchers — no behavioural change.
-- `createStorageState` (chrome.storage, `apps/tab-manager/src/lib/state/storage-state.svelte.ts`): today `get()` is async and `watch` only fires on external change. The adapter hydrates once at app boot (exposed as a `whenReady: Promise<void>`), caches the value in memory, keeps the cache live via `chrome.storage.onChanged`, and fans out local `set()` calls to watchers. The app awaits `whenReady` before constructing auth; after that, every read is sync.
+- `createPersistedState` and `createStorageState` can still be wrapped, but auth only consumes their boot read and durable write behavior.
 
 This keeps the core sync-only and pushes async concerns to the adapter layer, matching how `attachIndexedDb` already handles async hydration via `whenLoaded`.
 
@@ -174,13 +193,13 @@ This keeps the core sync-only and pushes async concerns to the adapter layer, ma
 
 **Firing order on any session transition:**
 
-1. Internal state is updated — `getSession()`, `getToken()`, `getUser()`, `isAuthenticated()` all reflect the new value before any subscriber runs.
+1. Internal state is updated --- `getSession()`, `getToken()`, `getUser()`, `isAuthenticated()` all reflect the new value before any subscriber runs.
 2. `onSessionChange` subscribers fire in registration order with `(next, previous)`.
 3. `onLogin` fires if `previous === null && next !== null`, with `next`.
 4. `onLogout` fires if `previous !== null && next === null`.
 5. `onTokenChange` fires if `previous?.token !== next?.token`, with `next?.token ?? null`.
 
-**Replay on subscribe:** every `on*` callback fires synchronously once during `on*()` itself with the current state. `onSessionChange` replays with `(current, null)`. `onLogin` replays only if a session already exists. `onTokenChange` replays with the current token (even if null). `onLogout` does NOT replay on subscribe — it only fires on a real logged-in → logged-out transition.
+**Replay on subscribe:** every `on*` callback fires synchronously once during `on*()` itself with the current state. `onSessionChange` replays with `(current, null)`. `onLogin` replays only if a session already exists. `onTokenChange` replays with the current token (even if null). `onLogout` does NOT replay on subscribe --- it only fires on a real logged-in - logged-out transition.
 
 **Reads inside subscribers:** all `getX()` methods return the *new* value when called from any subscriber. `previous` is carried only through the callback argument.
 
@@ -207,9 +226,9 @@ async function runBusy<T>(fn: () => Promise<T>): Promise<T> {
 
 `isBusy()` returns `busyCount > 0`. Fixes the existing concurrency bug where two overlapping ops would flip busy false prematurely.
 
-### Svelte wrapper — `packages/auth-svelte/src/create-auth.svelte.ts`
+### Svelte wrapper --- `packages/auth-svelte/src/create-auth.svelte.ts`
 
-Both packages export a function named `createAuth`. The import path distinguishes them — callers never see both in the same file, so there's no name collision at the type level. Same name keeps migration churn minimal (Svelte apps already type `createAuth`).
+Both packages export a function named `createAuth`. The import path distinguishes them --- callers never see both in the same file, so there's no name collision at the type level. Same name keeps migration churn minimal (Svelte apps already type `createAuth`).
 
 ```ts
 // @epicenter/auth-svelte
@@ -236,9 +255,9 @@ export function createAuth(config: CreateAuthConfig) {
 }
 ```
 
-~30 lines. No `$effect.root`, no HMR ceremony — disposal is delegated to the core's `[Symbol.dispose]`.
+~30 lines. No `$effect.root`, no HMR ceremony --- disposal is delegated to the core's `[Symbol.dispose]`.
 
-### Caller migration — workspace apps
+### Caller migration --- workspace apps
 
 Before (`apps/fuji/src/lib/client.svelte.ts`):
 
@@ -285,16 +304,16 @@ Edge-detector boilerplate gone. `$effect.root` gone. One subscription, three bra
 
 (Note: `sync.setToken` / `sync.reconnect` stay for now. The follow-up spec replaces them with a `url: () => string | null` closure after this lands.)
 
-### Caller migration — per-doc factories
+### Caller migration --- per-doc factories
 
 `apps/fuji/src/lib/entry-content-docs.ts`, `apps/honeycrisp/src/lib/note-body-docs.ts`:
 
 ```ts
-// Before — getToken closure, called once at handle open:
+// Before --- getToken closure, called once at handle open:
 getToken: () => auth.token,
-// Inside factory: sync.setToken(getToken()) — never updates.
+// Inside factory: sync.setToken(getToken()) --- never updates.
 
-// After — factory accepts the auth core directly:
+// After --- factory accepts the auth core directly:
 auth: AuthCore,
 // Inside factory:
 sync.setToken(auth.getToken());
@@ -304,7 +323,7 @@ auth.onTokenChange(token => sync.setToken(token));
 
 Per-doc syncs now observe rotation. Workspace and per-doc wiring use the same API.
 
-## Naming — resolved
+## Naming --- resolved
 
 Both packages export `createAuth`. Package name distinguishes them:
 
@@ -316,15 +335,15 @@ import { createAuth } from '@epicenter/auth';
 import { createAuth } from '@epicenter/auth-svelte';
 ```
 
-Callers never see both in one file, so there's no name collision. Migration churn stays minimal — existing `createAuth` call sites only need their import path updated, not renamed. Grep disambiguates via the import source, not the function name.
+Callers never see both in one file, so there's no name collision. Migration churn stays minimal --- existing `createAuth` call sites only need their import path updated, not renamed. Grep disambiguates via the import source, not the function name.
 
 ## Migration plan
 
-1. **Create `packages/auth` and `packages/auth-svelte` shells** — package.json, tsconfig, empty `src/index.ts` for each. Bun's `packages/*` workspace glob auto-picks them up. `@epicenter/auth` has zero framework deps; `@epicenter/auth-svelte` has `@epicenter/auth: workspace:*` + `svelte` peer. No lint rule needed — the package boundary enforces isolation.
-2. **Move `AuthSession` + related types** — `auth-types.ts` from `packages/svelte-utils/src/auth/` into `packages/auth/src/`. Re-export from the old location so nothing else breaks during migration. **Do not move `create-ai-chat-fetch.ts`** — it has no auth dependency; it stays in `svelte-utils` (or moves to a more appropriate home like `@epicenter/ai` as a separate change, out of scope here).
-3. **Define `SessionStore` type and adapters** — the type lands in `packages/auth`. The two adapters (`fromPersistedState`, `fromStorageState`) land next to the stores they wrap: `packages/svelte-utils/src/persisted-state.svelte.ts` and `apps/tab-manager/src/lib/state/storage-state.svelte.ts`. The chrome-storage adapter exposes `whenReady`.
-4. **Build `createAuth` core** — port logic from the current `.svelte.ts` file. Replace `$state`-backed `isBusy` with a counter (see `isBusy` semantics above). Replace reactive getters with imperative `getX()`. Add the five `on*` registries with firing order per spec. Wrap every subscriber call in try/catch with logger. Audit that `@epicenter/auth` imports zero from `@epicenter/svelte-utils`.
-5. **Unit tests** — `create-auth.test.ts` must cover at minimum:
+1. **Create `packages/auth` and `packages/auth-svelte` shells** --- package.json, tsconfig, empty `src/index.ts` for each. Bun's `packages/*` workspace glob auto-picks them up. `@epicenter/auth` has zero framework deps; `@epicenter/auth-svelte` has `@epicenter/auth: workspace:*` + `svelte` peer. No lint rule needed --- the package boundary enforces isolation.
+2. **Move `AuthSession` + related types** --- `auth-types.ts` from `packages/svelte-utils/src/auth/` into `packages/auth/src/`. Re-export from the old location so nothing else breaks during migration. **Do not move `create-ai-chat-fetch.ts`** --- it has no auth dependency; it stays in `svelte-utils` (or moves to a more appropriate home like `@epicenter/ai` as a separate change, out of scope here).
+3. **Define `SessionStore` type and adapters** --- the type lands in `packages/auth`. The two adapters (`fromPersistedState`, `fromStorageState`) land next to the stores they wrap: `packages/svelte-utils/src/persisted-state.svelte.ts` and `apps/tab-manager/src/lib/state/storage-state.svelte.ts`. The chrome-storage adapter exposes `whenReady`.
+4. **Build `createAuth` core** --- port logic from the current `.svelte.ts` file. Replace `$state`-backed `isBusy` with a counter (see `isBusy` semantics above). Replace reactive getters with imperative `getX()`. Add the five `on*` registries with firing order per spec. Wrap every subscriber call in try/catch with logger. Audit that `@epicenter/auth` imports zero from `@epicenter/svelte-utils`.
+5. **Unit tests** --- `create-auth.test.ts` must cover at minimum:
    - `onSessionChange` replays with `(current, null)` on subscribe when session exists
    - `onSessionChange` replays with `(null, null)` on subscribe when session is null
    - `onLogin` does not replay when session is null; does replay when session exists
@@ -333,13 +352,13 @@ Callers never see both in one file, so there's no name collision. Migration chur
    - Firing order: session state is updated before any subscriber sees it; `getX()` inside subscribers returns new value
    - Subscriber throwing does not prevent other subscribers from firing
    - `isBusy` counter: two overlapping ops only fires `onBusyChange(false)` once, when both settle
-   - `[Symbol.dispose]` unsubscribes from better-auth's `useSession`, clears registries, rejects pending ops? (decide during impl — probably leaves promises dangling, doesn't cancel)
-6. **Build `createAuth` Svelte wrapper** — ~30 lines in `packages/auth-svelte/src/create-auth.svelte.ts`.
-7. **Migrate consumers** — one commit per app. fuji, honeycrisp, opensidian each swap `@epicenter/svelte-utils/auth` → `@epicenter/auth-svelte` and replace `applySession` bridge with the `onSessionChange` pattern above. dashboard, tab-manager, zhongwen just swap the import path (no applySession to migrate).
-8. **Delete old `svelte-utils/auth`** — once every consumer is off it. Keep `auth-form` and other unrelated subpaths.
+   - `[Symbol.dispose]` unsubscribes from better-auth's `useSession`, clears registries, rejects pending ops? (decide during impl --- probably leaves promises dangling, doesn't cancel)
+6. **Build `createAuth` Svelte wrapper** --- ~30 lines in `packages/auth-svelte/src/create-auth.svelte.ts`.
+7. **Migrate consumers** --- one commit per app. fuji, honeycrisp, opensidian each swap `@epicenter/svelte-utils/auth` - `@epicenter/auth-svelte` and replace `applySession` bridge with the `onSessionChange` pattern above. dashboard, tab-manager, zhongwen just swap the import path (no applySession to migrate).
+8. **Delete old `svelte-utils/auth`** --- once every consumer is off it. Keep `auth-form` and other unrelated subpaths.
 9. **Typecheck + test across the repo.**
 
-Each step commits independently. Steps 1–6 land without touching any app. Step 7 is per-app.
+Each step commits independently. Steps 1---6 land without touching any app. Step 7 is per-app.
 
 ### HMR pattern for callers
 
@@ -365,7 +384,7 @@ Each subscription returns an unsubscribe fn; HMR dispose calls them all. The cor
 ## Risks
 
 - **Better-auth interceptor parity.** The current `.svelte.ts` uses `fetchOptions.auth.token` (Bearer callback) and an `onSuccess` response interceptor for token rotation. The core must preserve both exactly. Tests gate this.
-- **`session.current =` vs `session.set(...)`.** Current code mutates via property assignment. The new `SessionStore` uses explicit `set()`. The adapter for `createPersistedState` translates one to the other — no behavior change visible to auth.
+- **`session.current =` vs `session.set(...)`.** Current code mutates via property assignment. The new `SessionStore` uses explicit `set()`. The adapter for `createPersistedState` translates one to the other --- no behavior change visible to auth.
 - **`auth.fetch` and in-flight rotation.** `fetch` reads `session.get()?.token` at request time. The rotation interceptor calls `session.set(...)` before any subscriber fires, so a `fetch` call triggered from inside a subscriber sees the new token. Documented as an invariant in the firing-order section.
 - **Social popup requires a DOM.** Core stays framework-agnostic but not environment-agnostic: `signInWithSocialPopup` without a `socialTokenProvider` errors at runtime. Core-only CLI/worker consumers should omit the popup method or accept that it will reject.
 - **IDE import ambiguity on `createAuth`.** VS Code auto-import will offer both `@epicenter/auth` and `@epicenter/auth-svelte`. Reviewers must confirm the right one. Low-severity; the wrong import fails type-check immediately (the Svelte wrapper has reactive getters the core doesn't).
@@ -373,6 +392,6 @@ Each subscription returns an unsubscribe fn; HMR dispose calls them all. The cor
 
 ## Out of scope (follow-ups)
 
-- `attachSync` redesign — new spec, builds on this.
-- Removing `sync.setToken` / `sync.reconnect` in favor of `url: () => string | null` — part of the follow-up.
-- Collapsing the workspace `applySession` edge detector into `auth.onLogin` / `auth.onLogout` — partially done in step 6; the full kill happens after the `attachSync` redesign when `sync.setToken` goes away.
+- `attachSync` redesign --- new spec, builds on this.
+- Removing `sync.setToken` / `sync.reconnect` in favor of `url: () => string | null` --- part of the follow-up.
+- Collapsing the workspace `applySession` edge detector into `auth.onLogin` / `auth.onLogout` --- partially done in step 6; the full kill happens after the `attachSync` redesign when `sync.setToken` goes away.
