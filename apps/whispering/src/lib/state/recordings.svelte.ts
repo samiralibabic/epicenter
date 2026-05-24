@@ -41,6 +41,10 @@ function createRecordings() {
 	);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/**
 		 * All recordings as a reactive SvelteMap.
 		 *
@@ -122,3 +126,7 @@ function createRecordings() {
 }
 
 export const recordings = createRecordings();
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => recordings[Symbol.dispose]());
+}

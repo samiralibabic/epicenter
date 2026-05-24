@@ -1,204 +1,318 @@
 ---
 name: auth
-description: Epicenter auth packages — @epicenter/auth (framework-agnostic core) and @epicenter/auth-svelte (Svelte 5 reactive wrapper). Covers SessionStore contract, session/token subscription fan-out, and how consumer apps wire login/logout into sync and encryption.
+description: 'Epicenter auth packages: `@epicenter/auth`, `@epicenter/auth-svelte`, OAuth sessions, identity state, auth-owned fetch/WebSocket, and workspace lifecycle binding. Use when editing Epicenter auth clients, session state, hosted sign-in, or auth/workspace integration.'
 metadata:
   author: epicenter
-  version: '1.0'
+  version: '5.0'
 ---
 
 # Epicenter Auth
 
-Two packages:
+## Upstream Grounding
 
-- **`@epicenter/auth`** — framework-agnostic. Owns the Better Auth transport, session-rotation interceptor, and imperative subscription fan-out. Pure TypeScript, no Svelte.
-- **`@epicenter/auth-svelte`** — thin Svelte 5 wrapper. Subscribes once to the core's `on*` primitives and projects them onto `$state`-backed getters.
+When changes depend on Better Auth OAuth provider behavior, bearer token
+verification, device authorization, cookie handling, token rotation, plugin
+shape, or generated API shape, ask DeepWiki a narrow question against
+`better-auth/better-auth` before relying on memory. Use it to orient, then
+verify decisive details against local installed types, source, tests, or
+official docs before changing code.
 
-Everything runtime lives in the core. The Svelte package only adds reactive reads.
+Known Better Auth source landmarks:
 
-> **Related Skills**: `factory-function-composition` for the `SessionStore` structural-contract pattern. `error-handling` for the `AuthError` variants (`InvalidCredentials`, `SignInFailed`, `SignUpFailed`, `SocialSignInFailed`).
-
-## When to Apply This Skill
-
-Use this skill when:
-
-- Wiring a new consumer app to `@epicenter/auth-svelte` (see any `apps/*/src/lib/client.svelte.ts` or `auth.ts`).
-- Reacting to login/logout/token rotation in sync, encryption, or storage layers.
-- Writing or reviewing a `SessionStore` adapter (chrome.storage, localStorage, a custom persisted state).
-- Deciding between reactive reads (`auth.session`) and imperative reads (`auth.getSession()`).
-
-## The Package Split
-
-```
-@epicenter/auth          @epicenter/auth-svelte
-├── createAuth            ├── createAuth           (shadows, wraps core)
-├── AuthCore (type)       ├── AuthClient (type)    (= AuthCore + reactive getters)
-├── SessionStore (type)   └── re-exports the core's types
-├── AuthSession, StoredUser
-└── AuthError
+```txt
+packages/oauth-provider/src/oauth.ts
+packages/oauth-provider/src/authorize.ts
+packages/oauth-provider/src/token.ts
+packages/oauth-provider/src/revoke.ts
+packages/oauth-provider/src/client-resource.ts
+packages/better-auth/src/plugins/device-authorization/index.ts
+packages/better-auth/src/plugins/device-authorization/client.ts
+packages/better-auth/src/plugins/custom-session/index.ts
 ```
 
-Consumer apps import `createAuth` from **`@epicenter/auth-svelte`** — never from the core directly in Svelte apps. Non-Svelte contexts (CLI, workers, tests) import from `@epicenter/auth`.
+Better Auth remains the auth server and session engine. Epicenter extends it
+through plugins and options; it does not replace Better Auth's server-side
+session model.
 
-## The SessionStore Contract
+Use this composition sentence when explaining the architecture:
 
-`createAuth` takes a `SessionStore`, not a storage backend. The store is where the persisted session lives — the core reads and writes it but never persists itself.
+```txt
+Epicenter uses Better Auth for auth-server machinery, OAuth for the app/resource boundary, and AuthIdentity for workspace boot.
+```
+
+That means Better Auth owns users, account cookies, login, consent, token
+issuing, revocation, JWKS, and metadata. Epicenter clients store
+`OAuthSession`, not Better Auth sessions. `/api/session` is the adapter that
+verifies an OAuth access token, loads the Better Auth user, derives encryption
+keys, and returns the session projection (`{ user, localIdentity }`).
+
+When the user asks whether this is idiomatic Better Auth, be precise:
+
+```txt
+It is not the shortest Better Auth browser-cookie path.
+It is an idiomatic composition of Better Auth as the auth server beneath a cross-client OAuth runtime.
+```
+
+Do not suggest removing Better Auth unless the user has a concrete blocker that
+cannot be handled with configuration, a small adapter, or an upstream fix.
+Building OAuth by hand means owning PKCE validation, redirect URI validation,
+state and mix-up protections, trusted clients, token signing, refresh token
+rotation, revocation, JWKS, metadata, consent, account sessions, and security
+fixes forever.
+
+## Current Model
+
+Epicenter app clients use one OAuth app auth model:
 
 ```ts
-export type SessionStore = {
-  get(): AuthSession | null;
-  set(value: AuthSession | null): void;
-  watch(fn: (next: AuthSession | null) => void): () => void;
+const auth = createOAuthAppAuth({
+	baseURL: APP_URLS.API,
+	clientId,
+	launcher,
+	sessionStorage,
+});
+```
+
+The old split between `createCookieAuth` and `createBearerAuth` is legacy.
+Do not add new code using those factories, `BearerSession`, or
+`auth.bearerToken`. When touching old app code that still uses those names,
+migrate it to `createOAuthAppAuth` and auth-owned transports.
+
+Two packages own the public surface:
+
+- `@epicenter/auth`: framework-agnostic core. Owns OAuth session storage,
+  identity loading, refresh, refresh-token revocation, authenticated fetch, and
+  WebSocket opening.
+- `@epicenter/auth-svelte`: Svelte 5 wrapper. Mirrors `auth.state` through
+  `createSubscriber` so templates and `$derived` reads are reactive.
+
+The API server composes Better Auth like this:
+
+```txt
+Hono app
+  -> CORS
+  -> per-request DB
+  -> createAuth({ db, env, baseURL })
+  -> singleCredential
+  -> /auth/* Better Auth handler
+  -> /auth/me OAuth identity projection
+  -> protected resources
+```
+
+`createAuth()` configures Better Auth with Drizzle, Google sign-in,
+email/password, `bearer`, `jwt`, `deviceAuthorization`, `oauthProvider`, and
+`customSession`. The OAuth provider owns `/auth/oauth2/authorize`,
+`/auth/oauth2/token`, and `/auth/oauth2/revoke`. Epicenter owns `/auth/me`,
+which verifies an OAuth access token and returns the local-first identity.
+
+## Public Surface
+
+Auth has one public client interface:
+
+```ts
+type AuthIdentity = {
+	user: AuthUser;
+	encryptionKeys: EncryptionKeys;
+};
+
+type AuthState =
+	| { status: 'signed-in'; identity: AuthIdentity }
+	| { status: 'reauth-required'; identity: AuthIdentity }
+	| { status: 'signed-out' };
+
+type AuthClient = {
+	state: AuthState;
+	onStateChange(fn: (state: AuthState) => void): () => void;
+	startSignIn(input?: {
+		returnTo?: string;
+	}): Promise<Result<undefined, AuthError>>;
+	signOut(): Promise<Result<undefined, AuthError>>;
+	fetch(input: Request | string | URL, init?: RequestInit): Promise<Response>;
+	openWebSocket(url: string | URL, protocols?: string[]): Promise<WebSocket>;
+	[Symbol.dispose](): void;
 };
 ```
 
-**Invariants** (copy exactly when writing an adapter):
+Read `auth.state` synchronously. Use `auth.onStateChange(fn)` for future
+changes only; it does not replay. Consumers that need bootstrap behavior must
+read `auth.state` once and then register the listener.
 
-- All three methods are **synchronous**. Async backends (IndexedDB, chrome.storage) hydrate once at boot, cache in memory, and expose a sync read.
-- `watch` fires for **every** state change, including local writes via `set()`. Stores whose native event only fires on external change must fan out local writes themselves.
-- `set()` is fire-and-forget. It may persist asynchronously, but the next `get()` returns the new value immediately.
+Do not expose raw tokens above auth storage and transport boundaries. UI,
+workspace binding, AI fetches, and sync consume capabilities: `auth.fetch` and
+`auth.openWebSocket`.
 
-### Prefer using `createPersistedState` / `createStorageState` directly
+## OAuthSession
 
-Both factories in `@epicenter/svelte` and `apps/tab-manager/src/lib/state/storage-state.svelte.ts` are **structurally assignable** to `SessionStore`. Pass them directly:
+`OAuthSession` is the durable app session shape:
 
 ```ts
-// apps/dashboard/src/lib/auth.ts
-export const auth = createAuth({
-  baseURL: window.location.origin,
-  session: createPersistedState({
-    key: 'dashboard:authSession',
-    schema: AuthSession.or('null'),
-    defaultValue: null,
-  }),
+export const OAuthSession = type({
+	'...': AuthIdentity,
+	'+': 'delete',
+	accessToken: 'string',
+	refreshToken: 'string',
+	accessTokenExpiresAt: 'number',
 });
 ```
 
-No adapter layer. The earlier `fromPersistedState` / `fromStorageState` adapters were folded into the factories — don't reintroduce them.
-
-## Wiring a consumer app
-
-The canonical shape (fuji, honeycrisp, opensidian, zhongwen all look like this):
+Expanded:
 
 ```ts
-import { AuthSession, createAuth } from '@epicenter/auth-svelte';
-import { createPersistedState } from '@epicenter/svelte';
+type OAuthSession = {
+	user: AuthUser;
+	encryptionKeys: EncryptionKeys;
+	accessToken: string;
+	refreshToken: string;
+	accessTokenExpiresAt: number;
+};
+```
 
-const session = createPersistedState({
-  key: 'fuji:authSession',
-  schema: AuthSession.or('null'),
-  defaultValue: null,
-});
+It deliberately combines local identity and network credentials:
 
-export const auth = createAuth({
-  baseURL: APP_URLS.API,
-  session,
+```txt
+OAuthSession
+  user + encryptionKeys  -> local identity and offline unlock
+  accessToken            -> fetch and WebSocket credential
+  refreshToken           -> renew network access
+  accessTokenExpiresAt   -> transport refresh hint
+```
+
+The app can boot from a cached `OAuthSession` without calling the network.
+Refresh failure must preserve the cached identity and encryption keys so local
+workspace data can remain available.
+
+The current cleanup direction is stricter than some live code: token expiry
+should be transport freshness only. `reauth-required` should mean a refresh
+failed or the server rejected auth for an existing `OAuthSession`, not merely
+that `accessTokenExpiresAt` is in the past.
+
+## Sign-In Flow
+
+Apps ask auth to start hosted sign-in:
+
+```ts
+await auth.startSignIn({ returnTo: location.href });
+```
+
+The launcher decides how the runtime completes OAuth:
+
+- Browser redirect launchers navigate to the hosted `/sign-in` and usually do
+  not resolve before the page unloads.
+- Extension and device launchers may resolve after receiving tokens.
+- CLI and daemon flows use device authorization and machine session storage.
+
+The return value of `startSignIn` is not the "user is signed in" signal.
+Observe `auth.state.status === 'signed-in'` for completion.
+
+After tokens arrive, auth calls `/auth/me` with
+`Authorization: Bearer <accessToken>`. The API verifies the token with
+`oauthProviderResourceClient().verifyAccessToken`, loads the user, derives
+encryption keys, and returns `AuthIdentity`. Auth stores that as `OAuthSession`.
+
+## Transport
+
+Use `auth.fetch` for HTTP resources:
+
+```ts
+const response = await auth.fetch(`${APP_URLS.API}/ai/chat`, {
+	method: 'POST',
+	body,
 });
 ```
 
-Validate the stored value with Arktype: `AuthSession.or('null')` — if storage ever holds a malformed session, the schema rejects it and the default (`null`) takes over.
+Auth refreshes before network use when the access token is near expiry, retries
+one 401 after a forced refresh, and sends `credentials: 'omit'` for OAuth app
+requests. Storage writes are awaited before the refreshed token is used.
 
-## Reacting to session transitions
-
-**One subscription drives everything.** In consumer apps (see `apps/fuji/src/lib/client.svelte.ts:64`), a single `auth.onSessionChange` call handles login, logout, and token rotation:
+Use `auth.openWebSocket` for sync:
 
 ```ts
-auth.onSessionChange((next, previous) => {
-  if (next === null) {
-    sync.goOffline();
-    sync.setToken(null);
-    if (previous !== null) void idb.clearLocal();  // logout, not cold-boot
-    return;
-  }
-  encryption.applyKeys(next.encryptionKeys);
-  sync.setToken(next.token);
-  sync.reconnect();
+const collaboration = openCollaboration(ydoc, {
+	url: roomWsUrl(APP_URLS.API, ydoc.guid),
+	waitFor: idb.whenLoaded,
+	openWebSocket: auth.openWebSocket,
+	replicaId,
+	actions,
 });
 ```
 
-**Transition matrix:**
+Browsers cannot attach `Authorization` headers to `new WebSocket()`, so auth
+adds the bearer token as a WebSocket subprotocol. The API's `singleCredential`
+middleware normalizes that subprotocol into `Authorization` and rejects
+requests that carry multiple credentials.
 
-| `previous` | `next` | Meaning                 |
-| ---------- | ------ | ----------------------- |
-| `null`     | `null` | Anonymous replay (subscribe before hydration) — safe no-op |
-| `null`     | session | Login, OR cold-boot of a returning authenticated user |
-| session    | session (different token) | Token rotation |
-| session    | `null` | Logout — wipe local data |
+## Workspace Binding
 
-Use the `previous` argument to distinguish cold-boot from logout. Don't clear local data on every `null` branch.
-
-**Cold-boot note.** A subscriber attached *before* the store hydrates receives two calls: the initial replay with `(null, null)`, then the hydrated value via `watch` as `(session, null)`. A subscriber attached *after* hydration receives one call: `(session, null)` on replay. Both shapes look like login to handlers that key on `previous === null && next !== null` — which is the correct behavior (encryption keys and sync tokens must be re-applied on every cold boot), but it means `onLogin` fires on every page load for returning users, not only on fresh sign-in.
-
-## Session store write ownership
-
-Two code paths write to the session store, partitioned by **field**:
-
-| Writer | Fields owned | When |
-| ------ | ------------ | ---- |
-| `onSuccess` fetch interceptor | `token` only | Token rotation via `set-auth-token` response header. Writes `{ ...current, token: rotatedToken }`. |
-| `useSession.subscribe` | `user`, `encryptionKeys` (always); `token` (initial only) | Session establishment, profile updates, encryption key rotation, account switch. |
-| `useSession.subscribe` | `null` | Sign-out, server-side revocation. |
-
-**Token strategy:** `current?.token ?? state.data.session.token` — if we already have a session, preserve our token (onSuccess may have rotated it and BA's async refetch can emit a stale pre-rotation value). On initial establishment (current is null), use BA's token.
-
-**Why field-level, not null-partition.** An earlier design gated `useSession` data writes on `current === null`. This blocked encryption key rotation, account switching without sign-out, and user profile updates — all cases where `useSession` legitimately carries new data while a session already exists. The field-level partition solves the token race without blocking those flows.
-
-**Cross-tab sign-in/out** is handled by the persisted store's platform events (`StorageEvent` for `createPersistedState`, `chrome.storage.onChanged` for `createStorageState`), not by `useSession.subscribe`. Both stores propagate external writes to all `watch` subscribers automatically.
-
-## Firing order on any session transition
-
-1. `session.set(next)` is called; `getSession()` now returns `next`.
-2. The store's `watch` callback runs and notifies the core.
-3. `onSessionChange` subscribers fire with `(next, previous)`.
-4. `onLogin` fires if the transition was `null → session`.
-5. `onLogout` fires if the transition was `session → null`.
-6. `onTokenChange` fires if `previous?.token !== next?.token`.
-
-Every subscriber runs in its own try/catch — one throwing does not prevent others from firing.
-
-## Subscription primitives
-
-| Method | Fires on | Replays on subscribe? |
-| ------ | -------- | --------------------- |
-| `onSessionChange(fn)` | Any session transition | Yes — with `(current, null)` |
-| `onTokenChange(fn)` | Token changes (including rotation) | Yes — with current token |
-| `onLogin(fn)` | `null → session` | Only if a session already exists |
-| `onLogout(fn)` | `session → null` | No |
-| `onBusyChange(fn)` | In-flight op counter flips 0↔non-0 | Yes — with current busy state |
-
-`isBusy` is a counter, not a boolean — overlapping ops don't flip busy false prematurely.
-
-## Reactive vs imperative reads
-
-`AuthClient` (from `@epicenter/auth-svelte`) exposes both:
+Workspace construction reads identity from `createSession` and gives lower
+layers callbacks for data they need at their own boundary:
 
 ```ts
-// Reactive — use in templates, $derived, $effect
-auth.session       // AuthSession | null
-auth.token         // string | null
-auth.user          // StoredUser | null
-auth.isAuthenticated  // boolean
-auth.isBusy        // boolean
+import { requireSignedIn } from '@epicenter/auth';
+import { createSession, type InferSignedIn } from '@epicenter/svelte';
 
-// Imperative — use in fetch interceptors, one-shot callbacks, non-reactive contexts
-auth.getSession()
-auth.getToken()
-auth.getUser()
-auth.onSessionChange((next, previous) => { ... })
+export const session = createSession({
+	auth,
+	build: (identity) => {
+		const userId = identity.user.id;
+		const fuji = openFuji({
+			userId,
+			peer,
+			openWebSocket: auth.openWebSocket,
+			encryptionKeys: () => requireSignedIn(auth).encryptionKeys,
+		});
+		return {
+			userId,
+			fuji,
+			[Symbol.dispose]() {
+				fuji[Symbol.dispose]();
+			},
+		};
+	},
+});
+
+export type FujiSignedIn = InferSignedIn<typeof session>;
 ```
 
-**Rule**: subscribe imperatively at setup time (one `onSessionChange` in the client builder). Read reactively in components. Don't mix — don't subscribe inside `$effect` when the reactive getter already exists.
+`createSession` owns workspace lifecycle. A sign-out disposes the workspace. A
+same-user identity refresh is a no-op at the session boundary. A different-user
+transition must dispose or reload before sync resumes.
 
-## Social sign-in
+Local workspace data must not be wiped just because network auth failed. Wiping
+Yjs or IndexedDB storage is a separate destructive user action.
 
-`signInWithSocialRedirect` works anywhere (web default). `signInWithSocialPopup` requires a `socialTokenProvider` — native apps and extensions inject one at `createAuth` time. Web apps that only use redirect sign-in omit it entirely. If popup is called without a provider, it returns `AuthError.SocialSignInFailed`.
+## Server Routes
+
+In `apps/api/src/app.ts`, keep OAuth discovery routes before the `/auth/*`
+catch-all because Hono matches in registration order.
+
+Protected resources use `requireOAuthUser`:
+
+```txt
+/ai/*
+/rooms/*
+```
+
+`requireOAuthUser` calls `/auth/me` logic internally: verify bearer token, load
+the user, derive identity, then set `c.var.user`.
+
+WebSocket sync enters through the protected `/rooms/*` route.
+The API accepts the upgrade only after `singleCredential` and
+`requireOAuthUser` have resolved one user.
 
 ## Common Pitfalls
 
-- **Subscribing inside an `$effect`** — the reactive getter already tracks. Subscribe once at setup, read reactively in components.
-- **Reading `{current}` on `auth`** — `auth` isn't a runed box. Read the reactive getters directly (`auth.session`, not `auth.session.current`).
-- **Clearing local data on cold-boot** — guard logout handlers with `if (previous !== null)`, or `null → null` at boot will wipe an anonymous user's in-progress state.
-- **Importing `createAuth` from `@epicenter/auth` in Svelte apps** — always use `@epicenter/auth-svelte` for the reactive wrapper. The core import is for framework-agnostic consumers (CLI, workers).
-- **Writing an adapter where none is needed** — if your store already exposes `{ get, set, watch }`, pass it directly; don't wrap it.
-- **Wrapping `signInWithSocialRedirect` in `runBusy`** — the page navigates away on success. `isBusy` is never read, and the promise never resolves on the happy path. The other auth ops (`signIn`, `signUp`, `signOut`, `signInWithSocialPopup`) genuinely use `runBusy` because the user waits for a result.
-- **Passing `baseURL` as a function** — `createAuthClient` only accepts a string. The value is read once at construction. If the origin can change at runtime (e.g. tab-manager's `serverUrl`), the consumer must recreate the auth client — a lazy thunk cannot be honored. Tab-manager uses a single `serverUrl` for all services (sync, auth, AI, billing). The earlier `remoteServerUrl` split was removed — all services share one origin.
-- **Adding a second data writer to the session store** — see "Session store write ownership" above. The partition on `current === null` eliminates the token rotation race. Adding another path that writes session data when `current !== null` reintroduces the race with `onSuccess`.
+- Do not add `auth.bearerToken`. Token reading leaks transport details back
+  into app code.
+- Do not reintroduce cookie-vs-bearer app factories. Better Auth still uses
+  cookies for hosted sign-in pages, but app resources use OAuth access tokens.
+- Do not treat `startSignIn()` resolving as signed-in. State is the source of
+  truth.
+- Do not clear local workspace data on refresh failure. Move to
+  `reauth-required` and keep identity available.
+- Do not let `accessTokenExpiresAt` decide local identity state after the auth
+  core cleanup lands. It belongs to refresh decisions.
+- Do not send both cookies and bearer tokens to resource routes.
+  `singleCredential` should reject ambiguity before Better Auth sees it.
+- Do not hide persistence failures in storage adapters used by auth core. If
+  storage cannot save the refreshed session, the client should not keep using
+  the new token as if it is durable.

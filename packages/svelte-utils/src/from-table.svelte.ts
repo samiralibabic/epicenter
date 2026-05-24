@@ -1,15 +1,22 @@
 import type { BaseRow, Table } from '@epicenter/workspace';
 import { SvelteMap } from 'svelte/reactivity';
 
+export type ReactiveTableMap<TRow extends BaseRow> = SvelteMap<string, TRow> &
+	Disposable;
+
 /**
  * Create a reactive SvelteMap binding to a workspace table.
  *
  * Returns a `SvelteMap<id, Row>` that stays in sync with the underlying
  * Yjs table via granular per-row updates. Only changed rows trigger
- * re-renders—not the entire collection.
+ * re-renders, not the entire collection.
  *
- * Read-only—mutations go through `table.set()`, `table.update()`, etc.
+ * Read-only: mutations go through `table.set()`, `table.update()`, etc.
  * The observer picks up changes from both local writes and remote CRDT sync.
+ *
+ * The returned map is disposable. Call `[Symbol.dispose]()` when the binding
+ * has a shorter lifetime than the workspace, such as component teardown,
+ * workspace switching, HMR, or tests.
  *
  * @example
  * ```typescript
@@ -26,11 +33,14 @@ import { SvelteMap } from 'svelte/reactivity';
  *
  * // Derived state:
  * const filtered = $derived([...entries.values()].filter(e => !e.deletedAt));
+ *
+ * // Teardown:
+ * entries[Symbol.dispose]();
  * ```
  */
 export function fromTable<TRow extends BaseRow>(
 	table: Table<TRow>,
-): SvelteMap<string, TRow> & { destroy: () => void } {
+): ReactiveTableMap<TRow> {
 	const map = new SvelteMap<string, TRow>();
 
 	// Seed with current valid rows
@@ -38,21 +48,30 @@ export function fromTable<TRow extends BaseRow>(
 		map.set(row.id, row);
 	}
 
-	// Granular updates — only touch changed rows
+	// Granular updates: only touch changed rows
 	const unobserve = table.observe((changedIds) => {
 		for (const id of changedIds) {
-			const result = table.get(id);
-			switch (result.status) {
-				case 'valid':
-					map.set(id, result.row);
-					break;
-				case 'not_found':
-				case 'invalid':
-					map.delete(id);
-					break;
+			const { data: row, error } = table.get(id);
+			if (error || row === null) {
+				// This map only exposes valid rows. Invalid stored data and missing
+				// rows both leave the reactive view.
+				map.delete(id);
+				continue;
 			}
+
+			map.set(id, row);
 		}
 	});
+	let disposed = false;
 
-	return Object.assign(map, { destroy: unobserve });
+	Object.defineProperty(map, Symbol.dispose, {
+		value() {
+			if (disposed) return;
+			disposed = true;
+			unobserve();
+		},
+		enumerable: false,
+	});
+
+	return map as ReactiveTableMap<TRow>;
 }

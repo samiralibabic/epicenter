@@ -4,6 +4,8 @@
 **Related:** `20260420T230100-collapse-document-framework.md` — landed the
 app-owned `defineDocument` pattern this completes.
 
+> **Path note (2026-05-22):** Any `~/.epicenter/persistence/` examples in this historical implementation note are stale. Keep project-local `<projectDir>/.epicenter/` examples when they describe generated project data, but do not use top-level `~/.epicenter/` as the current persistence root.
+
 ## Problem
 
 Per-content Y.Docs had exactly one persistence adapter: `attachIndexedDb`,

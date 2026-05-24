@@ -1,16 +1,15 @@
 /**
  * Typed API client for the billing dashboard.
  *
- * Uses direct fetch with auth.fetch for Bearer tokens.
- * Same-origin deployment—no CORS config needed.
+ * Uses direct fetch with auth.fetch for the first-party auth cookie.
+ * Same-origin deployment, no CORS config needed.
  *
  * Every method returns `Result<T, BillingApiError>` so consumers
  * destructure `{ data, error }` instead of try/catch.
  *
  * Response types come from the shared billing contract
  * (`@epicenter/api/billing-contract`), which the API routes also
- * satisfy. Neither side derives from the other—both derive from
- * the contract.
+ * satisfy. Neither side derives from the other; both derive from the contract.
  *
  * @see docs/articles/shared-contract-over-derived-types.md
  */
@@ -28,7 +27,7 @@ import type {
 } from '@epicenter/api/billing-contract';
 import { defineErrors, extractErrorMessage } from 'wellcrafted/error';
 import { type Result, tryAsync } from 'wellcrafted/result';
-import { auth } from './auth';
+import { auth } from '$platform/auth';
 
 /**
  * Tagged error for the billing API boundary.
@@ -53,7 +52,7 @@ async function get<TResponse>(
 ): Promise<Result<TResponse, BillingApiError>> {
 	return tryAsync({
 		try: async () => {
-			const res = await auth.fetch(path, { credentials: 'include' });
+			const res = await auth.fetch(path);
 			if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 			return (await res.json()) as TResponse;
 		},
@@ -72,7 +71,6 @@ async function post<TBody, TResponse>(
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body),
-				credentials: 'include',
 			});
 			if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 			return (await res.json()) as TResponse;

@@ -1,10 +1,16 @@
 # Safe Sign-Out Flow
 
 **Date**: 2026-04-14
-**Status**: Draft
+**Status**: Superseded by `specs/20260504T233223-sign-out-preserves-local-data.md`
 **Author**: AI-assisted
 
 ## Overview
+
+Superseded note, 2026-05-05: this draft assumed sign-out must guard
+against data loss because sign-out wiped local IndexedDB. The replacement
+spec removes that premise. Sign-out now tears down runtime state and reloads,
+while owner-scoped local persistence is preserved. Explicit local deletion is
+handled by "Forget this device."
 
 Add a safe sign-out flow across all 5 workspace apps that checks sync status before signing out, warns users about unsynced changes, and does a clean page reload to eliminate in-memory state leakage.
 

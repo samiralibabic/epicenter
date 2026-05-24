@@ -4,10 +4,10 @@
 	import { confirmationDialog } from '@epicenter/ui/confirmation-dialog';
 	import { useCombobox } from '@epicenter/ui/hooks';
 	import * as Popover from '@epicenter/ui/popover';
+	import { Spinner } from '@epicenter/ui/spinner';
 	import { cn } from '@epicenter/ui/utils';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import MessageSquarePlusIcon from '@lucide/svelte/icons/message-square-plus';
 	import TrashIcon from '@lucide/svelte/icons/trash-2';
 	import type { ConversationHandle } from '$lib/chat/chat-state.svelte';
@@ -111,9 +111,7 @@
 											>{conv.title}</span
 										>
 										{#if conv.isLoading}
-											<LoaderCircleIcon
-												class="size-3 shrink-0 animate-spin text-muted-foreground"
-											/>
+											<Spinner class="size-3 shrink-0 text-muted-foreground" />
 										{/if}
 									</span>
 									<span class="flex shrink-0 items-center gap-1">
@@ -139,11 +137,10 @@
 										</Button>
 									</span>
 								</span>
-								{@const preview = conv.lastMessagePreview}
-								{#if preview}
+								{#if conv.lastMessagePreview}
 									<span
 										class="w-full truncate pl-5 text-[10px] text-muted-foreground"
-										>{preview}</span
+										>{conv.lastMessagePreview}</span
 									>
 								{/if}
 							</Command.Item>

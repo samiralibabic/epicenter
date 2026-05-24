@@ -6,7 +6,7 @@
  * all JSON Schema type mappings, nullable vs NOT NULL, and edge cases.
  *
  * Key behaviors:
- * - resolveSchema picks highest _v.const from oneOf array
+ * - generateDdl picks highest _v.const from oneOf array
  * - generateDdl maps JSON Schema types to correct SQLite types
  * - id field always becomes TEXT PRIMARY KEY
  * - _v field with const always becomes INTEGER NOT NULL
@@ -16,9 +16,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { generateDdl, resolveSchema } from './ddl.js';
-
-type JsonSchema = Record<string, unknown>;
+import { generateDdl } from './ddl.js';
 
 function objectSchema(
 	properties: Record<string, Record<string, unknown>>,
@@ -41,60 +39,6 @@ function versionedSchema(
 		['id', '_v', ...required],
 	);
 }
-
-describe('resolveSchema', () => {
-	test('returns schema as-is when no oneOf present', () => {
-		const schema = objectSchema(
-			{ id: { type: 'string' }, title: { type: 'string' } },
-			['id'],
-		);
-
-		expect(resolveSchema(schema)).toBe(schema);
-	});
-
-	test('picks highest _v.const from oneOf array', () => {
-		const v1Schema = versionedSchema(1, { title: { type: 'string' } }, [
-			'title',
-		]);
-		const v2Schema = versionedSchema(
-			2,
-			{ title: { type: 'string' }, published: { type: 'boolean' } },
-			['title'],
-		);
-
-		expect(resolveSchema({ oneOf: [v1Schema, v2Schema] })).toBe(v2Schema);
-	});
-
-	test('picks highest _v.const when versions are out of order', () => {
-		const v1Schema = versionedSchema(1, { title: { type: 'string' } }, [
-			'title',
-		]);
-		const v2Schema = versionedSchema(
-			2,
-			{ title: { type: 'string' }, published: { type: 'boolean' } },
-			['title'],
-		);
-
-		expect(resolveSchema({ oneOf: [v2Schema, v1Schema] })).toBe(v2Schema);
-	});
-
-	test('returns original schema when oneOf is empty', () => {
-		const schema: JsonSchema = { oneOf: [] };
-
-		expect(resolveSchema(schema)).toBe(schema);
-	});
-
-	test('returns first oneOf entry when oneOf entries lack _v', () => {
-		const firstSchema = objectSchema({ title: { type: 'string' } }, ['title']);
-		const secondSchema = objectSchema({ published: { type: 'boolean' } });
-
-		expect(resolveSchema({ oneOf: [firstSchema, secondSchema] })).toBe(
-			firstSchema,
-		);
-	});
-
-	test.todo('returns original schema when oneOf entries lack _v', () => {});
-});
 
 describe('generateDdl', () => {
 	test('generates correct DDL for a simple table', () => {
@@ -210,7 +154,7 @@ describe('generateDdl', () => {
 		);
 	});
 
-	test('handles multi-version schema via oneOf', () => {
+	test('handles out-of-order multi-version schema via oneOf', () => {
 		const v1Schema = versionedSchema(1, { title: { type: 'string' } }, [
 			'title',
 		]);
@@ -223,7 +167,7 @@ describe('generateDdl', () => {
 			['title'],
 		);
 
-		const sql = generateDdl('posts', { oneOf: [v1Schema, v2Schema] });
+		const sql = generateDdl('posts', { oneOf: [v2Schema, v1Schema] });
 
 		expect(sql).toBe(
 			'CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "_v" INTEGER NOT NULL, "title" TEXT NOT NULL, "published" INTEGER)',

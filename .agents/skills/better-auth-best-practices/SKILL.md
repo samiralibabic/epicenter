@@ -1,6 +1,6 @@
 ---
 name: better-auth-best-practices
-description: Configure Better Auth server and client, set up database adapters, manage sessions, add plugins, and handle environment variables. Use when users mention Better Auth, betterauth, auth.ts, or need to set up TypeScript authentication with email/password, OAuth, or plugin configuration.
+description: 'Better Auth server/client setup: `auth.ts`, generated schema, DB adapters, sessions, cookies, env vars, and plugins. Use when mentioning Better Auth, betterauth, auth handlers, OAuth, email/password, or session configuration.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -11,6 +11,12 @@ metadata:
 ## Reference Repositories
 
 - [Better Auth](https://github.com/better-auth/better-auth) — TypeScript authentication framework with plugins
+
+## Upstream Grounding
+
+When Better Auth API signatures, adapter behavior, generated schema, plugin options, session storage, cookie behavior, or security defaults affect correctness, ask DeepWiki a narrow question against `better-auth/better-auth` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for stable setup basics already documented below.
 
 **Always consult [better-auth.com/docs](https://better-auth.com/docs) for code examples and latest API.**
 
@@ -28,11 +34,11 @@ Use this pattern when you need to:
 
 ## Setup Workflow
 
-1. Install: `npm install better-auth`
+1. Install: `bun add better-auth`
 2. Set env vars: `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL`
 3. Create `auth.ts` with database + config
 4. Create route handler for your framework
-5. Run `npx @better-auth/cli@latest migrate`
+5. Run `bun x @better-auth/cli@latest migrate`
 6. Verify: call `GET /api/auth/ok` — should return `{ status: "ok" }`
 
 ---
@@ -49,9 +55,9 @@ Only define `baseURL`/`secret` in config if env vars are NOT set.
 CLI looks for `auth.ts` in: `./`, `./lib`, `./utils`, or under `./src`. Use `--config` for custom path.
 
 ### CLI Commands
-- `npx @better-auth/cli@latest migrate` - Apply schema (built-in adapter)
-- `npx @better-auth/cli@latest generate` - Generate schema for Prisma/Drizzle
-- `npx @better-auth/cli mcp --cursor` - Add MCP to AI tools
+- `bun x @better-auth/cli@latest migrate` - Apply schema (built-in adapter)
+- `bun x @better-auth/cli@latest generate` - Generate schema for Prisma/Drizzle
+- `bun x @better-auth/cli@latest mcp --cursor` - Add MCP to AI tools
 
 **Re-run after adding/changing plugins.**
 
@@ -129,6 +135,17 @@ CLI looks for `auth.ts` in: `./`, `./lib`, `./utils`, or under `./src`. Use `--c
 - `database.generateId` - Custom ID generation or `"serial"`/`"uuid"`/`false`
 
 **Rate limiting:** `rateLimit.enabled`, `rateLimit.window`, `rateLimit.max`, `rateLimit.storage` ("memory" | "database" | "secondary-storage").
+
+## Hono, Cookies, And OAuth Provider Boundaries
+
+- Mount Better Auth handlers for both `GET` and `POST` auth paths.
+- Register credentialed CORS before Better Auth when browser callers use cookies. Coordinate `credentials: true`, `trustedOrigins`, secure cookies, and origin checks.
+- Treat `baseURL` as security-sensitive: it drives redirects, issuer URLs, cookie behavior, and OAuth validation. Dynamic base URLs need explicit host or origin validation.
+- Treat `trustedOrigins` as a CSRF and redirect boundary, not a convenience list.
+- Do not disable CSRF or origin checks in production. `disableOriginCheck` also weakens CSRF protection.
+- Make secure cookie behavior explicit in production, even if Better Auth can infer it from HTTPS.
+- If `secondaryStorage` is configured, sessions may not persist to the database unless `session.storeSessionInDatabase` is set. Put OAuth verification records in durable storage when KV consistency or cross-isolate reads matter.
+- For OAuth provider work, document PKCE, trusted clients, JWT or JWKS signing choices, audience and issuer validation, discovery endpoints, and resource-server token verification.
 
 ---
 

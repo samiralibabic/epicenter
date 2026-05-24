@@ -197,7 +197,7 @@ export type YKeyValueLwwEntry<T> = { key: string; val: T; ts: number };
  */
 const DEDUP_ORIGIN = Symbol('dedup');
 
-export class YKeyValueLww<T> implements ObservableKvStore<T> {
+export class YKeyValueLww<T> implements ObservableKvStore<T>, Disposable {
 	/** The underlying Y.Array that stores `{key, val, ts}` entries. */
 	readonly yarray: Y.Array<YKeyValueLwwEntry<T>>;
 
@@ -279,7 +279,7 @@ export class YKeyValueLww<T> implements ObservableKvStore<T> {
 	/** Registered change handlers. */
 	private changeHandlers: Set<KvStoreChangeHandler<T>> = new Set();
 
-	/** Stored observer reference for cleanup in dispose(). */
+	/** Stored observer reference for cleanup in [Symbol.dispose](). */
 	private _observer!: (
 		event: Y.YArrayEvent<YKeyValueLwwEntry<T>>,
 		transaction: Y.Transaction,
@@ -867,7 +867,7 @@ export class YKeyValueLww<T> implements ObservableKvStore<T> {
 	 * Unregister the Y.Array observer. Call when this wrapper is no longer needed
 	 * but the underlying Y.Array continues to exist.
 	 */
-	dispose(): void {
+	[Symbol.dispose](): void {
 		this.yarray.unobserve(this._observer);
 	}
 }

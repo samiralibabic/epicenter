@@ -5,6 +5,8 @@
 **Author**: AI-assisted
 
 > **2026-04-18 Update**: `connectWorkspace` no longer uses persistence at all — the "global is correct" row below no longer applies to scripts. `EPICENTER_PATHS.persistence()` remains the standard location for daemon configs (`epicenter.config.ts`). The guidance for playground/daemon configs in this spec is unchanged.
+>
+> **Path note (2026-05-22):** The remaining `~/.epicenter/persistence/` guidance is superseded. Do not copy this spec's global persistence location into new work. Runtime persistence should use the current path owners described in `20260522T203209-top-level-epicenter-path-cleanup.md`; project-local generated data remains valid under `<projectDir>/.epicenter/`.
 
 ## Overview
 

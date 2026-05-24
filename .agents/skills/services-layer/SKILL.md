@@ -1,6 +1,6 @@
 ---
 name: services-layer
-description: Service layer patterns with defineErrors, namespace exports, and Result types. Use when the user says "create a service", "service layer", or when creating new services, defining domain-specific errors, or understanding the service architecture.
+description: 'Service layer patterns: defineErrors, namespace exports, Result types. Use when: "create a service", "service layer", creating services, defining domain-specific errors.'
 metadata:
   author: epicenter
   version: '2.0'
@@ -47,7 +47,7 @@ Every service defines domain-specific errors using `defineErrors` from wellcraft
 import { defineErrors, type InferError, type InferErrors, extractErrorMessage } from 'wellcrafted/error';
 import { Err, Ok, type Result, tryAsync, trySync } from 'wellcrafted/result';
 
-// Namespace-style error definition — name describes the domain
+// Namespace-style error definition : name describes the domain
 const CompletionError = defineErrors({
   ConnectionFailed: ({ cause }: { cause: unknown }) => ({
     message: `Connection failed: ${extractErrorMessage(cause)}`,
@@ -63,11 +63,11 @@ const CompletionError = defineErrors({
   }),
 });
 
-// Type derivation — shadow the const with a type of the same name
+// Type derivation : shadow the const with a type of the same name
 type CompletionError = InferErrors<typeof CompletionError>;
 type ConnectionFailedError = InferError<typeof CompletionError.ConnectionFailed>;
 
-// Call sites — each variant returns Err<...> directly
+// Call sites : each variant returns Err<...> directly
 return CompletionError.ConnectionFailed({ cause: error });
 return CompletionError.EmptyResponse({ providerLabel: 'OpenAI' });
 return CompletionError.MissingParam({ param: 'apiKey' });
@@ -78,9 +78,9 @@ return CompletionError.MissingParam({ param: 'apiKey' });
 `defineErrors({ ... })` takes an object of factory functions and returns a namespace object. Each key becomes a variant:
 
 - **`name` is auto-stamped** from the key (e.g., key `NotFound` → `error.name === 'NotFound'`)
-- **The factory function IS the message generator** — it returns `{ message, ...fields }`
-- **Each variant returns `Err<...>` directly** — no separate `FooErr` constructor needed
-- **Types use `InferError` / `InferErrors`** — not `ReturnType`
+- **The factory function IS the message generator** : it returns `{ message, ...fields }`
+- **Each variant returns `Err<...>` directly** : no separate `FooErr` constructor needed
+- **Types use `InferError` / `InferErrors`** : not `ReturnType`
 
 ```typescript
 // No-input variant (static message)
@@ -90,10 +90,10 @@ const RecorderError = defineErrors({
   }),
 });
 
-// Usage — no arguments needed
+// Usage : no arguments needed
 return RecorderError.Busy();
 
-// Variant with derived fields — constructor extracts from raw input
+// Variant with derived fields : constructor extracts from raw input
 const HttpError = defineErrors({
   Response: ({ response, body }: { response: { status: number }; body: unknown }) => ({
     message: `HTTP ${response.status}: ${extractErrorMessage(body)}`,
@@ -102,7 +102,7 @@ const HttpError = defineErrors({
   }),
 });
 
-// Usage — pass raw objects, constructor derives fields
+// Usage : pass raw objects, constructor derives fields
 return HttpError.Response({ response, body: await response.json() });
 // error.message → "HTTP 401: Unauthorized"
 // error.status  → 401 (derived from response, flat on the object)
@@ -153,7 +153,7 @@ type ConnectionError = InferError<typeof HttpError.Connection>;
 5. **Export factory + Live instance** - Factory for testing, Live for production
 6. **Use defineErrors namespaces** - Group related errors under a single namespace
 7. **Derive types with InferError/InferErrors** - Not `ReturnType`
-8. **Variant names describe the failure mode** - Never use generic names like `Service`, `Error`, or `Failed`. The namespace provides domain context (`RecorderError`), so the variant must say *what went wrong* (`AlreadyRecording`, `InitFailed`, `StreamAcquisition`). `RecorderError.Service` is meaningless — `RecorderError.AlreadyRecording` tells you exactly what happened.
+8. **Variant names describe the failure mode** - Never use generic names like `Service`, `Error`, or `Failed`. The namespace provides domain context (`RecorderError`), so the variant must say *what went wrong* (`AlreadyRecording`, `InitFailed`, `StreamAcquisition`). `RecorderError.Service` is meaningless : `RecorderError.AlreadyRecording` tells you exactly what happened.
 9. **Split discriminated union inputs** - Each variant gets its own name and shape. If the constructor branches on its inputs (if/switch/ternary) to decide the message, each branch should be its own variant
 10. **Transform cause in the constructor, not the call site** - Accept `cause: unknown` and call `extractErrorMessage(cause)` inside the factory's message template. Call sites pass the raw error: `{ cause: error }`. This centralizes message extraction where the message is composed and keeps call sites clean.
 

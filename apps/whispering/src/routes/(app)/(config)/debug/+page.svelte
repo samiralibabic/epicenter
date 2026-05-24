@@ -37,7 +37,10 @@
 
 	function createMetrics() {
 		const tableDefs = [
-			{ label: 'Recordings', count: () => whispering.tables.recordings.count() },
+			{
+				label: 'Recordings',
+				count: () => whispering.tables.recordings.count(),
+			},
 			{
 				label: 'Transformations',
 				count: () => whispering.tables.transformations.count(),
@@ -146,7 +149,7 @@
 				const { error } = trySync({
 					try: () => {
 						measure('Generated', count, () => {
-							whispering.ydoc.transact(() => {
+							whispering.batch(() => {
 								for (let i = 0; i < count; i++) {
 									const now = new Date().toISOString();
 									const transcript = content;
@@ -398,38 +401,44 @@
 
 				<!-- Results -->
 				{#if stressTest.lastResult}
-					{@const result = stressTest.lastResult}
 					<div class="rounded-md border bg-muted/30 p-4 space-y-2">
 						<p class="text-sm font-medium">
-							{result.label}
-							{result.rowCount.toLocaleString()}
+							{stressTest.lastResult.label}
+							{stressTest.lastResult.rowCount.toLocaleString()}
 							rows
 						</p>
 						<div class="grid gap-1.5 text-sm">
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Duration</span>
-								<span class="font-mono">{result.durationMs.toFixed(1)} ms</span>
+								<span class="font-mono"
+									>{stressTest.lastResult.durationMs.toFixed(1)}
+									ms</span
+								>
 							</div>
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Throughput</span>
 								<span class="font-mono"
-									>{result.rowsPerSecond.toLocaleString()}
+									>{stressTest.lastResult.rowsPerSecond.toLocaleString()}
 									rows/s</span
 								>
 							</div>
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Size before</span>
-								<span class="font-mono">{formatBytes(result.sizeBefore)}</span>
+								<span class="font-mono"
+									>{formatBytes(stressTest.lastResult.sizeBefore)}</span
+								>
 							</div>
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Size after</span>
-								<span class="font-mono">{formatBytes(result.sizeAfter)}</span>
+								<span class="font-mono"
+									>{formatBytes(stressTest.lastResult.sizeAfter)}</span
+								>
 							</div>
 							<div class="flex justify-between">
 								<span class="text-muted-foreground">Size delta</span>
 								<span class="font-mono">
-									{result.sizeDelta >= 0 ? '+' : ''}
-									{formatBytes(Math.abs(result.sizeDelta))}
+									{stressTest.lastResult.sizeDelta >= 0 ? '+' : ''}
+									{formatBytes(Math.abs(stressTest.lastResult.sizeDelta))}
 								</span>
 							</div>
 						</div>

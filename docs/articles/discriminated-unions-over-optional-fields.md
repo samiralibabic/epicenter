@@ -8,30 +8,30 @@ type SyncProviderConfig = {
 	/** Static shared secret, set once when the server starts. */
 	token?: string;
 	/** Fetches a short-lived JWT from your auth service on each connection. */
-	getToken?: (workspaceId: string) => Promise<string>;
+	loadToken?: (workspaceId: string) => Promise<string>;
 };
 ```
 
-This works. You can pass just a URL, or a URL with a token, or a URL with a getToken callback. Three valid combinations. But there's a fourth combination TypeScript won't stop you from writing:
+This works. You can pass just a URL, or a URL with a token, or a URL with a loadToken callback. Three valid combinations. But there's a fourth combination TypeScript won't stop you from writing:
 
 ```typescript
 createSyncProvider({
 	url: 'wss://sync.example.com',
 	token: 'my-static-secret',
-	getToken: async (id) => fetchJwt(id),
+	loadToken: async (id) => fetchJwt(id),
 });
 ```
 
-Both `token` and `getToken` present. Which one wins? The spec says "mutually exclusive" in a JSDoc comment, but comments don't compile.
+Both `token` and `loadToken` present. Which one wins? The spec says "mutually exclusive" in a JSDoc comment, but comments don't compile.
 
 ## The Real Cost
 
-The JSDoc comment `Mutually exclusive with getToken` is documentation debt. Someone will miss it. The provider implementation has to handle the impossible state anyway:
+The JSDoc comment `Mutually exclusive with loadToken` is documentation debt. Someone will miss it. The provider implementation has to handle the impossible state anyway:
 
 ```typescript
 function createSyncProvider(config: SyncProviderConfig) {
-	if (config.token && config.getToken) {
-		throw new Error('Cannot specify both token and getToken');
+	if (config.token && config.loadToken) {
+		throw new Error('Cannot specify both token and loadToken');
 	}
 	// ...
 }
@@ -50,7 +50,7 @@ type SyncProviderConfig =
 	| {
 			mode: 'dynamic-token';
 			url: string;
-			getToken: (workspaceId: string) => Promise<string>;
+			loadToken: (workspaceId: string) => Promise<string>;
 	  };
 ```
 
@@ -66,7 +66,7 @@ function createSyncProvider(config: SyncProviderConfig) {
 		case 'static-token':
 			return connect(config.url, { protocol: config.token });
 		case 'dynamic-token':
-			return connect(config.url, { getProtocol: config.getToken });
+			return connect(config.url, { getProtocol: config.loadToken });
 		default: {
 			const _exhaustive: never = config;
 			throw new Error(
@@ -97,7 +97,7 @@ createSyncProvider({
 createSyncProvider({
 	mode: 'dynamic-token',
 	url: 'wss://cloud.example.com',
-	getToken: fetchJwt,
+	loadToken: fetchJwt,
 });
 ```
 
@@ -120,9 +120,9 @@ function staticTokenSync(url: string, token: string): SyncProviderConfig {
 
 function dynamicTokenSync(
 	url: string,
-	getToken: (workspaceId: string) => Promise<string>,
+	loadToken: (workspaceId: string) => Promise<string>,
 ): SyncProviderConfig {
-	return { mode: 'dynamic-token', url, getToken };
+	return { mode: 'dynamic-token', url, loadToken };
 }
 ```
 
@@ -144,7 +144,7 @@ createSyncProvider(
 );
 ```
 
-Each function accepts only the fields valid for its mode. You can't accidentally pass both `token` and `getToken` because no single function accepts both. The discriminant `mode` key is injected automatically; the consumer never sees it.
+Each function accepts only the fields valid for its mode. You can't accidentally pass both `token` and `loadToken` because no single function accepts both. The discriminant `mode` key is injected automatically; the consumer never sees it.
 
 The internal implementation still gets a clean discriminated union to switch on. The external API is a set of focused functions with obvious names and tight signatures.
 

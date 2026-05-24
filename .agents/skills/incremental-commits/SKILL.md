@@ -1,6 +1,6 @@
 ---
 name: incremental-commits
-description: Break multi-file changes into atomic commits ordered by dependency. Use when the user says "split this into commits", "commit strategy", "break this up", or when making refactors, breaking API changes, or features touching 3+ files that need clean git history.
+description: Break multi-file changes into atomic commits ordered by dependency. Use for "split this into commits", "commit strategy", "break this up", refactors.
 metadata:
   author: epicenter
   version: '1.0'
@@ -8,9 +8,27 @@ metadata:
 
 # Incremental Commits
 
-When a feature touches multiple files, implement in **waves**. Each wave is one logical concern, one commit. This creates a clean git history that tells a story.
+When a feature touches multiple files, implement in **waves**. Each wave is one logical concern, one standalone commit, ordered by dependency. This creates a clean git history that reviewers can audit one commit at a time.
 
-> **Related Skills**: See `git` for commit message conventions and PR guidelines.
+> **Related Skills**: See `standalone-commits` for making each wave reviewable and auditable. See `git` for commit message conventions and PR guidelines.
+
+## Relationship To Standalone Commits
+
+`incremental-commits` decides commit order. `standalone-commits` decides whether each commit boundary is good.
+
+Use this skill to plan the sequence:
+
+```
+foundation -> implementation -> consumers -> cleanup
+```
+
+Then use `standalone-commits` to test each wave:
+
+```
+Can this commit be reviewed, verified, and reverted as one coherent unit?
+```
+
+If a planned wave fails that test, change the wave boundary before committing.
 
 ## The Pattern
 
@@ -26,7 +44,7 @@ Wave 4: Infrastructure (utilities, converters, dependencies)
 Wave 5: Consumers (apps, UI, integrations)
 ```
 
-Not every change needs all waves. A simple bugfix might be one wave. A cross-cutting refactor might need five.
+Not every change needs all waves. A simple bugfix might be one standalone commit. A cross-cutting refactor might need five.
 
 ## Wave Characteristics
 
@@ -38,6 +56,7 @@ Each wave must be:
 | **Buildable** | Code compiles after this wave (run type-check) |
 | **Focused**   | Changes relate to ONE layer/concern            |
 | **Complete**  | No half-done work within a wave                |
+| **Auditable** | Reviewers can inspect this wave without waiting for a later wave |
 
 ## Real Example: Schema Refactor
 
@@ -108,6 +127,7 @@ Files: App files that consume the new types.
    - List files that need changes
    - Group by layer/concern
    - Order by dependency (foundations first)
+   - Define the standalone claim each wave will prove
 
 2. **Implement one wave**
    - Make changes for that wave only
@@ -115,6 +135,7 @@ Files: App files that consume the new types.
 
 3. **Verify the wave**
    - Run type-check: `bun run tsc --noEmit`
+   - Re-read `git diff --staged` against the wave claim
    - Ensure no errors introduced
 
 4. **Commit the wave**

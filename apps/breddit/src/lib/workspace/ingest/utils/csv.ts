@@ -51,26 +51,33 @@ export function parseCsv<
 	input: string,
 	options?: CsvOptions & { headers?: boolean },
 ): T[] | string[][] {
-	const opts = { ...defaultOpts, ...options };
+	const {
+		delimiter,
+		quote,
+		escape: escapeChar,
+		trim,
+		headers,
+		skipEmptyLines,
+		comment,
+	} = {
+		...defaultOpts,
+		...options,
+	};
 
 	const rows: string[][] = [];
 	let current: string[] = [];
 	let field = '';
 	let inQuotes = false;
 
-	const delimiterOpt = opts.delimiter;
-	const quoteOpt = opts.quote;
-	const escapeOpt = opts.escape;
-
 	const pushField = () => {
 		let val = field;
-		if (opts.trim) val = val.trim();
+		if (trim) val = val.trim();
 		current.push(val);
 		field = '';
 	};
 
 	const pushRow = () => {
-		if (!(opts.skipEmptyLines && current.length === 1 && current[0] === '')) {
+		if (!(skipEmptyLines && current.length === 1 && current[0] === '')) {
 			rows.push(current);
 		}
 		current = [];
@@ -83,7 +90,7 @@ export function parseCsv<
 		// Handle comments at start of line
 		if (
 			!inQuotes &&
-			char === opts.comment &&
+			char === comment &&
 			(i === 0 || input[i - 1] === '\n' || input[i - 1] === '\r')
 		) {
 			while (i < input.length && input[i] !== '\n') i++;
@@ -91,18 +98,18 @@ export function parseCsv<
 		}
 
 		if (inQuotes) {
-			if (char === escapeOpt && next === quoteOpt) {
-				field += quoteOpt;
+			if (char === escapeChar && next === quote) {
+				field += quote;
 				i++;
-			} else if (char === quoteOpt) {
+			} else if (char === quote) {
 				inQuotes = false;
 			} else {
 				field += char;
 			}
 		} else {
-			if (char === quoteOpt) {
+			if (char === quote) {
 				inQuotes = true;
-			} else if (char === delimiterOpt) {
+			} else if (char === delimiter) {
 				pushField();
 			} else if (char === '\n') {
 				pushField();
@@ -120,7 +127,7 @@ export function parseCsv<
 	pushRow();
 
 	// If headers → return array of objects
-	if (opts.headers !== false && rows.length > 0) {
+	if (headers !== false && rows.length > 0) {
 		const [headerRow, ...body] = rows;
 		return body.map((row) => {
 			const obj: Record<string, string> = {};

@@ -1,694 +1,282 @@
 # Multi-Device Sync Architecture
 
-Epicenter's sync system enables Y.Doc replication across multiple devices and servers using WebSocket. Every device with a filesystem can run an Elysia server as a **sync node**, and Yjs's multi-provider support allows connecting to multiple nodes simultaneously.
+Epicenter replicates a `Y.Doc` across many devices over a WebSocket relay. Yjs's CRDT semantics keep every replica eventually consistent regardless of message order or how many devices are connected. The relay is a dumb pipe: it moves bytes, never executes business logic.
 
-## Core Concepts
+This document describes the runtime: the one public primitive (`openCollaboration`), the handle it returns, and how the wire is organized.
 
-### Sync Nodes
+## One primitive: `openCollaboration`
 
-A **sync node** is any device running an Elysia server with the sync plugin enabled. Sync nodes:
-
-- Hold a Y.Doc instance in memory
-- Accept WebSocket connections from browsers and other servers
-- Broadcast updates to all connected clients
-- Can connect to OTHER sync nodes as a client (server-to-server sync)
-
-### Multi-Provider Architecture
-
-Yjs supports **multiple providers simultaneously**. Each provider connects to a different sync node, and changes merge automatically via CRDTs:
-
-```typescript
-// A Y.Doc can connect to multiple servers at once
-const doc = new Y.Doc();
-
-// Provider 1: Local desktop server
-new WebsocketProvider('ws://desktop.tailnet:3913/rooms/blog', 'blog', doc);
-
-// Provider 2: Laptop server
-new WebsocketProvider('ws://laptop.tailnet:3913/rooms/blog', 'blog', doc);
-
-// Provider 3: Cloud server
-new WebsocketProvider('wss://sync.myapp.com/rooms/blog', 'blog', doc);
-
-// Changes sync through ALL connected providers
-// Yjs deduplicates updates automatically
-```
-
-### Why This Works
-
-- **CRDTs**: Yjs uses Conflict-free Replicated Data Types; updates merge regardless of order
-- **Vector Clocks**: Each update has a unique ID; same update received twice is applied once
-- **Eventual Consistency**: All Y.Docs converge to identical state, guaranteed
-
-## Network Topology
-
-### Example Setup (3 Devices + Cloud)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          SYNC NODE NETWORK                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   PHONE                    LAPTOP                     DESKTOP               │
-│   ┌──────────┐            ┌──────────┐              ┌──────────┐           │
-│   │ Browser  │            │ Browser  │              │ Browser  │           │
-│   │ Y.Doc    │            │ Y.Doc    │              │ Y.Doc    │           │
-│   └────┬─────┘            └────┬─────┘              └────┬─────┘           │
-│        │                       │                         │                  │
-│   (no server)             ┌────▼─────┐              ┌────▼─────┐           │
-│        │                  │ Elysia   │◄────────────►│ Elysia   │           │
-│        │                  │ Y.Doc    │  server-to-  │ Y.Doc    │           │
-│        │                  │ :3913    │    server    │ :3913    │           │
-│        │                  └────┬─────┘              └────┬─────┘           │
-│        │                       │                         │                  │
-│        │                       └──────────┬──────────────┘                  │
-│        │                                  │                                 │
-│        │                           ┌──────▼──────┐                          │
-│        └──────────────────────────►│ Cloud Server│◄─────────────────────────│
-│                                    │ Y.Doc :3913 │                          │
-│                                    └─────────────┘                          │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Y.Doc Instance Count
-
-| Location        | Y.Doc Count | Notes                          |
-| --------------- | ----------- | ------------------------------ |
-| Phone browser   | 1           | Client only (no local server)  |
-| Laptop browser  | 1           | Connects to localhost          |
-| Desktop browser | 1           | Connects to localhost          |
-| Laptop server   | 1           | Sync node                      |
-| Desktop server  | 1           | Sync node                      |
-| Cloud server    | 1           | Sync node (optional)           |
-| **Total**       | **5-6**     | All stay in sync via providers |
-
-## Sync Node Configuration
-
-Define your sync nodes as a constant for easy reference:
-
-```typescript
-// src/config/sync-nodes.ts
-
-/**
- * Registry of all sync nodes in your network.
- *
- * Each entry is a WebSocket URL to an Elysia server running the sync plugin.
- * Use Tailscale hostnames for local network devices.
- */
-export const SYNC_NODES = {
-	// Local devices via Tailscale
-	desktop: 'ws://desktop.my-tailnet.ts.net:3913/rooms/{id}',
-	laptop: 'ws://laptop.my-tailnet.ts.net:3913/rooms/{id}',
-
-	// Cloud server (optional, always-on)
-	cloud: 'wss://sync.myapp.com/rooms/{id}',
-
-	// Localhost (for browser connecting to local server)
-	localhost: 'ws://localhost:3913/rooms/{id}',
-} as const;
-
-export type SyncNodeId = keyof typeof SYNC_NODES;
-```
-
-## Provider Strategy Per Device
-
-Different devices need different provider configurations.
-
-### Quick Reference Table
-
-| Device              | Acts As         | Providers (Connects To)                                       | Rationale                                       |
-| ------------------- | --------------- | ------------------------------------------------------------- | ----------------------------------------------- |
-| **Phone browser**   | Client only     | `SYNC_NODES.desktop`, `SYNC_NODES.laptop`, `SYNC_NODES.cloud` | No local server; connect to all available nodes |
-| **Laptop browser**  | Client          | `SYNC_NODES.localhost`                                        | Server handles cross-device sync                |
-| **Desktop browser** | Client          | `SYNC_NODES.localhost`                                        | Server handles cross-device sync                |
-| **Laptop server**   | Server + Client | `SYNC_NODES.desktop`, `SYNC_NODES.cloud`                      | Sync with OTHER servers (not itself)            |
-| **Desktop server**  | Server + Client | `SYNC_NODES.laptop`, `SYNC_NODES.cloud`                       | Sync with OTHER servers (not itself)            |
-| **Cloud server**    | Server only     | (none)                                                        | Accepts connections; doesn't initiate           |
-
-### Key Insight
-
-- **Browsers** on laptop/desktop only connect to `localhost`. Their local server handles all cross-device sync.
-- **Servers** connect to OTHER servers (never themselves). This creates server-to-server sync.
-- **Phone** has no server, so it connects directly to all available sync nodes for resilience.
-
-### Phone Browser Configuration
-
-Phone has no local server, so it connects directly to all available sync nodes. Each `attachSync` opens its own WebSocket to a different node.
-
-```typescript
-// phone/src/client.ts
-import {
-	attachIndexedDb,
-	attachSync,
-	attachTables,
-	defineDocument,
-} from '@epicenter/workspace';
-import * as Y from 'yjs';
-import { SYNC_NODES } from './config/sync-nodes';
-import { blogTables } from './workspace/definition';
-
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	const idb = attachIndexedDb(ydoc);
-	// Connect to ALL sync nodes for maximum resilience
-	const syncDesktop = attachSync(ydoc, { url: SYNC_NODES.desktop, waitFor: idb.whenLoaded });
-	const syncLaptop = attachSync(ydoc, { url: SYNC_NODES.laptop, waitFor: idb.whenLoaded });
-	const syncCloud = attachSync(ydoc, { url: SYNC_NODES.cloud, waitFor: idb.whenLoaded });
-	return { id, ydoc, tables, idb, syncDesktop, syncLaptop, syncCloud, /* ... */ };
-});
-
-export const blogWorkspace = blog.open('blog');
-```
-
-### Laptop/Desktop Browser Configuration
-
-Browser connects only to its own local server (localhost). The server handles cross-device sync.
-
-```typescript
-// desktop/browser/src/client.ts
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	const idb = attachIndexedDb(ydoc);
-	// Browser only needs to connect to its local server
-	const sync = attachSync(ydoc, { url: SYNC_NODES.localhost, waitFor: idb.whenLoaded });
-	return { id, ydoc, tables, idb, sync, /* ... */ };
-});
-
-export const blogWorkspace = blog.open('blog');
-```
-
-### Desktop Server Configuration (Server-to-Server Sync)
-
-The server acts as BOTH:
-
-1. A sync server (accepts connections via `createSyncPlugin`)
-2. A sync client (connects to other servers via `attachSync`)
-
-```typescript
-// desktop/server/src/client.ts
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	const sqlite = attachSqlite(ydoc, { filePath: '...' });
-	// Connect to OTHER sync nodes (not itself!) — Desktop connects to laptop + cloud
-	const syncToLaptop = attachSync(ydoc, { url: SYNC_NODES.laptop, waitFor: sqlite.whenLoaded });
-	const syncToCloud  = attachSync(ydoc, { url: SYNC_NODES.cloud,  waitFor: sqlite.whenLoaded });
-	return { id, ydoc, tables, sqlite, syncToLaptop, syncToCloud, /* ... */ };
-});
-
-export const blogWorkspace = blog.open('blog');
-```
-
-### Laptop Server Configuration
-
-```typescript
-// laptop/server/src/client.ts
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	const sqlite = attachSqlite(ydoc, { filePath: '...' });
-	// Laptop connects to: desktop + cloud
-	const syncToDesktop = attachSync(ydoc, { url: SYNC_NODES.desktop, waitFor: sqlite.whenLoaded });
-	const syncToCloud   = attachSync(ydoc, { url: SYNC_NODES.cloud,   waitFor: sqlite.whenLoaded });
-	return { id, ydoc, tables, sqlite, syncToDesktop, syncToCloud, /* ... */ };
-});
-
-export const blogWorkspace = blog.open('blog');
-```
-
-### Cloud Server Configuration
-
-Cloud server typically only accepts connections (doesn't initiate) — no `attachSync` calls at all, only `createSyncPlugin` on the Elysia side.
-
-```typescript
-// cloud/src/client.ts
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	const sqlite = attachSqlite(ydoc, { filePath: '...' });
-	return { id, ydoc, tables, sqlite, /* ... */ };
-});
-
-export const blogWorkspace = blog.open('blog');
-```
-
-## Data Flow Examples
-
-### Scenario 1: Phone Edits While All Devices Online
-
-```
-1. Phone edits document
-2. Update sent to desktop server (via WebSocket)
-3. Desktop server:
-   - Applies update to its Y.Doc
-   - Broadcasts to desktop browser
-   - Sends to laptop server (server-to-server)
-   - Sends to cloud server (server-to-server)
-4. Laptop server:
-   - Applies update
-   - Broadcasts to laptop browser
-5. All 6 Y.Docs now have the update
-```
-
-### Scenario 2: Desktop Browser Edits Offline
-
-```
-1. Desktop browser edits while offline
-2. Update stored in IndexedDB (via y-indexeddb)
-3. Desktop browser reconnects
-4. Update sent to localhost (desktop server)
-5. Desktop server broadcasts to all connected clients/servers
-6. All devices converge
-```
-
-### Scenario 3: Two Devices Edit Simultaneously
-
-```
-1. Phone edits "Hello"
-2. Laptop browser edits "World"
-3. Both updates propagate through network
-4. Yjs CRDTs merge automatically
-5. All devices see "Hello World" (or merged result)
-```
-
-## Offline Support
-
-Each device should also use local persistence:
-
-```typescript
-import {
-	attachIndexedDb,
-	attachSync,
-	attachTables,
-	defineDocument,
-} from '@epicenter/workspace';
-import * as Y from 'yjs';
-
-const blog = defineDocument((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, blogTables);
-	// Local persistence (use attachSqlite on Node.js)
-	const idb = attachIndexedDb(ydoc);
-	// Network sync — waits for local replay so the first exchange is a delta
-	const sync = attachSync(ydoc, { url: SYNC_NODES.desktop, waitFor: idb.whenLoaded });
-	return { id, ydoc, tables, idb, sync, /* ... */ };
-});
-```
-
-When offline:
-
-1. Changes saved to IndexedDB/filesystem
-2. When back online, Yjs syncs missed updates
-3. CRDTs ensure consistent merge
-
-## Tailscale Integration
-
-[Tailscale](https://tailscale.com/) provides a private mesh VPN that makes all your devices directly reachable:
-
-- **No port forwarding**: Devices get stable hostnames like `desktop.my-tailnet.ts.net`
-- **End-to-end encryption**: WireGuard tunnels between devices
-- **Works anywhere**: Home, office, cellular; devices always reachable
-
-```typescript
-// With Tailscale, use hostnames instead of IPs
-const SYNC_NODES = {
-	desktop: 'ws://desktop.my-tailnet.ts.net:3913/rooms/{id}', // Tailscale hostname
-	laptop: 'ws://laptop.my-tailnet.ts.net:3913/rooms/{id}', // Tailscale hostname
-	cloud: 'wss://sync.myapp.com/rooms/{id}', // Public domain
-} as const;
-```
-
-## Monitoring and Debugging
-
-### Connection Status
-
-```typescript
-import { WebsocketProvider } from 'y-websocket';
-
-const provider = new WebsocketProvider(url, roomId, doc);
-
-provider.on('status', ({ status }) => {
-	console.log(`Connection to ${url}: ${status}`);
-	// 'connecting' | 'connected' | 'disconnected'
-});
-
-provider.on('sync', (isSynced) => {
-	console.log(`Synced with ${url}: ${isSynced}`);
-});
-```
-
-### Check Y.Doc State
-
-```typescript
-// See current document state
-console.log(doc.toJSON());
-
-// See client ID (unique per Y.Doc instance)
-console.log(doc.clientID);
-
-// See state vector (what this doc has seen)
-console.log(Y.encodeStateVector(doc));
-```
-
-## Summary
-
-| Component            | Purpose                                     |
-| -------------------- | ------------------------------------------- |
-| **SYNC_NODES**       | Constant defining all sync endpoints        |
-| **websocketSync**    | Creates a provider for one sync node        |
-| **Multi-provider**   | Connect to multiple nodes simultaneously    |
-| **Server-to-server** | Servers sync with each other as clients     |
-| **Tailscale**        | Private network for device-to-device access |
-| **persistence**      | Local persistence for offline support       |
-
-The architecture scales from "just my devices on Tailscale" to "add a cloud server later" without fundamental changes. Start simple and add providers as needed.
-
----
-
-# Inside `attachSync`: the supervisor loop
-
-Everything above describes the *topology* — which devices talk to which sync nodes. This section describes what happens inside one `attachSync(doc, config)` call: the WebSocket lifecycle, the supervisor that owns it, the timers that keep it alive, and the RPC dispatch tree.
-
-`attachSync` is the entire network surface. One call wires sync, presence (awareness), and RPC dispatch. Understanding the supervisor is the difference between "WebSocket reconnection just works" and being able to debug "why is my CLI hanging."
-
-## What `attachSync` does at construction
-
-One call, four jobs (in `packages/workspace/src/document/attach-sync.ts`):
-
-```
-attachSync(doc, { device, url, getToken, waitFor: idb })
-        │
-        ├── 1. Validate `'system' not in userActions`
-        │      └─ throws at attach time on collision
-        │
-        ├── 2. Build the dispatch tree:
-        │        actions = {
-        │          ...userActions,   ← yours
-        │          system: {         ← injected
-        │            describe: defineQuery({...}),
-        │          },
-        │        }
-        │
-        ├── 3. If `device` was passed, build awareness:
-        │        awareness.setLocal({ device })   ← presence-only, ~150B
-        │
-        └── 4. Start the supervisor loop
-               └─ owns the WebSocket; reconnects forever
-                  with exponential backoff
-```
-
-The function returns synchronously. The first connect happens asynchronously after `waitFor` resolves (typically `idb.whenLoaded`).
-
-## Layer split: doc factory vs runtime wrapper
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  client.ts          (singleton + lifecycle)             │
-│  ─ resolves device descriptor                           │
-│  ─ wires auth, calls openXxx(...)                       │
-│  ─ exports the workspace binding                        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│  browser.ts/extension.ts   (runtime wrapper)            │
-│  ─ adds idb (persistence)                               │
-│  ─ adds broadcastChannel (cross-tab)                    │
-│  ─ adds sync (network + presence + RPC)                 │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────┐
-│  index.ts           (doc factory — pure)                │
-│  ─ ydoc, encryption, tables, kv, actions                │
-│  ─ no network, no auth, no platform                     │
-└─────────────────────────────────────────────────────────┘
-```
-
-The wrapper takes the doc bundle (which carries `.actions`) and a `device` and hands them to `attachSync`. The doc factory has no awareness, no sync, no platform concerns.
-
-## The dispatch tree
-
-Pretend an app exposes:
+Every document that participates in sync, the workspace doc and every nested content doc, goes through `openCollaboration`. There is no second primitive. The workspace doc passes a real action registry; content docs pass `actions: {}`.
 
 ```ts
-userActions = {
-  tabs: {
-    close: defineMutation({...}),
-    list:  defineQuery({...}),
-  },
-  bookmarks: {
-    create: defineMutation({...}),
-  },
+import {
+    defineActions,
+    defineMutation,
+    openCollaboration,
+    roomWsUrl,
+} from '@epicenter/workspace';
+
+const collaboration = openCollaboration(ydoc, {
+    url: roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId }),
+    waitFor: idb.whenLoaded,
+    openWebSocket: auth.openWebSocket,
+    onReconnectSignal: auth.onStateChange,
+    actions: defineActions({
+        tabs_close: defineMutation({ /* ... */ }),
+    }),
+});
+
+// Local invocation: direct function call against the registry.
+await collaboration.actions.tabs_close({ tabIds: [1, 2] });
+
+// Remote invocation: pick an online device, dispatch to it over the relay.
+const phone = collaboration.devices
+    .list()
+    .find((d) => d.installationId === 'phone');
+if (phone) {
+    const { data, error } = await collaboration.dispatch({
+        to: phone.installationId,
+        action: 'tabs_close',
+        input: { tabIds: [1, 2] },
+        signal: AbortSignal.timeout(5_000),
+    });
 }
 ```
 
-After `attachSync` runs:
+Content docs (rich-text bodies, attachments, anything nested that syncs independently) use the same call with `actions: {}`. Inbound dispatch frames reply `ActionNotFound`; sync and presence are unchanged.
+
+## The `Collaboration` handle
+
+`openCollaboration` returns synchronously:
+
+| Field             | What it is                                                         |
+| ----------------- | ------------------------------------------------------------------ |
+| `actions`         | Live local action registry; call directly                          |
+| `status`          | Current `SyncStatus` (`offline`/`connecting`/`connected`/`failed`) |
+| `whenConnected`   | Resolves on first successful handshake; rejects on permanent fail  |
+| `whenDisposed`    | Resolves once the supervisor exits and the socket closes           |
+| `onStatusChange`  | Subscribe to status changes; returns unsubscribe                   |
+| `reconnect`       | Manually wake the supervisor (resets backoff)                      |
+| `devices`         | `list()` / `subscribe()` over the server-owned presence channel    |
+| `dispatch`        | Fire a cross-device call over the relay socket                     |
+| `[Symbol.dispose]`| Sugar for `ydoc.destroy()`; cascades through every attachment      |
+
+`devices.list()` returns `LiveDevice[]`, where each device carries `{ installationId, connectedAt, actions }`. `actions` is the device's published `ActionManifest` (the metadata-only projection of its `ActionRegistry`), suitable for rendering UI affordances, validating input against schemas, or feeding an AI tool layer.
+
+## The wire: one socket, three channels
+
+`openCollaboration` opens exactly one authenticated WebSocket per `(Y.Doc, relay)` pair. Three channels share that socket:
 
 ```
-actions = {
-  tabs:                 ┐
-    close                 ← USER (yours)
-    list                ┘
-  bookmarks:
-    create
-  system:               ┐
-    describe              ← SYSTEM (runtime-injected)
-                        ┘
-}
+binary frames   ->  Yjs CRDT sync (STEP1 / STEP2 / UPDATE)
+text frames     ->  presence + dispatch
 ```
 
-User and system actions are **structurally identical** — both built with `defineQuery`/`defineMutation`, both reachable via `sync.rpc(target, '<path>', ...)`. The dispatcher (`resolveActionPath`) doesn't distinguish.
+Channels are independent: a malformed dispatch frame does not tear down sync. The server NEVER inspects the contents of a Yjs binary frame or a dispatch input; it only routes and persists.
 
-The only thing that separates them is the reservation: a top-level `system` key in *your* actions throws at construction. The reservation is shallow (only top-level), follows JSON-RPC's `rpc.*` precedent, and the snapshot is taken at attach time — post-attach mutations to `userActions` don't affect dispatch.
+### Sync plane (binary)
 
-## Awareness vs RPC: what's where
+Standard Yjs sync: STEP1 (state vector), STEP2 (missing updates), UPDATE (incremental changes). The supervisor encodes and decodes through `@epicenter/sync`'s `handleSyncPayload`. The first STEP2 or UPDATE after connect completes the handshake and flips status to `connected`.
 
-This is the architectural split worth memorizing:
+The server merges every update it sees (Yjs is multi-writer; admission control is not the server's job here) and fans out to peers excluding origin. The update log persists to per-room storage and is opportunistically compacted when the room empties.
 
-```
-AWARENESS                          RPC
-─────────                          ───
-Always-on broadcast                Request/response
-Every ~15s rebroadcast             Once per call
-Presence only                      Capability + dispatch
-~150 bytes/peer                    Whatever you send
-30s TTL (auto-cleanup)             Per-call timeout
+### Presence plane (server-owned)
 
-"Who's online?"                    "Hey, do this"
-"What's their identity?"           "What can you do?" (system.describe)
-                                   "Close these tabs" (user actions)
-```
-
-Awareness carries `{id, name, platform}` only. The action manifest moved to `system.describe` — fetched on demand instead of broadcast every 15s. The trip-wire was N²·M wire traffic; the fix was on-demand RPC.
-
-## The supervisor loop and its timers
-
-`attachSync` runs ONE loop that owns the WebSocket. Six timers participate:
-
-```
-                    ┌──────────────────────────────┐
-                    │   SUPERVISOR LOOP            │
-                    │   while (desired==='online') │
-                    └──────────────┬───────────────┘
-                                   │
-                       ┌───────────▼───────────┐
-                       │  CONNECT_TIMEOUT_MS   │
-                       │       15_000          │
-                       │  if not OPEN by then, │
-                       │  ws.close()           │
-                       └───────────┬───────────┘
-                                   │ open
-                       ┌───────────▼───────────┐
-                       │   handshake           │  ← STEP1 → STEP2 → resolveConnected()
-                       └───────────┬───────────┘
-                                   │
-        ┌──────────────────────────▼──────────────────────────┐
-        │  CONNECTED — four timers run in parallel             │
-        ├──────────────────────────────────────────────────────┤
-        │                                                      │
-        │  PING_INTERVAL_MS = 60_000                           │
-        │   every 60s: ws.send('ping')                         │
-        │   keeps NAT/proxy alive                              │
-        │                                                      │
-        │  LIVENESS_CHECK_INTERVAL_MS = 10_000                 │
-        │   every 10s: if Date.now() - lastMsg > 90_000        │
-        │              ws.close()  ← server is dead            │
-        │                                                      │
-        │  syncStatusTimer = 100ms (debounce)                  │
-        │   after a doc-update burst, send SYNC_STATUS once    │
-        │   instead of per-keystroke                           │
-        │                                                      │
-        │  RPC timers (per outbound call)                      │
-        │   default DEFAULT_RPC_TIMEOUT_MS = 5_000             │
-        │   if no response by then → RpcError.Timeout          │
-        │                                                      │
-        └──────────────────────────┬───────────────────────────┘
-                                   │ ws.onclose
-                       ┌───────────▼───────────┐
-                       │   BACKOFF             │
-                       │  base 500ms           │
-                       │  × 2^retries          │
-                       │  capped at 30_000     │
-                       │  jittered 0.5–1.0     │
-                       └───────────┬───────────┘
-                                   │
-                                   └──→ back to top
-```
-
-Constants in plain English:
-
-| Constant | Value | What it does |
-|---|---|---|
-| `CONNECT_TIMEOUT_MS` | 15s | Give up on a half-open WebSocket |
-| `PING_INTERVAL_MS` | 60s | Send `'ping'` to keep the connection warm |
-| `LIVENESS_TIMEOUT_MS` | 90s | If no message arrived in this long, declare the server dead |
-| `LIVENESS_CHECK_INTERVAL_MS` | 10s | How often we evaluate the 90s rule |
-| `DEFAULT_RPC_TIMEOUT_MS` | 5s | Per-call timeout for an outbound RPC |
-| `BASE_DELAY_MS` / `MAX_DELAY_MS` | 500ms / 30s | Reconnect backoff bounds |
-| `syncStatusTimer` | 100ms | Debounce for batching SYNC_STATUS frames |
-
-## The cancellation thread (`runId`)
-
-The single load-bearing safety property in the loop. Every `await` in `runLoop` is followed by:
+The relay tracks live WebSocket connections in a `connections` Map. That map is the source of truth for "who is here." On every membership or manifest change it broadcasts one server-to-client text frame carrying the whole list:
 
 ```ts
-if (cancelled(myRunId)) continue;
+type PresenceFrame = {
+    type: 'presence';
+    devices: PresenceDevice[];
+};
+
+type PresenceDevice = {
+    installationId: string;
+    connectedAt: number;
+    actions: ActionManifest;   // Record<string, ActionMeta>
+};
 ```
 
-`cancelled(myRunId)` returns true if `runId` advanced since this iteration captured it. `goOffline()` and `reconnect()` both bump `runId`, so an iteration that was mid-await when intent changed will `continue` to a fresh iteration with fresh state.
+- The frame is sent to a freshly-upgraded socket, and rebroadcast to every other socket whenever a device joins, leaves, or republishes its manifest.
+- `devices` is computed per recipient with the receiver's own install excluded, so the client stores it verbatim.
+- Multi-tab same-install collapses to one row (newest-wins by `connectedAt`); a graceful tab handoff produces no wire-visible transition (300 ms debounce).
+- A close code of `4401` (permanent auth failure) bypasses the debounce: peers see the device drop immediately.
 
-Without this thread, a stale token from an awaited `getToken()` could be used to open a new connection that the user already asked to close. Or two supervisor loops could run on top of each other after a reconnect-during-handshake.
+There is no delta protocol. The relay owns the whole truth and ships the whole truth on every change; the client never reassembles `added` / `removed` events.
 
-## Lifecycle promises
-
-| Promise | Resolves when | Rejects when |
-|---|---|---|
-| `whenConnected` | First successful handshake (STEP2 or UPDATE arrives) | Doc destroyed before first handshake (permanent failure) |
-| `whenDisposed` | Supervisor exits AND WebSocket reaches CLOSED (or 1s safety timeout fires) | Never |
-
-`whenConnected` was previously "may hang forever" — fixed to reject on dispose so CLIs that `await sync.whenConnected` get a useful failure instead of a wedge.
-
-## RPC: peer dispatch surface
-
-`SyncAttachment` is the single source of truth for "who else is here":
+Devices publish their own manifest with one client-to-server frame on every (re)connect:
 
 ```ts
-sync.peers()                           // Map<clientId, PeerAwarenessState>
-sync.find(deviceId)                    // FoundPeer | undefined
-sync.observe(callback)                 // unsubscribe fn
-sync.rpc(target, action, input, opts)  // typed remote call
+type PresencePublishFrame = {
+    type: 'presence_publish';
+    actions: ActionManifest;
+};
 ```
 
-Cross-device action call:
+The relay stores the manifest against the sending socket's connection attachment (so it survives Cloudflare hibernation via `serializeAttachment`) and rebroadcasts presence so peers see the update.
+
+`openCollaboration` builds its own manifest from the action registry via `toActionMeta` at construction and publishes it on every successful connect.
+
+#### Why server-owned, not awareness
+
+Presence used to ride y-protocols Awareness. Awareness is built for ephemeral peer-to-peer state with concurrent per-peer writers (cursors, selections, typing indicators), not for a server-authoritative fact the relay already holds in its `connections` Map. Moving presence onto a plain server-pushed channel deleted the awareness round-trip, the Durable Object hibernation restore loop, and the clock-fabrication seed.
+
+Cursor and selection sync, when they arrive, bring Awareness back, used for what it is designed for and kept separate from this presence channel.
+
+### Dispatch plane (text, in-band)
+
+A cross-device call rides text frames on the same socket as presence and sync. The wire is four correlated frames:
 
 ```ts
-const macbook = peer<TabManagerActions>(fuji.sync, 'macbook-pro');
-const result = await macbook.tabs.close({ tabIds: [1, 2] });
+caller -> relay:     { type: 'dispatch_request',  id, to, action, input }
+relay  -> recipient: { type: 'dispatch_inbound',  id, action, input }
+recipient -> relay:  { type: 'dispatch_response', id, result }
+relay  -> caller:    { type: 'dispatch_result',   id, result }
 ```
 
-`peer<T>(sync, deviceId)` returns a typed Proxy. Walking `.tabs.close` builds nested proxies; calling `.tabs.close(input)` dispatches via `sync.rpc(clientId, 'tabs.close', input)`.
-
-`describePeer(sync, deviceId)` is a thin wrapper that calls `peer<SystemMeta>(sync, deviceId).system.describe()` to fetch the peer's full action manifest on demand.
-
-### Peer-removed race semantics
-
-Both `peer<T>` and `describePeer` race the RPC against a peer-removed signal. If the matched peer disappears mid-call, the in-flight Promise rejects immediately with `RpcError.PeerLeft` rather than waiting the full RPC timeout:
-
-```
-peer<T>(sync, 'mac').foo()
-  │
-  ├─ subscribe to sync.observe(callback)
-  ├─ fire: sync.rpc(...)
-  │
-  ├─ if RPC resolves first:        → return its result
-  ├─ if peer leaves awareness first → reject with PeerLeft
-  └─ either way: unsubscribe
+```ts
+const { data, error } = await collaboration.dispatch({
+    to: 'phone-install-id',
+    action: 'tabs_close',
+    input: { tabIds: [1, 2] },
+    signal: AbortSignal.timeout(5_000),
+});
 ```
 
-## A full call: `epicenter list --peer macbook-pro`
-
-End-to-end. The CLI process is "Fuji"; the peer is "macbook-pro" (a tab-manager instance).
+End to end:
 
 ```
-┌────────────────────┐                     ┌────────────────────┐
-│  Fuji (CLI)        │                     │  macbook-pro       │
-│  workspace.sync    │                     │  (tab-manager)     │
-└─────────┬──────────┘                     └─────────┬──────────┘
-          │                                          │
-          │ 1. CLI loads epicenter.config.ts         │
-          │    workspace.sync.peers() returns:       │
-          │    Map { 42 → {device:{id:'macbook-pro'}}}│
-          │                                          │
-          │ 2. describePeer(sync, 'macbook-pro')     │
-          │    → peer<SystemMeta>().system.describe()│
-          │                                          │
-          │ 3. internally: sync.find('macbook-pro')  │
-          │    returns { clientId: 42, state }       │
-          │                                          │
-          │ 4. sync.rpc(42, 'system.describe',       │
-          │             undefined)                   │
-          │                                          │
-          │    ─── encodeRpcRequest ───────────►     │
-          │                                          │
-          │    [waits up to 5s, RPC timer running]   │
-          │                                          │ 5. ws.onmessage
-          │                                          │    decodes RPC request
-          │                                          │
-          │                                          │ 6. resolveActionPath(
-          │                                          │      actions,
-          │                                          │      'system.describe')
-          │                                          │
-          │                                          │ 7. handler runs:
-          │                                          │    describeActions(userActions)
-          │                                          │    → ActionManifest
-          │                                          │
-          │   ◄──── encodeRpcResponse ────────────   │
-          │                                          │
-          │ 8. ws.onmessage matches requestId in     │
-          │    pendingRequests, resolves the         │
-          │    Promise with Ok(manifest)             │
-          │                                          │
-          │ 9. CLI renders the manifest as a tree    │
-          │                                          │
+caller                      relay                        recipient
+──────                      ─────                        ─────────
+dispatch_request ─────────▶ look up `to` in connections
+                            │
+                            ├─ no live socket ─▶ dispatch_result { RecipientOffline }
+                            │
+                            └─ dispatch_inbound ──▶ runInboundDispatch:
+                                                      actions[action](input)
+                                                      │
+                            ◀── dispatch_response ────┘
+       dispatch_result ◀──  forward opaquely
+       { Ok(data) }
+       or { Err(...) }
 ```
 
-## Construction → first connect, in time
+The caller's `signal` (or a ~90 s caller-side ceiling) settles the promise if no result arrives. The relay holds its own internal 60 s timeout so a stuck dispatch eventually answers `RecipientOffline`.
+
+`dispatch` always resolves to `Result<unknown, DispatchError>`:
+
+| Variant            | Produced by | When                                                       |
+| ------------------ | ----------- | ---------------------------------------------------------- |
+| `RecipientOffline` | relay       | No live socket for `to`, or its socket closed mid-handler  |
+| `ActionNotFound`   | recipient   | Recipient has no handler for `action`                      |
+| `ActionFailed`     | recipient   | Recipient handler threw or returned `Err`; `cause` is a string |
+| `Cancelled`        | local       | Caller's `AbortSignal` aborted before the response arrived |
+| `NetworkFailed`    | local       | Dispatch socket disconnected, dropped, or returned a malformed result |
+
+`RecipientOffline`, `ActionNotFound`, and `ActionFailed` arrive in `dispatch_result` frames. `Cancelled` and `NetworkFailed` are produced locally.
+
+Because the relay answers reachability inline (its `connections` Map decides, on the same socket that routes the call), callers that need to tell "addressed an offline install" apart from "the call reached the peer and failed" branch on `RecipientOffline` directly. There is no separate liveness pre-check, and no window where a client cache disagrees with the relay.
+
+For a type-narrowed success payload against a known target registry, lift through `typedDispatch`:
+
+```ts
+import { typedDispatch } from '@epicenter/workspace';
+import type { TabManagerActions } from '@epicenter/tab-manager/actions';
+
+const tabManager = typedDispatch<TabManagerActions>(collaboration.dispatch);
+const { data } = await tabManager({
+    to: phone.installationId,
+    action: 'tabs_close',
+    input: { tabIds: [1, 2] },
+});
+```
+
+With manifests on the presence wire, the same narrowing is *runtime-verifiable*: walk `device.actions` and confirm the action key exists. The `typedDispatch` wrapper is ergonomic sugar; the wire payload is the ground truth.
+
+The recipient side is `runInboundDispatch`: the supervisor routes inbound text frames to it, it looks up the action in the local registry, runs it, and emits the `dispatch_response`. A content doc with `actions: {}` always replies `ActionNotFound`.
+
+## URLs and routing
+
+A cloud document is owned by the authenticated subject (the user's identity) and addressed by its own `ydoc.guid`. The client builds the URL from `(baseURL, owner, guid, installationId)`:
+
+```ts
+roomWsUrl({
+    baseURL: 'https://api.epicenter.so',
+    owner: { kind: 'personal', userId },
+    guid: ydoc.guid,
+    installationId,
+});
+// -> wss://api.epicenter.so/api/users/<userId>/rooms/<guid>?installationId=<id>
+```
+
+The relay takes the subject from the auth token, validates `:userId === c.var.user.id` in personal mode, and builds the internal Durable Object name `users:${userId}:rooms:${room}`. There is no workspace lookup and no membership check at the relay layer: the route's auth middleware is the whole authorization story, because you cannot fail to be yourself.
+
+This is the consumer Google Docs model and the first of three account layers, introduced over time:
+
+- **Layer 1 (this)**: personal content. `users:${userId}` owns the doc.
+- **Layer 1.5 (future)**: sharing. A per-document ACL grants other subjects access; the owner's DO name does not change.
+- **Layer 2 (future)**: shared-drive content. An org owns a namespace so content survives a departing employee.
+- **Layer 3 (future)**: tenancy and billing. An organization groups user accounts for one invoice and admin policy; it never owns a document.
+
+`installationId` is appended as a query parameter (`?installationId=`) on every connect, including reconnects. It is a routing label stamped on the socket at upgrade, not an auth principal: the relay authorizes the room from the token, and within that room `installationId` only decides which socket dispatch is delivered to.
+
+`/rooms/:room` (team) and `/users/:userId/rooms/:room` (personal) are the cloud sync routes. Browser apps and the workspace daemon both build their URL with `roomWsUrl`.
+
+## Supervisor lifecycle
+
+`openCollaboration` wraps an internal `createSyncSupervisor` that owns the WebSocket. Three timers participate:
+
+| Timer                 | Default | Job                                                         |
+| --------------------- | ------- | ----------------------------------------------------------- |
+| `CONNECT_TIMEOUT_MS`  | 15 s    | Abort a socket stuck in CONNECTING                          |
+| `PING_INTERVAL_MS`    | 60 s    | Send a `'ping'` text frame to keep the socket alive         |
+| `LIVENESS_TIMEOUT_MS` | 90 s    | Close the socket if no traffic arrives for this long (checked every 10 s) |
+
+### Connect, reconnect, backoff
 
 ```
-t=0ms      attachSync(doc, { device, url, getToken, waitFor: idb })
-              ├─ validates `'system' not in userActions`
-              ├─ injects system.describe
-              ├─ builds awareness, sets {device} synchronously
-              ├─ wires ydoc.on('updateV2'), awareness.on('update')
-              └─ kicks off async waitFor → ensureSupervisor()
-
-              returns SyncAttachment immediately
-
-t=~10ms    idb.whenLoaded resolves (typical hot start)
-
-t=~10ms    supervisor: getToken() → token
-           supervisor: new WebSocket(url, [main, bearer.<token>])
-
-           [CONNECT_TIMEOUT_MS = 15s timer running]
-
-t=~50ms    ws.onopen
-           send STEP1
-           start liveness monitor
-
-t=~80ms    ws.onmessage: STEP2 from server
-           handshakeComplete = true
-           status: { phase: 'connected', hasLocalChanges }
-           resolveConnected()
-
-t=80ms+    [from here on, four loops run forever:]
-            • PING every 60s
-            • LIVENESS check every 10s (90s threshold)
-            • per-RPC 5s timers as calls happen
-            • per-doc-update-burst SYNC_STATUS at 100ms quiet
+   ┌─────────────┐
+   │   offline   │ ◄── ydoc.destroy()
+   └──────┬──────┘
+          │ waitFor resolves
+          ▼
+   ┌─────────────┐
+   │ connecting  │ ──► attemptConnection(signal)
+   │ retries=N   │ ◄── reconnect() wakes the loop
+   └──────┬──────┘
+          │ STEP2/UPDATE handshake
+          ▼
+   ┌─────────────┐
+   │  connected  │ ──► whenConnected.resolve()
+   │             │ ──► presence_publish sent
+   └──────┬──────┘
+          │ ws.onclose
+          ▼
+   backoff sleep (jittered, capped at 30 s)
+          │
+          └─► retry
 ```
+
+Backoff is `min(BASE_DELAY_MS * 2 ** retries, MAX_DELAY_MS)` scaled by `0.5 + Math.random() * 0.5`. Window `online`, `offline`, and `visibilitychange` events wake the backoff or close the socket as appropriate.
+
+### Permanent failure
+
+A server-side auth rejection closes the WebSocket with code `4401` and a JSON reason `{ "code": "<reason>" }`. Codes seen today: `invalid_token`, `token_expired`, `deauthorized`, `unknown`. On 4401:
+
+- Status becomes `{ phase: 'failed', reason: { type: 'auth', code } }`.
+- `whenConnected` rejects with `SyncFailedError.AuthRejected({ code })`.
+- The supervisor parks; only `reconnect()` reopens it. Apps wire `reconnect()` to `auth.onStateChange` so a sign-in retries automatically.
+
+### Cancellation hierarchy
+
+```
+masterController   aborts on ydoc.destroy(); kills everything
+   ▼
+cycleController    aborts on reconnect(); kills the current iteration only
+```
+
+`reconnect()` replaces `cycleController` (rather than just re-aborting it) so the next cycle gets a fresh signal unrelated to the old one. The supervisor reads `cycleController.signal` fresh at the top of each iteration; aborting the old one wakes a parked supervisor and the next iteration picks up the replacement.
 
 ## Mental model in one paragraph
 
-`attachSync(doc, { device })` is the wire. It owns presence (awareness), dispatch (RPC), and the supervisor (reconnect loop). One call, all of it. The dispatch tree is `{ ...userActions, system: { describe } }` with `system.*` reserved. Awareness is identity-only (~150B/peer, broadcast every 15s, 30s TTL). RPC is capability and dispatch (request/response, 5s timeout, racing against peer-removed). Two typed proxies (`peer<T>` for user actions, `describePeer` for system) walk the same wire. The whole thing is one supervisor loop, six timers, a single dispatch tree, and a `runId` cancellation thread.
+`openCollaboration(ydoc, config)` is the one collaboration primitive: it opens a single WebSocket to the relay, runs the Yjs binary sync protocol, publishes its own action manifest at connect via `presence_publish`, mirrors the relay's server-owned presence channel into `devices` (including each device's manifest), and runs inbound dispatch frames against the local `actions` registry. Cross-device calls go out through `dispatch(...)`, which rides the same socket as text frames and answers with a typed `Result<unknown, DispatchError>`. The relay is a dumb pipe: it merges Yjs updates (eventually consistent CRDT semantics, no admission control), tracks the live connections Map (source of truth for who is here), and forwards dispatch text frames (it never executes them). Presence is the relay's `connections` Map, not Yjs Awareness; dispatch is in-band text on the sync socket, not HTTP. Content docs use the same primitive with `actions: {}`.

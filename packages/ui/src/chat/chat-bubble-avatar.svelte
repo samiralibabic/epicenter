@@ -4,8 +4,8 @@
 
 <script lang="ts">
 	import { Avatar as AvatarPrimitive } from 'bits-ui';
-	import { Root } from '#/avatar';
-	import { cn } from '#/utils.js';
+	import { Root } from '../avatar/index.js';
+	import { cn } from '../utils.js';
 
 	let {
 		class: className,

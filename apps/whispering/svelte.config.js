@@ -13,7 +13,6 @@ const config = {
 		}),
 		alias: {
 			$routes: './src/routes',
-			'#': '../../packages/ui/src',
 		},
 	},
 

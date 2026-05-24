@@ -1,11 +1,11 @@
 <script lang="ts">
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
-	import { Button } from '#/button';
-	import * as Command from '#/command';
-	import { useCombobox } from '#/hooks';
-	import * as Popover from '#/popover';
-	import { cn } from '#/utils';
+	import { Button } from '../button/index.js';
+	import * as Command from '../command/index.js';
+	import { useCombobox } from '../hooks/index.js';
+	import * as Popover from '../popover/index.js';
+	import { cn } from '../utils.js';
 
 	let {
 		value = $bindable(),
@@ -43,9 +43,7 @@
 	const selectedTimeZone = $derived(
 		timeZoneOptions.find((timeZoneOption) => timeZoneOption.timeZone === value),
 	);
-	const triggerLabel = $derived(
-		selectedTimeZone?.label ?? 'Select timezone',
-	);
+	const triggerLabel = $derived(selectedTimeZone?.label ?? 'Select timezone');
 </script>
 
 <Popover.Root bind:open={combobox.open}>

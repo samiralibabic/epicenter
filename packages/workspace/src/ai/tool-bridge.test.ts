@@ -1,42 +1,19 @@
 /**
- * Tool bridge tests — verifies the mapping between workspace actions and
+ * Tool bridge tests: verifies the mapping between workspace actions and
  * TanStack AI tool representations.
  */
 
 import { describe, expect, test } from 'bun:test';
-import { defineMutation, defineQuery } from '@epicenter/workspace';
 import { Err, Ok } from 'wellcrafted/result';
+import {
+	type ActionRegistry,
+	defineMutation,
+	defineQuery,
+} from '../shared/actions.js';
 import { actionsToAiTools } from './tool-bridge.js';
 
 describe('actionsToAiTools', () => {
 	describe('tools', () => {
-		test('all mutations get needsApproval', () => {
-			const actions = {
-				tabs: {
-					close: defineMutation({
-						title: 'Close Tabs',
-						description: 'Close tabs',
-						handler: () => {},
-					}),
-					open: defineMutation({
-						title: 'Open Tab',
-						description: 'Open a tab',
-						handler: () => {},
-					}),
-				},
-			};
-
-			const { tools } = actionsToAiTools(actions);
-
-			const closeTool = tools.find((t) => t.name === 'tabs_close');
-			expect(closeTool).toBeDefined();
-			expect(closeTool?.needsApproval).toBe(true);
-
-			const openTool = tools.find((t) => t.name === 'tabs_open');
-			expect(openTool).toBeDefined();
-			expect(openTool?.needsApproval).toBe(true);
-		});
-
 		test('queries omit needsApproval entirely', () => {
 			const actions = {
 				query: defineQuery({
@@ -49,7 +26,7 @@ describe('actionsToAiTools', () => {
 					description: 'Mutate data',
 					handler: () => {},
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { tools } = actionsToAiTools(actions);
 
@@ -71,7 +48,7 @@ describe('actionsToAiTools', () => {
 					description: 'Search stuff',
 					handler: () => {},
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { definitions } = actionsToAiTools(actions);
 
@@ -93,7 +70,7 @@ describe('actionsToAiTools', () => {
 					description: 'Safe action',
 					handler: () => {},
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { definitions } = actionsToAiTools(actions);
 
@@ -110,11 +87,26 @@ describe('actionsToAiTools', () => {
 					description: 'No title here',
 					handler: () => {},
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { definitions } = actionsToAiTools(actions);
 
 			expect('title' in definitions[0]!).toBe(false);
+		});
+
+		test('AI tool names equal action keys verbatim', () => {
+			const actions = {
+				tabs_close: defineMutation({
+					title: 'Close Tabs',
+					description: 'Close tabs',
+					handler: () => {},
+				}),
+			} satisfies ActionRegistry;
+
+			const { tools, definitions } = actionsToAiTools(actions);
+
+			expect(tools[0]?.name).toBe('tabs_close');
+			expect(definitions[0]?.name).toBe('tabs_close');
 		});
 	});
 
@@ -127,7 +119,7 @@ describe('actionsToAiTools', () => {
 		test('returns raw value from a raw-returning handler', async () => {
 			const actions = {
 				count: defineQuery({ handler: () => ({ count: 42 }) }),
-			};
+			} satisfies ActionRegistry;
 
 			const { tools } = actionsToAiTools(actions);
 			const tool = tools.find((t) => t.name === 'count')!;
@@ -139,7 +131,7 @@ describe('actionsToAiTools', () => {
 		test('unwraps Ok to .data so the LLM never sees the envelope', async () => {
 			const actions = {
 				count: defineQuery({ handler: () => Ok({ count: 42 }) }),
-			};
+			} satisfies ActionRegistry;
 
 			const { tools } = actionsToAiTools(actions);
 			const tool = tools.find((t) => t.name === 'count')!;
@@ -154,7 +146,7 @@ describe('actionsToAiTools', () => {
 					handler: () =>
 						Err({ name: 'Boom', message: 'everything is on fire' }),
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { tools } = actionsToAiTools(actions);
 			const tool = tools.find((t) => t.name === 'boom')!;
@@ -173,7 +165,7 @@ describe('actionsToAiTools', () => {
 						throw new Error('internal bug');
 					},
 				}),
-			};
+			} satisfies ActionRegistry;
 
 			const { tools } = actionsToAiTools(actions);
 			const tool = tools.find((t) => t.name === 'crash')!;

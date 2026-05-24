@@ -27,6 +27,10 @@ function createTransformationSteps() {
 	const map = fromTable(whispering.tables.transformationSteps);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/**
 		 * All transformation steps as a reactive SvelteMap.
 		 */
@@ -44,7 +48,7 @@ function createTransformationSteps() {
 		/**
 		 * Get all steps for a transformation, sorted by order.
 		 *
-		 * This is the primary query method—replaces the old `transformation.steps[]`
+		 * This is the primary query method. It replaces the old `transformation.steps[]`
 		 * nested array pattern. Steps are now a separate table with `transformationId` FK.
 		 *
 		 * @param transformationId - FK to the parent transformation
@@ -83,7 +87,7 @@ function createTransformationSteps() {
 		/**
 		 * Delete all steps for a transformation.
 		 *
-		 * Useful when deleting a transformation—removes all child steps.
+		 * Useful when deleting a transformation. Removes all child steps.
 		 */
 		deleteByTransformationId(transformationId: string) {
 			for (const [id, step] of map) {
@@ -102,6 +106,10 @@ function createTransformationSteps() {
 
 export const transformationSteps = createTransformationSteps();
 
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => transformationSteps[Symbol.dispose]());
+}
+
 /**
  * Generate a default transformation step with sensible defaults.
  *
@@ -117,13 +125,17 @@ export const transformationSteps = createTransformationSteps();
  * transformationSteps.set(step);
  * ```
  */
-export function generateDefaultStep(
-	context: Pick<TransformationStep, 'transformationId' | 'order'>,
-): TransformationStep {
+export function generateDefaultStep({
+	transformationId,
+	order,
+}: {
+	transformationId: string;
+	order: number;
+}): TransformationStep {
 	return {
 		id: nanoid(),
-		transformationId: context.transformationId,
-		order: context.order,
+		transformationId,
+		order,
 		type: 'prompt_transform',
 		inferenceProvider: 'Google',
 		openaiModel: 'gpt-4o',

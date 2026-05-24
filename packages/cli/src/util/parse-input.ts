@@ -1,13 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { extractErrorMessage } from 'wellcrafted/error';
 
-export type ParseInputOptions = {
-	/** Positional argument: inline JSON, or `@file.json` (curl convention) */
-	positional?: string;
-	/** Stdin content (undefined = no piped input) */
-	stdinContent?: string;
-};
-
 /**
  * Parse JSON input from CLI sources.
  *
@@ -16,22 +9,28 @@ export type ParseInputOptions = {
  * on invalid JSON or missing `@file`.
  *
  * The error-shape discrimination that `wellcrafted`'s Result-types would
- * carry isn't useful here — the sole caller in `run.ts` rethrows
+ * carry isn't useful here; the sole caller in `run.ts` rethrows
  * `error.message` verbatim. Plain `throw` at a CLI boundary is the simpler
  * equivalent.
  */
-export function parseJsonInput<T = unknown>(
-	options: ParseInputOptions,
-): T | undefined {
-	if (options.positional) {
-		if (options.positional.startsWith('@')) {
-			const filePath = options.positional.slice(1);
+export function parseJsonInput<T = unknown>({
+	positional,
+	stdinContent,
+}: {
+	/** Positional argument: inline JSON, or `@file.json` (curl convention) */
+	positional?: string;
+	/** Stdin content (undefined = no piped input) */
+	stdinContent?: string;
+}): T | undefined {
+	if (positional) {
+		if (positional.startsWith('@')) {
+			const filePath = positional.slice(1);
 			return readJsonFile<T>(filePath);
 		}
-		return parseJson<T>(options.positional);
+		return parseJson<T>(positional);
 	}
-	if (options.stdinContent) {
-		return parseJson<T>(options.stdinContent);
+	if (stdinContent) {
+		return parseJson<T>(stdinContent);
 	}
 	return undefined;
 }
@@ -61,7 +60,7 @@ function readJsonFile<T>(filePath: string): T {
 
 /**
  * Read piped stdin content (for CLI use). Returns undefined when stdin
- * is a TTY (interactive terminal — no pipe).
+ * is a TTY (interactive terminal, no pipe).
  *
  * Caveat: if stdin reports non-TTY but no writer is connected (pathological
  * CI/Docker TTY-allocation shapes), `Bun.stdin.text()` blocks until the OS

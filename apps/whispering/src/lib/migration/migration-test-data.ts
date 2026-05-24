@@ -25,7 +25,7 @@ export function createMigrationTestData() {
 			});
 
 			for (const { id, audio } of recordings) {
-				const { error } = await indexedDb.audio.save(id, audio);
+				const { error } = await indexedDb.save(id, audio);
 				if (error) {
 					throw new Error(`Failed to seed recording ${id}: ${error.message}`);
 				}
@@ -41,7 +41,7 @@ export function createMigrationTestData() {
 			onProgress: (message: string) => void;
 		}): Promise<void> {
 			onProgress('Clearing IndexedDB audio...');
-			const result = await indexedDb.audio.clear();
+			const result = await indexedDb.clear();
 			if (result.error) {
 				throw new Error(`Failed to clear audio: ${result.error.message}`);
 			}

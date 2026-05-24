@@ -3,25 +3,27 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "Framework-agnostic auth core for Epicenter. Imperative subscription API over better-auth.",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
+	"description": "Framework-agnostic auth core for Epicenter.",
 	"exports": {
-		".": "./src/index.ts"
+		".": "./src/index.ts",
+		"./node": "./src/node.ts",
+		"./oauth-launchers": "./src/oauth-launchers/index.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
 	},
 	"dependencies": {
-		"@epicenter/api": "workspace:*",
-		"@epicenter/workspace": "workspace:*",
+		"@epicenter/constants": "workspace:*",
+		"@epicenter/encryption": "workspace:*",
 		"arktype": "catalog:",
 		"better-auth": "catalog:",
+		"oauth4webapi": "catalog:",
 		"wellcrafted": "catalog:"
 	},
 	"devDependencies": {
 		"@types/bun": "catalog:",
 		"typescript": "catalog:"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

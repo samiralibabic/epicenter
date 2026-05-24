@@ -391,7 +391,7 @@ if (error) {
 
 ```typescript
 const session = createPersistedState({
-  key: 'honeycrisp:authSession',
+  key: 'honeycrisp.auth.session',
   schema: AuthSessionSchema,
   defaultValue: { status: 'anonymous' },
 });

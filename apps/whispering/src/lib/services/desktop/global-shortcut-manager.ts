@@ -170,8 +170,6 @@ export const GlobalShortcutManagerLive = {
 	},
 };
 
-export type GlobalShortcutManager = typeof GlobalShortcutManagerLive;
-
 /**
  * Validates if a string is a valid Electron accelerator
  */

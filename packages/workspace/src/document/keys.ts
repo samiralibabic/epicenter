@@ -5,8 +5,15 @@
  * - Tables: `table:{tableName}` (one array per table)
  * - KV: `'kv'` (single array for all settings)
  *
- * These prefixes are reserved. Do not create Y.Doc arrays with
- * keys matching these patterns outside of the document API.
+ * These prefixes are reserved. Do not create Y.Doc arrays with keys
+ * matching these patterns outside of the document API.
+ *
+ * Liveness does not live in the Y.Doc. Presence is server-owned: the
+ * relay binds `installationId` to a socket by URL stamp at upgrade, and
+ * the client derives `devices.list()` from the relay's `presence`
+ * full-list text frame. Cross-device dispatch rides a sibling HTTP
+ * endpoint correlated with two WebSocket text frames; no Y.Doc array is
+ * reserved for it.
  *
  * @example
  * ```typescript

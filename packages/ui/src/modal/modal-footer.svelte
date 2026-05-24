@@ -6,8 +6,8 @@
 	import type { WithElementRef } from 'bits-ui';
 	import type { HTMLAttributes } from 'svelte/elements';
 
-	import * as Dialog from '#/dialog/index.js';
-	import * as Drawer from '#/drawer/index.js';
+	import * as Dialog from '../dialog/index.js';
+	import * as Drawer from '../drawer/index.js';
 
 	import { useModalSub } from './modal-state.svelte.js';
 

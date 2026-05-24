@@ -3,7 +3,7 @@
 	Adapted for our button API (no sizeMap/Size exports).
 -->
 <script lang="ts" module>
-	import type { ButtonProps, ButtonSize } from '#/button/button.svelte';
+	import type { ButtonProps } from '../button/button.svelte';
 
 	export type GithubButtonProps = Omit<ButtonProps, 'href' | 'children'> & {
 		repo: {
@@ -18,10 +18,10 @@
 </script>
 
 <script lang="ts">
-	import Button from '#/button/button.svelte';
-	import { cn } from '#/utils';
 	import { cubicInOut } from 'svelte/easing';
 	import { Tween } from 'svelte/motion';
+	import Button from '../button/button.svelte';
+	import { cn } from '../utils.js';
 
 	let {
 		starsTweenedDuration = 5000,

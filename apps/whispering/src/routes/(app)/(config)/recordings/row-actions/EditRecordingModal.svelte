@@ -80,8 +80,6 @@
 		() => rpc.audio.getPlaybackUrl(() => recording.id).options,
 	);
 
-	const audioUrl = $derived(audioPlaybackUrlQuery.data);
-
 	function promptUserConfirmLeave() {
 		if (!isWorkingCopyDirty) {
 			isDialogOpen = false;
@@ -175,10 +173,14 @@
 					class="col-span-3"
 				/>
 			</div>
-			{#if audioUrl}
+			{#if audioPlaybackUrlQuery.data}
 				<div class="grid grid-cols-4 items-center gap-4">
 					<Label for="audio" class="text-right">Audio</Label>
-					<audio src={audioUrl} controls class="col-span-3 h-8 w-full"></audio>
+					<audio
+						src={audioPlaybackUrlQuery.data}
+						controls
+						class="col-span-3 h-8 w-full"
+					></audio>
 				</div>
 			{/if}
 		</div>

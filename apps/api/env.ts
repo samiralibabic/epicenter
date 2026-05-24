@@ -10,8 +10,8 @@
  * | Runtime    | Hyperdrive `env.HYPERDRIVE`         | DML only (R/W)      | `app.ts` in production     |
  *
  * This module only reads the local connection string from `wrangler.jsonc`.
- * Call sites should load `.dev.vars` themselves and check `process.env.DATABASE_URL`
- * for remote migration URLs before falling back to this constant.
+ * Call sites read `process.env.DATABASE_URL` (set by `infisical run` for
+ * `:remote` commands) and fall back to this constant for `:local` commands.
  */
 
 import { readFileSync } from 'node:fs';

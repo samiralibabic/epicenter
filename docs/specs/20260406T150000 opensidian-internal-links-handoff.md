@@ -77,25 +77,19 @@ export function createOpensidian() {
 
 ### Client & State
 
-**`apps/opensidian/src/lib/client.ts`** — workspace singleton:
+**`apps/opensidian/src/lib/session.svelte.ts`**:
 ```typescript
-export const workspace = createOpensidian()
-	.withExtension('persistence', indexeddbPersistence)
-	.withExtension('sync', createSyncExtension({ /* ... */ }))
-	.withWorkspaceExtension('sqliteIndex', createSqliteIndex());
-
-export const fs = createYjsFileSystem(
-	workspace.tables.files,
-	workspace.documents.files.content,
-);
+const signedIn = getSignedInSession();
+const workspace = signedIn.workspace;
+const files = signedIn.state.files;
 ```
 
-**`apps/opensidian/src/lib/state/fs-state.svelte.ts`** — reactive filesystem state:
-- `fsState.activeFileId` — currently open file (FileId | null)
-- `fsState.selectFile(id)` — navigate to a file (sets activeFileId + opens tab)
-- `fsState.getFile(id)` — get FileRow by ID
-- `fsState.walkTree(visitor)` — walk the file tree, collecting results
-- `fromTable(workspace.tables.files)` — reactive SvelteMap of all file rows
+**`apps/opensidian/src/lib/state/files-state.svelte.ts`**:
+- `signedIn.state.files.activeFileId`: currently open file (`FileId | null`)
+- `signedIn.state.files.selectFile(id)`: navigate to a file and open its tab
+- `signedIn.state.files.getFile(id)`: get a `FileRow` by ID
+- `signedIn.state.files.walkTree(visitor)`: walk the file tree, collecting results
+- `fromTable(workspace.tables.files)`: reactive SvelteMap of all file rows
 
 ### Current Editor Components
 
@@ -103,31 +97,25 @@ export const fs = createYjsFileSystem(
 ```svelte
 <script lang="ts">
 	import type { FileId } from '@epicenter/filesystem';
-	import type { DocumentHandle } from '@epicenter/workspace';
-	import { fsState } from '$lib/state/fs-state.svelte';
-	import { workspace } from '$lib/client';
+	import { fromDisposableCache } from '@epicenter/svelte';
+	import { Loading } from '@epicenter/ui/loading';
+	import { getSignedInSession } from '$lib/session.svelte';
 	import CodeMirrorEditor from './CodeMirrorEditor.svelte';
 
-	let { fileId }: { fileId: FileId } = $props();
-	let handle = $state<DocumentHandle | null>(null);
+	const signedIn = getSignedInSession();
 
-	$effect(() => {
-		const id = fileId;
-		handle = null;
-		workspace.documents.files.content.open(id).then((h) => {
-			if (fsState.activeFileId !== id) return;
-			handle = h;
-		});
-	});
+	let { fileId }: { fileId: FileId } = $props();
+	const doc = fromDisposableCache(
+		signedIn.workspace.fileContentDocs,
+		() => fileId,
+	);
 </script>
 
-{#if handle}
-	<CodeMirrorEditor ytext={handle.asText()} />
-{:else}
-	<div class="flex h-full items-center justify-center">
-		<Spinner class="size-5 text-muted-foreground" />
-	</div>
-{/if}
+{#await doc.current.idb.whenLoaded}
+	<Loading class="h-full" />
+{:then _}
+	<CodeMirrorEditor ytext={doc.current.content.asText()} />
+{/await}
 ```
 
 **`apps/opensidian/src/lib/components/editor/CodeMirrorEditor.svelte`**:
@@ -289,7 +277,7 @@ This only applies to the body content, not frontmatter.
 
 - [x] `CodeMirrorEditor.svelte` accepts `onNavigate`, `resolveTitle`, `getFiles` props
 - [x] Both extensions added to the CodeMirror extensions array
-- [x] `ContentEditor.svelte` passes `fsState.selectFile`, `fsState.getFile(...).name`, and workspace file list
+- [x] `ContentEditor.svelte` passes `signedIn.state.files.selectFile`, `signedIn.state.files.getFile(...).name`, and the workspace file list
 
 ## MUST DO
 

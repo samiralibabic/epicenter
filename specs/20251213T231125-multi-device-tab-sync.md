@@ -89,7 +89,7 @@ import { generateId } from '@epicenter/workspace';
  * Device ID storage item.
  * Auto-generates a NanoID on first access if not already set.
  */
-const deviceIdItem = storage.defineItem<string>('local:deviceId', {
+const deviceIdItem = storage.defineItem<string>('local:device.id', {
   init: () => generateId(),
 });
 

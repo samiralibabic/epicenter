@@ -9,7 +9,7 @@
 	import { skillsState } from '$lib/state/skills-state.svelte';
 	import { validateSkill } from '$lib/utils/validation';
 
-	let open = $state(false);
+	let isOpen = $state(false);
 	let name = $state('');
 	let error = $state('');
 
@@ -29,13 +29,13 @@
 
 		skillsState.createSkill(trimmed);
 		toast.success(`Created skill: ${trimmed}`);
-		open = false;
+		isOpen = false;
 		name = '';
 		error = '';
 	}
 </script>
 
-<Dialog.Root bind:open>
+<Dialog.Root bind:open={isOpen}>
 	<Tooltip.Root>
 		<Tooltip.Trigger>
 			{#snippet child({ props })}
@@ -43,7 +43,7 @@
 					{...props}
 					variant="ghost"
 					size="icon-xs"
-					onclick={() => (open = true)}
+					onclick={() => (isOpen = true)}
 				>
 					<PlusIcon class="size-3.5" />
 				</Button>
@@ -79,7 +79,7 @@
 			</p>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
+			<Button variant="outline" onclick={() => (isOpen = false)}>Cancel</Button>
 			<Button onclick={handleCreate} disabled={!name.trim()}>Create</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

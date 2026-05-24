@@ -1,24 +1,86 @@
 /**
  * Epicenter: YJS-First Collaborative Workspace System
  *
- * This root export provides the full workspace API and shared utilities.
- *
- * - `@epicenter/workspace` - Full API (documents, tables, KV, attachments)
+ * `@epicenter/workspace` attaches typed primitives: tables, KV, plain/rich
+ * text, timeline, and an action registry to a `Y.Doc`, then wires the
+ * result to IndexedDB persistence, end-to-end encryption, and WebSocket
+ * sync via `openCollaboration`. `openCollaboration` also consumes the
+ * server-owned presence channel and exposes the live-device surface
+ * (`devices.list()`) plus socket-backed `dispatch()` for cross-device calls.
  *
  * @example
  * ```typescript
- * import { attachTables, createDisposableCache, defineTable } from '@epicenter/workspace';
+ * import {
+ *   attachIndexedDb,
+ *   attachRichText,
+ *   attachTables,
+ *   createDisposableCache,
+ *   createInstallationId,
+ *   defineTable,
+ *   docGuid,
+ *   openCollaboration,
+ *   roomWsUrl,
+ * } from '@epicenter/workspace';
+ * import type { AuthClient, Owner } from '@epicenter/auth';
  * import { type } from 'arktype';
+ * import * as Y from 'yjs';
  *
  * const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
+ * declare const auth: AuthClient;
+ * declare const owner: Owner;
  *
- * // Singleton workspace: inline at module scope, no factory wrapper.
+ * const installationId = createInstallationId({ storage: localStorage });
+ *
+ * // A cloud doc is owned by the authenticated subject and addressed by its
+ * // Y.Doc guid: `roomWsUrl({ baseURL, owner, guid, installationId })` builds the
+ * // partitioned room URL the server expects.
  * const ydoc = new Y.Doc({ guid: 'notes' });
  * const tables = attachTables(ydoc, { posts });
+ * const idb = attachIndexedDb(ydoc);
+ * const collaboration = openCollaboration(ydoc, {
+ *   url: roomWsUrl({ baseURL: auth.baseURL, owner, guid: ydoc.guid, installationId }),
+ *   openWebSocket: auth.openWebSocket,
+ *   onReconnectSignal: auth.onStateChange,
+ *   waitFor: idb.whenLoaded,
+ *   actions: {},
+ * });
  *
- * // Per-row docs: createDisposableCache wraps a pure builder.
+ * // Content docs build the same URL from their own guid. The local Y.Doc
+ * // guid doubles as the cloud room id, so there is no second id system.
  * const noteBodyDocs = createDisposableCache(
- *   (noteId) => buildNoteBody({ noteId, notesTable: tables.posts }),
+ *   (noteId: string) => {
+ *     const bodyYdoc = new Y.Doc({
+ *       guid: docGuid({
+ *         workspaceId: ydoc.guid,
+ *         collection: 'posts',
+ *         rowId: noteId,
+ *         field: 'body',
+ *       }),
+ *       gc: true,
+ *     });
+ *     const bodyIdb = attachIndexedDb(bodyYdoc);
+ *     const bodySync = openCollaboration(bodyYdoc, {
+ *       url: roomWsUrl({
+ *         baseURL: auth.baseURL,
+ *         owner,
+ *         guid: bodyYdoc.guid,
+ *         installationId,
+ *       }),
+ *       openWebSocket: auth.openWebSocket,
+ *       onReconnectSignal: auth.onStateChange,
+ *       waitFor: bodyIdb.whenLoaded,
+ *       actions: {},
+ *     });
+ *     return {
+ *       ydoc: bodyYdoc,
+ *       body: attachRichText(bodyYdoc),
+ *       idb: bodyIdb,
+ *       sync: bodySync,
+ *       [Symbol.dispose]() {
+ *         bodyYdoc.destroy();
+ *       },
+ *     };
+ *   },
  *   { gcTime: 5_000 },
  * );
  * ```
@@ -30,222 +92,100 @@
 // ACTION SYSTEM
 // ════════════════════════════════════════════════════════════════════════════
 
-export type {
-	Action,
-	ActionManifest,
-	ActionMeta,
-	Actions,
-	Mutation,
-	Query,
-	RemoteActions,
-} from './shared/actions';
+export type { ActionManifest } from './shared/actions';
 export {
+	defineActions,
 	defineMutation,
 	defineQuery,
-	describeActions,
-	invokeAction,
-	isAction,
-	resolveActionPath,
-	walkActions,
 } from './shared/actions';
 
 // ════════════════════════════════════════════════════════════════════════════
-// RPC + PEER DISPATCH
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { InferRpcMap, RpcActionMap } from './rpc/types';
-export { isRpcError, RpcError } from '@epicenter/sync';
-
-// Peer dispatch (cross-device action calling) — see `peer<T>(workspace, deviceId)`.
-export { peer, describePeer } from './rpc/peer.js';
-export type { RemoteCallOptions } from './shared/actions.js';
-
-// ════════════════════════════════════════════════════════════════════════════
-// DEVICE IDENTITY
+// INSTALLATION IDENTITY
 // ════════════════════════════════════════════════════════════════════════════
 
 export {
-	type AsyncStorage,
-	getOrCreateDeviceId,
-	getOrCreateDeviceIdAsync,
-	type SimpleStorage,
-} from './shared/device-id.js';
+	createInstallationId,
+	createInstallationIdAsync,
+} from './document/installation-id.js';
 
 // ════════════════════════════════════════════════════════════════════════════
-// SHARED TYPES
+// PROJECT CONFIG (browser-safe surface)
 // ════════════════════════════════════════════════════════════════════════════
 
-export type { MaybePromise } from './shared/types';
+// Node-only helpers that resolve real paths (`findProjectRoot`,
+// `loadProjectConfig`, etc.) import `node:fs`, `node:path`, or `node:os`
+// at module top level. They are exported from `@epicenter/workspace/node`;
+// keeping them out of this root barrel stops browser bundles (fuji,
+// whispering, etc.) from traversing `node:*` modules. Platform paths
+// (data, log, cache, config, runtime) live in `@epicenter/constants/node`
+// behind `createEpicenterEnv`.
+export {
+	DEFAULT_PROJECT_CONFIG_SOURCE,
+	defineConfig,
+} from './config/define-config.js';
+export { defineWorkspace } from './daemon/define-workspace.js';
+export type { ProjectDir } from './shared/types';
 
 // ════════════════════════════════════════════════════════════════════════════
-// ERROR TYPES
+// ID + DATE PRIMITIVES
 // ════════════════════════════════════════════════════════════════════════════
 
-export { ExtensionError } from './shared/errors';
-
-// JSONL file sink (Bun-only) lives at the `@epicenter/workspace/logger/jsonl-sink`
-// subpath. Keeping it out of this barrel matters: re-exporting it pulls
-// `node:fs`/`node:path` into every browser bundle that touches `@epicenter/workspace`,
-// which breaks SvelteKit/Vite ssr→client builds (see `__vite-browser-external`
-// "mkdirSync is not exported" errors). Import the sink directly from the subpath
-// in Bun/Node entry points; the logger core (`createLogger`, `consoleSink`, etc.)
-// still comes from `wellcrafted/logger`.
-
-// ════════════════════════════════════════════════════════════════════════════
-// CORE TYPES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { AbsolutePath, ProjectDir } from './shared/types';
-
-// ════════════════════════════════════════════════════════════════════════════
-// ID UTILITIES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { Guid, Id } from './shared/id';
-export { generateGuid, generateId, Id as createId } from './shared/id';
-
-// ════════════════════════════════════════════════════════════════════════════
-// DATE UTILITIES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type {
-	DateIsoString,
-	ParsedDateTimeString,
-	TimezoneId,
-} from './shared/datetime-string';
 export { DateTimeString } from './shared/datetime-string';
+export type { Guid, Id } from './shared/id';
+export { generateGuid, generateId } from './shared/id';
 
 // ════════════════════════════════════════════════════════════════════════════
-// DOCUMENT PRIMITIVES — attach*, define*, createDisposableCache, encryption,
-// timeline, storage keys, types — everything in src/document/ + src/cache/
-// flows through its barrel.
+// DOCUMENT PRIMITIVES
 // ════════════════════════════════════════════════════════════════════════════
 
 export {
-	attachIndexedDb,
-	type IndexedDbAttachment,
-} from './document/attach-indexed-db.js';
+	createDisposableCache,
+	type DisposableCache,
+} from './cache/disposable-cache.js';
 
+export { attachBroadcastChannel } from './document/attach-broadcast-channel.js';
 export {
-	attachSqlite,
-	type SqliteAttachment,
-} from './document/attach-sqlite.js';
-
+	type AttachEncryptionOptions,
+	attachEncryption,
+	type EncryptionAttachment,
+} from './document/attach-encryption.js';
+export { attachIndexedDb } from './document/attach-indexed-db.js';
 export {
-	attachBroadcastChannel,
-	BC_ORIGIN,
-	type BroadcastChannelAttachment,
-} from './document/attach-broadcast-channel.js';
-
-export {
-	attachRichText,
-	xmlFragmentToPlaintext,
-	type RichTextAttachment,
-} from './document/attach-rich-text.js';
-
-export {
-	attachPlainText,
-	type PlainTextAttachment,
-} from './document/attach-plain-text.js';
-
-export {
-	attachSync,
-	toWsUrl,
-	type AttachSyncDoc,
-	type SyncAttachment,
-	type SyncAttachmentConfig,
-	type SyncStatus,
-	type WaitForBarrier,
-} from './document/attach-sync.js';
-
+	attachKv,
+	type InferKvValue,
+	type Kv,
+	type KvDefinitions,
+} from './document/attach-kv.js';
+export { attachLocalStorage } from './document/attach-local-storage.js';
+export { attachPlainText } from './document/attach-plain-text.js';
+export { attachRichText } from './document/attach-rich-text.js';
 export {
 	attachTable,
 	attachTables,
 	type BaseRow,
 	type InferTableRow,
-	type LastSchema,
 	type Table,
-	type TableDefinition,
-	type TableDefinitions,
-	TableParseError,
 	type Tables,
 } from './document/attach-table.js';
-
-export {
-	attachKv,
-	type InferKvValue,
-	type Kv,
-	type KvChange,
-	type KvDefinition,
-	type KvDefinitions,
-} from './document/attach-kv.js';
-
-export {
-	type DeviceDescriptor,
-	type FoundPeer,
-	type PeerAwarenessState,
-	PeerDevice,
-	Platform,
-} from './document/standard-awareness-defs.js';
-
-export {
-	attachAwareness,
-	type Awareness,
-	type AwarenessDefinitions,
-	type AwarenessState,
-	type InferAwarenessValue,
-} from './document/attach-awareness.js';
-
-export type { CombinedStandardSchema } from './document/standard-schema.js';
-
-export {
-	attachTimeline,
-	computeMidpoint,
-	generateInitialOrders,
-	parseSheetFromCsv,
-	populateFragmentFromText,
-	serializeSheetToCsv,
-	type ContentType,
-	type RichTextEntry,
-	type SheetBinding,
-	type SheetEntry,
-	type TextEntry,
-	type Timeline,
-	type TimelineEntry,
-} from './document/attach-timeline/index.js';
-
-export {
-	createDisposableCache,
-	type DisposableCache,
-	DisposableCacheError,
-} from './cache/disposable-cache.js';
-export { defineTable } from './document/define-table.js';
+export { attachTimeline } from './document/attach-timeline/index.js';
 export { defineKv } from './document/define-kv.js';
+export { defineTable } from './document/define-table.js';
+export { DispatchError } from './document/dispatch.js';
 export { docGuid } from './document/doc-guid.js';
-export { type DocPersistence } from './document/doc-persistence.js';
+export type { SyncStatus } from './document/internal/sync-supervisor.js';
 export { onLocalUpdate } from './document/on-local-update.js';
-
 export {
-	attachEncryption,
-	type EncryptionAttachment,
-} from './document/attach-encryption.js';
-export {
-	EncryptionKey,
-	EncryptionKeys,
-	encryptionKeysFingerprint,
-} from './document/encryption-key.js';
-
-export { KV_KEY, TableKey, type KvKey } from './document/keys.js';
-// ════════════════════════════════════════════════════════════════════════════
-// EPICENTER LINKS
-// ════════════════════════════════════════════════════════════════════════════
-
-export {
-	convertEpicenterLinksToWikilinks,
-	convertWikilinksToEpicenterLinks,
-	EPICENTER_LINK_RE,
-	type EpicenterLink,
-	isEpicenterLink,
-	makeEpicenterLink,
-	parseEpicenterLink,
-} from './links.js';
+	type Collaboration,
+	type OnReconnectSignal,
+	type OpenCollaborationConfig,
+	type OpenWebSocketFn,
+	openCollaboration,
+} from './document/open-collaboration.js';
+// Transport URL builder.
+//
+// `roomWsUrl({ baseURL, owner, guid, installationId })` builds the WebSocket URL
+// for the partitioned `/api/users/:userId/rooms/:roomId` (personal) or
+// `/api/rooms/:roomId` (team) endpoint. Both browser apps and the daemon
+// use this one builder.
+export { type RoomWsUrlOptions, roomWsUrl } from './document/transport.js';
+export { wipeLocalStorage } from './document/wipe-local-storage.js';

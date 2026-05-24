@@ -3,7 +3,7 @@
  *
  * Bridges the async chrome.storage API into synchronous, reactive `$state`
  * that can be read directly in templates and `$derived` blocks. Values are
- * validated against a Standard Schema on every read from storage — invalid
+ * validated against a Standard Schema on every read from storage. Invalid
  * data silently falls back to the default.
  *
  * Two read channels: `.current` for reactive template bindings (may be the
@@ -15,7 +15,7 @@
  * import { type } from 'arktype';
  * import { createStorageState } from './storage-state.svelte';
  *
- * export const serverUrl = createStorageState('local:serverUrl', {
+ * export const serverUrl = createStorageState('local:server.url', {
  *   fallback: 'https://api.epicenter.so',
  *   schema: type('string'),
  * });
@@ -36,7 +36,7 @@ import { type StorageItemKey, storage } from '@wxt-dev/storage';
  * Create a reactive Svelte 5 state backed by extension storage.
  *
  * The type is inferred from the schema. Values read from storage are
- * validated — if they don't match the schema, the fallback is used
+ * validated. If they don't match the schema, the fallback is used
  * (without writing it back to storage).
  */
 export function createStorageState<TSchema extends StandardSchemaV1>(
@@ -77,7 +77,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 	/**
 	 * Number of writes we initiated that haven't resolved yet.
 	 *
-	 * chrome.storage fires `onChanged` for ALL writes — including our own.
+	 * chrome.storage fires `onChanged` for ALL writes, including our own.
 	 * Without this guard, the watch callback would echo our optimistic value
 	 * back (harmless but wasteful), or worse, revert the UI to a stale value
 	 * when rapid writes overlap (set "A" → set "B" → watch fires "A" → flicker).
@@ -88,7 +88,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 	 */
 	let writesInFlight = 0;
 
-	// Async init — load persisted value from chrome.storage.
+	// Async init: load persisted value from chrome.storage.
 	const whenReady = item.getValue().then((persisted) => {
 		setValue(validate(persisted) ?? fallback);
 	});
@@ -109,8 +109,8 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 			writesInFlight--;
 			if (writesInFlight === 0) {
 				// Re-read to catch any external changes we suppressed.
-				const v = await item.getValue();
-				setValue(validate(v) ?? fallback);
+				const storedValue = await item.getValue();
+				setValue(validate(storedValue) ?? fallback);
 			}
 		}
 	}
@@ -125,7 +125,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 		},
 
 		/**
-		 * Optimistic set — updates the reactive `$state` immediately so Svelte
+		 * Optimistic set: updates the reactive `$state` immediately so Svelte
 		 * bindings reflect the change on the same tick, then persists async
 		 * (fire-and-forget; accessors can't return promises). Use the `set(v)`
 		 * method if you need to await persistence.
@@ -135,7 +135,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 		},
 
 		/**
-		 * Synchronous read — returns the in-memory value.
+		 * Synchronous read: returns the in-memory value.
 		 *
 		 * Before `whenReady` resolves this returns `fallback`. After `whenReady`
 		 * this is authoritative and matches `.current`. Use when a consumer's
@@ -144,7 +144,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 		get: () => value,
 
 		/**
-		 * Method-form setter — updates UI immediately, resolves once
+		 * Method-form setter: updates UI immediately, resolves once
 		 * chrome.storage has flushed. Return type `Promise<void>` is assignable
 		 * to `void`-returning consumer contracts, so callers that don't care
 		 * about durability can ignore the promise; callers that do can `await`.
@@ -158,7 +158,7 @@ export function createStorageState<TSchema extends StandardSchemaV1>(
 		whenReady,
 
 		/**
-		 * Watch for any change — local writes and external changes from other
+		 * Watch for any change: local writes and external changes from other
 		 * extension contexts. Fires exactly once per value change.
 		 */
 		watch(callback: (value: T) => void): () => void {

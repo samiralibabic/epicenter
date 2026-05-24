@@ -18,15 +18,15 @@ The body of this spec describes the v2 design (three layers: `createRemoteProxy`
 import { peer } from '@epicenter/workspace';
 import type { TabManagerActions } from '@epicenter/tab-manager';
 
-const macbook = peer<TabManagerActions>(fuji, 'macbook-pro');
+const macbook = peer<TabManagerActions>(fuji.sync, 'macbook-pro');
 const result = await macbook.tabs.close({ tabIds: [1] }, { timeout: 5_000 });
-// Promise<Result<{ closedCount }, BrowserApiFailed | RpcError.PeerNotFound | RpcError.PeerLeft | RpcError.Timeout | RpcError.ActionFailed>>
+// Promise<Result<{ closedCount }, RpcError>>
 
 if (result.error) toast.error(extractErrorMessage(result.error));
 else toast.success(`closed ${result.data.closedCount} tabs`);
 ```
 
-`peer<T>(workspace, deviceId)` is the entire public surface. Returns a typed JavaScript Proxy. Every leaf is `(input?, options?) => Promise<Result<T, E | RpcError>>`. The proxy is stateless — each call resolves the deviceId against awareness and dispatches via `workspace.sync.rpc`.
+`peer<T>(sync, deviceId)` is the app-facing public surface. Returns a typed JavaScript Proxy. Every leaf is `(input?, options?) => Promise<Result<T, RpcError>>`. The proxy is stateless: each call resolves the deviceId against awareness and dispatches via `sync.rpc`.
 
 ### What was collapsed from v2
 
@@ -38,7 +38,7 @@ else toast.success(`closed ${result.data.closedCount} tabs`);
 | `prefer: 'unique' \| 'any'` option, `RpcError.AmbiguousPeer` variant | First-match-wins, no ambiguity error | Per-installation deviceId convention makes collisions cryptographically unreachable |
 | Dot-prefix CLI sugar (`epicenter run mac.tabs.close`) | Only `--peer` form | Two ways to do the same thing; dot-prefix has implicit fallback ambiguity (peer vs workspace export) |
 | Two awareness top-level keys (`device`, `offers`) | One key (`device.offers`) | Always written together at boot, never partially updated |
-| `createRemoteCaller(workspace).peer<T>(target)` two-step | `peer<T>(workspace, deviceId)` one-step | Intermediate `RemoteCaller` noun has no other callers; workspace always in scope |
+| `createRemoteCaller(workspace).peer<T>(target)` two-step | `peer<T>(sync, deviceId)` one-step | Intermediate `RemoteCaller` noun has no other callers; sync is always in scope |
 | `dispatch:` callback on `attachSync` | `actions:` data on `attachSync` | All apps had identical `(p, i) => dispatchAction(actions, p, i)` boilerplate; idiomatic precedent (tRPC, gRPC, Comlink) is data not callbacks; wrapping (auth/audit) becomes upstream tree composition |
 
 ### The deviceId convention (load-bearing for first-match-wins)
@@ -177,7 +177,7 @@ const remote = createRemoteProxy<TabManagerActions>(async (path, input, options)
 | Piece | Status |
 |---|---|
 | `sync.rpc(clientId, action, input, { timeout })` | Implemented end-to-end |
-| `RpcActionMap` / `DefaultRpcMap` / `InferRpcMap<A>` | Implemented |
+| `RpcActionMap` / `DefaultRpcMap` / `InferSyncRpcMap<A>` | Implemented |
 | `createRemoteActions(actions, send)` (runtime tree walk) | Implemented; **deleted in this proposal** — redundant with `createRemoteProxy` |
 | `attachAwareness(ydoc, defs)` typed wrapper | Implemented |
 | Standardized `device` / `offers` awareness keys | **Not implemented — spec only** |

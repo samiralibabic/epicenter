@@ -4,26 +4,28 @@
 		"target": "ESNext",
 		"lib": ["ESNext"],
 		"moduleDetection": "force",
+		// Disable auto-include of every package under node_modules/@types.
+		// Each package opts in explicitly via `"types": ["bun"]` or `["node"]`.
+		"types": [],
 
-		// Modules
+		// Modules: every package is source-only .ts consumed by Bun or a
+		// bundler. `module: preserve` implies `moduleResolution: bundler`;
+		// the pair is kept explicit for readability.
 		"module": "preserve",
 		"moduleResolution": "bundler",
-		"resolvePackageJsonExports": true,
 		"resolveJsonModule": true,
 		"allowImportingTsExtensions": true,
 
 		// JavaScript Support
 		"allowJs": true,
 
-		// Emit
+		// Emit: type-check only; Bun and bundlers handle transpilation.
 		"noEmit": true,
-		"sourceMap": true,
 
 		// Interop
 		"isolatedModules": true,
 		"verbatimModuleSyntax": true,
 		"esModuleInterop": true,
-		"forceConsistentCasingInFileNames": true,
 
 		// Type Checking
 		"strict": true,

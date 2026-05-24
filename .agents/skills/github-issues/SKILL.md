@@ -1,6 +1,6 @@
 ---
 name: github-issues
-description: GitHub issue comment guidelines for community interaction. Use when the user says "respond to this issue", "reply to this bug report", "close this issue", or when responding to GitHub issues, bug reports, feature requests, or any GitHub discussion.
+description: 'GitHub issue comment guidelines for community interaction. Use when: "respond to this issue", "reply to this bug report", "close this issue", or any GitHub discussion.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -23,9 +23,7 @@ Use this pattern when you need to:
 - **Over-structured responses**: Don't use headers, numbered sections, or bullet lists for simple replies. A conversational paragraph is usually better.
 - **Formulaic openings**: Don't start every comment identically. Match the tone to the conversation.
 - **Restating what's obvious**: If someone asked a question, just answer it. Don't recap what they said.
-- **Corporate announcements**: "We are pleased to announce..." — just say what changed.
-
-Follow [writing-voice](../writing-voice/SKILL.md) for tone.
+- **Corporate announcements**: "We are pleased to announce..."; just say what changed.
 
 Follow [writing-voice](../writing-voice/SKILL.md) for tone.
 

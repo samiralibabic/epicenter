@@ -388,7 +388,7 @@ import {
   attachRichText,
   attachSync,
   defineDocument,
-  toWsUrl,
+  websocketUrl,
 } from '@epicenter/document'
 import { auth, workspace } from './client'
 
@@ -398,7 +398,7 @@ export function entryContentDoc(rowId: string) {
 
     const idb  = attachIndexedDb(ydoc)
     const sync = attachSync(ydoc, {
-      url: (id) => toWsUrl(`${APP_URLS.API}/docs/${id}`),
+      url: (id) => websocketUrl(`${APP_URLS.API}/docs/${id}`),
       getToken: async () => auth.token,
       waitFor: idb.whenSynced,      // connect only after local state hydrates
     })

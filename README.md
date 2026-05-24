@@ -48,13 +48,53 @@
 
 ## What is Epicenter?
 
-Epicenter is an ecosystem of open-source, local-first apps. All your data—notes, transcripts, chat histories—lives in a single folder of plain text and SQLite on your machine. Every tool we build reads and writes to the same place. It's open, tweakable, and yours. Grep it, open it in Obsidian, version it with Git, host it wherever you want.
+Epicenter is an ecosystem of open-source, local-first apps. Your notes, transcripts, and chat histories live in a single folder of plain text and SQLite on your machine. Every tool we build reads and writes to the same place. It's open, tweakable, and yours. Grep it, open it in Obsidian, version it with Git, host it wherever you want.
 
-Under the hood, Yjs CRDTs are the single source of truth. They materialize *down* to SQLite (for fast queries) and markdown (for human-readable files). Sync happens over the Yjs protocol; the server is a relay, not an authority—it never sees your content.
+Under the hood, Yjs CRDTs are the single source of truth. They materialize *down* to SQLite (for fast queries) and markdown (for human-readable files). Sync happens over the Yjs protocol; the server is a relay, not an authority. It never sees your content.
 
 The library that powers this, [`@epicenter/workspace`](packages/workspace), is something other developers can build on too. Define a typed schema, get CRDT-backed tables with multi-device sync handled for you.
 
 ## Architecture
+
+Epicenter has three different backend boundaries on purpose:
+
+```txt
+Domains split by public protocol role.
+Deployables split by infrastructure and operational boundary.
+Hono modules split by code composition boundary.
+```
+
+Hosted Epicenter is moving toward three public domains served by two deployables:
+
+```txt
+accounts.epicenter.so
+  OAuth issuer, sign-in, consent, token issuance
+  served by apps/server
+
+sync.epicenter.so
+  workspace identity, workspace sync, document sync
+  served by apps/server
+
+api.epicenter.so
+  hosted Cloud APIs, billing, storage registry, dashboard
+  served by apps/cloud
+```
+
+Inside each deployable, route groups are mountable Hono modules:
+
+```txt
+apps/server
+  createAccountsRoutes()
+  createSyncRoutes()
+
+apps/cloud
+  createCloudResourceRoutes()
+  createDashboardRoutes()
+```
+
+This keeps the self-hostable server free of Postgres and billing dependencies,
+while still making accounts, sync, Cloud APIs, and dashboard routes easy to
+split later if their operational needs diverge.
 
 ```
                               ┌──────────────────────────────────┐
@@ -75,24 +115,24 @@ The library that powers this, [`@epicenter/workspace`](packages/workspace), is s
           │
     ┌─────▼───────────────────────────────────────────────────────────┐
     │                     MIDDLEWARE / ADAPTERS                        │
-    │  @epicenter/svelte    — Svelte integration, auth, persistence   │
-    │  @epicenter/filesystem — POSIX file layer over Yjs              │
-    │  @epicenter/skills    — skill/reference tables                  │
-    │  @epicenter/ai        — LLM tool bridging                      │
+    │  @epicenter/svelte    : Svelte integration, auth, persistence   │
+    │  @epicenter/filesystem : POSIX file layer over Yjs              │
+    │  @epicenter/skills    : skill/reference tables                  │
+    │  @epicenter/ai        : LLM tool bridging                      │
     └─────────────────────────────┬───────────────────────────────────┘
                                   │
     ┌──────────────────────────────▼───────────────────────────────────┐
     │                           CORE                                   │
-    │  @epicenter/workspace — typed schemas, Yjs CRDTs, extensions,   │
+    │  @epicenter/workspace : typed schemas, Yjs CRDTs, extensions,   │
     │                         E2E encryption, lifecycle, materializers │
-    │  @epicenter/sync      — protocol encoding/decoding, V2 updates  │
-    │  @epicenter/constants — app URLs, versions, shared config       │
-    │  @epicenter/ui        — shadcn-svelte component library         │
-    │  @epicenter/cli       — TypeBox→yargs CLI, auth/session APIs    │
+    │  @epicenter/sync      : protocol encoding/decoding, V2 updates  │
+    │  @epicenter/constants : app URLs, versions, shared config       │
+    │  @epicenter/ui        : shadcn-svelte component library         │
+    │  @epicenter/cli       : TypeBox→yargs CLI, auth/session APIs    │
     └─────────────────────────────────────────────────────────────────┘
 ```
 
-The dependency flow is strict: core has zero upward dependencies, middleware only reaches into core, and apps compose both. [`@epicenter/workspace`](packages/workspace) is the gravitational center—every middleware package and most apps depend on it. The sync server is a relay, not an authority; it never sees your content because encryption happens client-side before anything leaves the device.
+The dependency flow is strict: core has zero upward dependencies, middleware only reaches into core, and apps compose both. [`@epicenter/workspace`](packages/workspace) is the gravitational center; every middleware package and most apps depend on it. The sync server is a relay, not an authority; it never sees your content because encryption happens client-side before anything leaves the device.
 
 [Full architecture walkthrough →](docs/architecture.md) · [Encryption design →](docs/encryption.md)
 
@@ -143,14 +183,16 @@ Also in the repo: [Fuji](apps/fuji) (personal CMS), [Zhongwen](apps/zhongwen) (M
 | Package | Description | License |
 | --- | --- | --- |
 | [`@epicenter/workspace`](packages/workspace) | Core library. Typed schemas, Yjs CRDTs, extension builder, E2E encryption, materializers. Everything builds on this. | MIT |
-| [`@epicenter/sync`](packages/sync) | Yjs sync protocol encoding/decoding. Dumb server, smart client—protocol framing is separate from transport. | AGPL-3.0 |
+| [`@epicenter/sync`](packages/sync) | Yjs sync protocol encoding/decoding. Dumb server, smart client; protocol framing is separate from transport. | AGPL-3.0 |
 | [`@epicenter/ui`](packages/ui) | shadcn-svelte component library shared across all apps. | MIT |
-| [`@epicenter/svelte`](packages/svelte-utils) | Svelte 5 integration—persisted state, auth, workspace gate, TanStack Query helpers. | MIT |
+| [`@epicenter/svelte`](packages/svelte-utils) | Svelte 5 integration: persisted state, auth, workspace gate, TanStack Query helpers. | MIT |
 | [`@epicenter/filesystem`](packages/filesystem) | POSIX-style virtual filesystem over Yjs workspace tables. `mkdir`, `mv`, `rm`, `stat`. | MIT |
-| [`@epicenter/skills`](packages/skills) | Skill and reference tables for AI-enhanced workspace apps. | MIT |
-| [`@epicenter/ai`](packages/ai) | Bridges workspace actions with LLM tool calling. | MIT |
+| [`@epicenter/skills`](packages/skills) | Skill and reference tables for AI-enhanced workspace apps. | AGPL-3.0 |
+| [`@epicenter/ai`](packages/ai) | Bridges workspace actions with LLM tool calling. | AGPL-3.0 |
 | [`@epicenter/cli`](packages/cli) | The `epicenter` command. TypeBox schemas become CLI flags automatically. | MIT |
-| [`@epicenter/constants`](packages/constants) | Shared URLs, ports, and version info across the monorepo. | MIT |
+| [`@epicenter/constants`](packages/constants) | Shared URLs, ports, and version info across the monorepo. | AGPL-3.0 |
+| [`@epicenter/auth`](packages/auth) | Framework-agnostic auth core. Imperative subscription API over better-auth. | AGPL-3.0 |
+| [`@epicenter/auth-svelte`](packages/auth-svelte) | Svelte 5 reactive wrapper around `@epicenter/auth`. | AGPL-3.0 |
 
 ## For Developers
 
@@ -163,34 +205,33 @@ import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
   attachIndexedDb,
-  attachSync,
   attachTables,
-  defineDocument,
   defineTable,
-  toWsUrl,
+  openCollaboration,
+  websocketUrl,
 } from '@epicenter/workspace';
 
 const posts = defineTable(
   type({ id: 'string', title: 'string', published: 'boolean', _v: '1' }),
 );
 
-const blog = defineDocument((id: string) => {
+function openBlog(id: string, installationId: string) {
   const ydoc = new Y.Doc({ guid: id });
   const tables = attachTables(ydoc, { posts });
   const idb = attachIndexedDb(ydoc);
-  const sync = attachSync(ydoc, {
-    url: (docId) => toWsUrl(`http://localhost:3913/rooms/${docId}`),
+  const collaboration = openCollaboration(ydoc, {
+    url: websocketUrl(`http://localhost:3913/rooms/${ydoc.guid}`),
     waitFor: idb.whenLoaded,
+    installationId,
   });
 
   return {
-    id, ydoc, tables, idb, sync,
-    whenReady: idb.whenLoaded,
+    id, ydoc, tables, idb, collaboration,
     [Symbol.dispose]() { ydoc.destroy(); },
   };
-});
+}
 
-const workspace = await blog.load('epicenter.blog');
+const workspace = openBlog('epicenter.blog', 'browser-dev');
 workspace.tables.posts.set({ id: '1', title: 'Hello', published: false, _v: 1 });
 ```
 
@@ -200,9 +241,9 @@ Each user gets their own database. Schema definitions are plain JSON, so they wo
 
 ## Where We're Headed
 
-More apps are in progress—each one shares the same workspace, so data flows between them without import/export. The [`@epicenter/workspace`](packages/workspace) library handles the hard parts (schemas, CRDT sync, materialization), so each new app is mostly UI.
+More apps are in progress. Each one shares the same workspace, so data flows between them without import/export. The [`@epicenter/workspace`](packages/workspace) library handles the hard parts (schemas, CRDT sync, materialization), so each new app is mostly UI.
 
-Epicenter Cloud will provide hosted sync for people who don't want to run their own server. Same model as Supabase selling hosted Postgres or Liveblocks selling hosted collaboration. Self-hosting is and will remain first-class—the sync server is open source under AGPL, and when you run it yourself, you control the encryption keys and trust boundary.
+Epicenter Cloud will provide hosted sync for people who don't want to run their own server. Same model as Supabase selling hosted Postgres or Liveblocks selling hosted collaboration. Self-hosting is and will remain first-class. The sync server is open source under AGPL, and when you run it yourself, you control the encryption keys and trust boundary.
 
 ## Quick Start
 
@@ -219,13 +260,19 @@ Or download directly from [GitHub Releases](https://github.com/EpicenterHQ/epice
 ### Build from Source
 
 ```bash
-# Prerequisites: Bun (https://bun.sh) and Rust (https://rustup.rs)
+# Prerequisites: Bun, local Postgres, and Infisical access for API secrets
 git clone https://github.com/EpicenterHQ/epicenter.git
 cd epicenter
 bun install
-cd apps/whispering
 bun dev
 ```
+
+Root `bun dev` starts one local workflow: the API and Tab Manager. See
+[`apps/api/README.md`](apps/api/README.md) for local Postgres and Infisical
+setup. Use `bun run dev:api` for only the local API, or
+`bun run dev:tab-manager:ui` for only the extension UI. App folders still
+support `bun dev` for focused local work on that app. Rust is only needed for
+Tauri apps like Whispering.
 
 ### Troubleshooting
 
@@ -243,7 +290,17 @@ bun nuke     # Clears everything including Rust target
 bun install
 ```
 
-You rarely need `bun nuke`—Cargo handles incremental builds well. Use `bun clean` first.
+You rarely need `bun nuke`. Cargo handles incremental builds well. Use `bun clean` first.
+
+### Developing against a local API
+
+Most CLI commands default to the hosted Epicenter API at `https://api.epicenter.so`. If you are iterating on `apps/api` and want the CLI pointed at your local server, use the `cli:local` script:
+
+```bash
+bun run cli:local auth login
+```
+
+See [`packages/cli/README.md`](packages/cli/README.md) for the full environment table and per-host token file behavior.
 
 ## Contributing
 
@@ -267,7 +324,7 @@ Contributors coordinate in our [Discord](https://go.epicenter.so/discord).
 
 ## Design Decisions
 
-We publish our implementation specs. These are the reasoning behind non-obvious architectural choices—alternatives considered, trade-offs made, and why we landed where we did.
+We publish our implementation specs. These are the reasoning behind non-obvious architectural choices: alternatives considered, trade-offs made, and why we landed where we did.
 
 | Spec | What it decided |
 | --- | --- |
@@ -281,9 +338,15 @@ All 112 implemented specs live in [`specs/`](specs/).
 
 ## License
 
-Most packages and all apps are [MIT](licenses/LICENSE-MIT)—use them however you want, no strings attached. The sync server (`apps/api`) and sync protocol (`packages/sync`) are [AGPL-3.0](licenses/LICENSE-AGPL-3.0), which means anyone hosting a modified version shares their changes. This follows the same pattern as Yjs (MIT core, AGPL y-redis), Liveblocks (Apache clients, AGPL server), and Bitwarden (GPL clients, AGPL server).
+Epicenter uses a sharp two-tier split:
 
-See [FINANCIAL_SUSTAINABILITY.md](FINANCIAL_SUSTAINABILITY.md) for the full reasoning behind the split.
+- **[MIT](licenses/LICENSE-MIT)** for the local-first-on-Yjs developer toolkit: `@epicenter/workspace`, `@epicenter/ui`, `@epicenter/svelte`, `@epicenter/filesystem`, `@epicenter/cli`. An external developer can `npm install` any of these and embed them in a closed-source product.
+- **[AGPL-3.0](licenses/LICENSE-AGPL-3.0)** for everything else Epicenter ships: all 12 apps, the sync protocol (`@epicenter/sync`), and the Epicenter-internal packages. Anyone hosting or distributing a modified version must share their changes.
+- **Proprietary (deferred, empty)** as an escape hatch only. Revenue comes from hosting Epicenter Cloud, not from selling licenses, so this tier is intended to stay empty.
+
+This follows the same pattern as [Plausible](https://github.com/plausible/analytics) and [PostHog](https://github.com/PostHog/posthog) (AGPL apps and servers, hosted SaaS as revenue), and [Yjs](https://github.com/yjs/yjs) (MIT core library, AGPL `y-redis` server).
+
+See the root [LICENSE](LICENSE) for the full index, [FINANCIAL_SUSTAINABILITY.md](FINANCIAL_SUSTAINABILITY.md) for the narrative, and [specs/20260428T120000-licensing-strategy.md](specs/20260428T120000-licensing-strategy.md) for the threat model and decision procedure.
 
 ---
 

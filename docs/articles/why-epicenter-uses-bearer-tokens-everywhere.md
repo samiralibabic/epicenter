@@ -16,7 +16,7 @@ Bearer tokens work everywhere. Store a string, send it in a header. That's the w
 
 ## The security argument for cookies
 
-The case for httpOnly cookies is real. If an attacker gets XSS on your app, they can't steal a token they can't read. With localStorage, `localStorage.getItem('zhongwen:authToken')` gives them the token to exfiltrate and use from their own machine.
+The case for httpOnly cookies is real. If an attacker gets XSS on your app, they can't steal a token they can't read. With localStorage, `localStorage.getItem('zhongwen.auth.token')` gives them the token to exfiltrate and use from their own machine.
 
 That's a genuine difference. But here's what it actually means in practice.
 

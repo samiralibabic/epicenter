@@ -5,7 +5,6 @@ import {
 	type InferErrors,
 } from 'wellcrafted/error';
 import { Err, isErr, Ok, type Result } from 'wellcrafted/result';
-import { whispering } from '$lib/whispering/client';
 import { defineMutation } from '$lib/query/client';
 import {
 	WhisperingErr,
@@ -13,17 +12,19 @@ import {
 	type WhisperingResult,
 } from '$lib/result';
 import { services } from '$lib/services';
+import type { DeviceConfigKey } from '$lib/state/device-config.svelte';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
 import { transformationRuns } from '$lib/state/transformation-runs.svelte';
 import { transformationSteps } from '$lib/state/transformation-steps.svelte';
+import { asTemplateString, interpolateTemplate } from '$lib/utils/template';
+import { whispering } from '$lib/whispering/client';
 import type {
 	Transformation,
 	TransformationRun,
 	TransformationStep,
 	TransformationStepRun,
 } from '$lib/workspace';
-import { asTemplateString, interpolateTemplate } from '$lib/utils/template';
 
 type TransformationRunRunning = Extract<
 	TransformationRun,
@@ -89,7 +90,7 @@ const STANDARD_PROVIDER_CONFIG = {
 				userPrompt: string;
 			}) => Promise<Result<string, { message: string }>>;
 		};
-		apiKeyPath: Parameters<typeof deviceConfig.get>[0];
+		apiKeyPath: DeviceConfigKey;
 		modelKey: keyof TransformationStep;
 	}
 >;
@@ -116,12 +117,13 @@ export const transformer = {
 		mutationFn: async ({
 			input,
 			transformation,
-			steps,
 		}: {
 			input: string;
 			transformation: Transformation;
-			steps: TransformationStep[];
 		}): Promise<WhisperingResult<string>> => {
+			const steps = transformationSteps.getByTransformationId(
+				transformation.id,
+			);
 			const getTransformationOutput = async (): Promise<
 				Result<string, WhisperingError>
 			> => {

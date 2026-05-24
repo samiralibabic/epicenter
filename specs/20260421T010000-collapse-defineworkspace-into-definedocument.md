@@ -318,9 +318,9 @@ All seven consumer `client.ts` files are now single `defineDocument` closures. V
 
 ### Phase 5: Migrate shared-schema packages
 
-- [x] **5.1** `@epicenter/skills` browser entry — `skillsDocument` factory now owns Y.Doc construction, tables, KV, encryption, IDB, broadcast channel, actions, instruction/reference doc factories. `createSkillsWorkspace` deleted (consumers call `.open()` directly — less indirection).
+- [x] **5.1** `@epicenter/skills` browser entry once used a document factory for Y.Doc construction, tables, KV, encryption, IDB, broadcast channel, actions, instruction/reference doc factories. `createSkillsWorkspace` deleted.
 - [x] **5.2** `@epicenter/skills/node` — separate factory with `importFromDisk` / `exportToDisk` added. Actions extracted to `skills-actions.ts` and shared by both entries.
-- [x] **5.3** `apps/opensidian` (skills section) and `apps/skills` rewritten to `skillsDocument.open('epicenter.skills')`. No consumer shape changes — field reads (`.tables`, `.actions`, `.instructionsDocs`, `.referenceDocs`, `.idb`, `.whenReady`) remain identical.
+- [x] **5.3** `apps/opensidian` (skills section) and `apps/skills` were rewritten to the then-current skills document factory shape. No consumer shape changes were made in that phase.
   > **Note**: Two factories, one per entry point, each with its own `defineDocument` cache. A single process only ever imports one — cache sharing within that process works by module-identity. Hybrid Tauri/Node processes flagged with a TODO; not implemented speculatively.
 
 ### Phase 6: Delete `defineWorkspace` and adjust types — **REMAINING WORK**

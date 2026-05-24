@@ -16,6 +16,7 @@
 	} = $props();
 
 	const visible = $derived(error && error.message !== dismissedError);
+	const displayMessage = $derived(error?.message ?? '');
 </script>
 
 {#if visible}

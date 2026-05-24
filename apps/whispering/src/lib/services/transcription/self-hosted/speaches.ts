@@ -151,6 +151,3 @@ export const SpeachesTranscriptionServiceLive = {
 		return Ok(whisperApiResponse.text.trim());
 	},
 };
-
-export type SpeachesTranscriptionService =
-	typeof SpeachesTranscriptionServiceLive;

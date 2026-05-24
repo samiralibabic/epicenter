@@ -11,6 +11,6 @@ export function parseDateToIso(
 	dateStr: string | undefined | null,
 ): string | null {
 	if (!dateStr || dateStr === '') return null;
-	const d = new Date(dateStr);
-	return Number.isNaN(d.getTime()) ? null : d.toISOString();
+	const date = new Date(dateStr);
+	return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

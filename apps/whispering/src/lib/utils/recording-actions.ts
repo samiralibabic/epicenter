@@ -37,7 +37,7 @@ export const recordingActions = {
 	 */
 	deleteWithConfirmation(
 		toDelete: Recording | Recording[],
-		options?: { onSuccess?: () => void },
+		{ onSuccess }: { onSuccess?: () => void } = {},
 	) {
 		const arr = Array.isArray(toDelete) ? toDelete : [toDelete];
 		const isSingle = arr.length === 1;
@@ -57,7 +57,7 @@ export const recordingActions = {
 					title: `Deleted ${noun}!`,
 					description: `Your ${noun} ${isSingle ? 'has' : 'have'} been deleted.`,
 				});
-				options?.onSuccess?.();
+				onSuccess?.();
 			},
 		});
 	},

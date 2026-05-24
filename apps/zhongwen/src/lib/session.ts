@@ -1,0 +1,19 @@
+import { createSession } from '@epicenter/svelte';
+import { createInstallationId } from '@epicenter/workspace';
+import { auth } from '$platform/auth';
+import { openZhongwenBrowser } from '../routes/(signed-in)/zhongwen/browser';
+
+export const session = createSession({
+	auth,
+	build: (signedIn) =>
+		openZhongwenBrowser({
+			signedIn,
+			installationId: createInstallationId({ storage: localStorage }),
+		}),
+});
+
+export const requireZhongwen = session.require;
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => session[Symbol.dispose]());
+}

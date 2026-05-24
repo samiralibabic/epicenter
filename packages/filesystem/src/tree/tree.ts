@@ -1,4 +1,5 @@
 import type { Table } from '@epicenter/workspace';
+import type * as Y from 'yjs';
 import { FS_ERRORS } from '../errors.js';
 import type { FileId } from '../ids.js';
 import { generateFileId } from '../ids.js';
@@ -13,9 +14,12 @@ import { attachFileSystemIndex } from './path-index.js';
  * Owns the files table and the derived path/children indexes.
  * All methods work with absolute paths (never sees `cwd`).
  * Has no knowledge of file content — only structure and metadata.
+ *
+ * Teardown is hooked to `ydoc.once('destroy', ...)` via the underlying
+ * index. Callers do not call a dispose method.
  */
-export function attachFileTree(filesTable: Table<FileRow>) {
-	const index = attachFileSystemIndex(filesTable);
+export function attachFileTree(ydoc: Y.Doc, filesTable: Table<FileRow>) {
+	const index = attachFileSystemIndex(ydoc, filesTable);
 
 	return {
 		/** Reactive file-system indexes for path lookups and parent-child queries. */
@@ -140,21 +144,26 @@ export function attachFileTree(filesTable: Table<FileRow>) {
 		 *
 		 * @returns The new FileId.
 		 */
-		create(opts: {
+		create({
+			name,
+			parentId,
+			type,
+			size,
+		}: {
 			name: string;
 			parentId: FileId | null;
 			type: 'file' | 'folder';
 			size: number;
 		}): FileId {
-			validateName(opts.name);
-			assertUniqueName(filesTable, index.getChildIds(opts.parentId), opts.name);
+			validateName(name);
+			assertUniqueName(filesTable, index.getChildIds(parentId), name);
 			const id = generateFileId();
 			filesTable.set({
 				id,
-				name: opts.name,
-				parentId: opts.parentId,
-				type: opts.type,
-				size: opts.size,
+				name,
+				parentId,
+				type,
+				size,
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
 				trashedAt: null,
@@ -187,11 +196,6 @@ export function attachFileTree(filesTable: Table<FileRow>) {
 		/** Update `updatedAt` only (for utimes). */
 		setMtime(id: FileId, mtime: Date): void {
 			filesTable.update(id, { updatedAt: mtime.getTime() });
-		},
-
-		/** Tear down reactive indexes. */
-		dispose(): void {
-			index.dispose();
 		},
 	};
 }

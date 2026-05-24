@@ -12,7 +12,6 @@
 	import type { PageData } from './$types';
 
 	let { data } = $props();
-	const isAccessibilityGranted = $derived(data.isAccessibilityGranted);
 
 	async function requestPermissionOrShowGuidance() {
 		const { error } = await desktopServices.permissions.accessibility.request();
@@ -135,7 +134,7 @@
 			</div>
 		</Card.Content>
 		<Card.Footer>
-			{#if !isAccessibilityGranted}
+			{#if !data.isAccessibilityGranted}
 				<div class="flex gap-3 w-full">
 					<Button
 						variant="outline"

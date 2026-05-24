@@ -48,8 +48,8 @@ type FetchFn = (
 	init?: RequestInit,
 ) => Promise<Response>;
 
-export function createAiChatFetch(authFetch: FetchFn): FetchFn {
-	return async (input, init) => {
+export function createAiChatFetch(authFetch: FetchFn): typeof fetch {
+	const fetchClient = async (input: RequestInfo | URL, init?: RequestInit) => {
 		const response = await authFetch(input, init);
 		if (response.ok) return response;
 
@@ -77,4 +77,12 @@ export function createAiChatFetch(authFetch: FetchFn): FetchFn {
 			`HTTP error! status: ${response.status} ${response.statusText}`,
 		);
 	};
+
+	// `fetchClient` must stay assignable to TanStack AI's `typeof fetch`
+	// option, whose type carries a `preconnect` member under Node libs.
+	// Reading the global `fetch.preconnect` fails to type-check under the
+	// DOM lib that the browser-app consumers recompile this source with,
+	// and SSE only ever invokes `fetchClient` as a function: a no-op
+	// satisfies the structural contract.
+	return Object.assign(fetchClient, { preconnect: () => {} });
 }

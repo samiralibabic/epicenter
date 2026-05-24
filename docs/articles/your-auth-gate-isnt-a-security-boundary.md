@@ -29,7 +29,7 @@ Every piece of data in that UI comes from authenticated API calls. The sync exte
 ```typescript
 createSyncExtension({
   url: (workspaceId) => `${serverUrl.current}/workspaces/${workspaceId}`,
-  getToken: async () => authState.token ?? '',
+  loadToken: async () => authState.token ?? '',
 })
 ```
 

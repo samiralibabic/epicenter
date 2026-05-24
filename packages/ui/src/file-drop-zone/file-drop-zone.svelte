@@ -5,7 +5,7 @@
 <script lang="ts">
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import { useId } from 'bits-ui';
-	import { cn } from '#/utils.js';
+	import { cn } from '../utils.js';
 	import { displaySize } from '.';
 	import type { FileDropZoneProps, FileRejectedReason } from './types';
 

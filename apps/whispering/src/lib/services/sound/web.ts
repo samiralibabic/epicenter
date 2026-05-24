@@ -3,7 +3,7 @@ import { Ok } from 'wellcrafted/result';
 import type { PlaySoundService } from '.';
 import { audioElements } from './assets';
 
-export function createPlaySoundServiceWeb(): PlaySoundService {
+export function createPlaySoundServiceWeb() {
 	return {
 		playSound: async (soundName) => {
 			if (!document.hidden) {
@@ -12,5 +12,5 @@ export function createPlaySoundServiceWeb(): PlaySoundService {
 			}
 			return Ok(undefined);
 		},
-	};
+	} satisfies PlaySoundService;
 }

@@ -3,6 +3,8 @@
 **Date:** 2026-03-12
 **Status:** Implemented
 
+> **Path note (2026-05-22):** The rebuild references below point at older sidecar specs that used `~/.epicenter/workspaces/`. That global workspace registry is superseded. Treat those references as historical architecture context, not current path guidance.
+
 ## Context
 
 `apps/epicenter/` is a Tauri desktop app (SvelteKit + Rust) built on an obsolete architecture. It uses hardcoded workspace templates, direct Tauri FS plugin persistence, and a model that every recent spec has moved away from. The codebase has evolved toward a Bun sidecar architecture where:

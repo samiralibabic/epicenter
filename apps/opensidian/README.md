@@ -57,7 +57,7 @@ Internal links use `[[` autocomplete: typing `[[` opens a file picker, and selec
 
 Sync uses the Yjs protocol (STEP1/STEP2/UPDATE messages) over WebSocket, with exponential backoff and jitter on reconnect. A BroadcastChannel handles tab-to-tab sync within the same browser without going through the server. The server side runs on Cloudflare Durable Objects with a SQLite update log and auto-compaction.
 
-Encryption is XChaCha20-Poly1305. Keys are derived with HKDF-SHA256 in a two-level hierarchy: a user key derives a workspace key, and the workspace key encrypts the data. The sync server receives only ciphertext—it can relay updates without being able to read them. Keys are loaded on login and cleared from memory on logout; IndexedDB is wiped on logout too.
+Encryption is XChaCha20-Poly1305. Keys are derived with HKDF-SHA256 in a two-level hierarchy: a user key derives a workspace key, and the workspace key encrypts the data. The sync server receives only ciphertext, so it can relay updates without being able to read them. Keys are loaded on login and cleared from memory by the sign-out reload. IndexedDB is owner-scoped and is only deleted by the explicit "Forget this device" action.
 
 ### Search
 
@@ -81,25 +81,30 @@ cd apps/opensidian
 bun dev
 ```
 
-By default this runs against a local dev server. To run against the production sync server:
+This starts the app dev server on port 5176. Auth and sync expect the local API on `localhost:8787`; start it from the repo root with `bun run dev:api`.
 
-```bash
-bun run dev:remote
-```
+### Auth deployment
+
+The public `opensidian.com` app uses bearer auth because it runs on its own
+domain and cannot rely on the API server's first-party cookies. If the app moves
+behind a reverse proxy, configure `/auth/*` to proxy to
+`https://api.epicenter.so/auth/*`, then switch the app client to
+`createCookieAuth`. With that proxy in place, the browser sees auth as
+same-origin and the cookie-backed client can replace local bearer storage.
 
 ---
 
 ## Tech stack
 
-- [SvelteKit](https://kit.svelte.dev) — UI framework
-- [Yjs](https://yjs.dev) — CRDT engine (Y.Doc, Y.Array, Y.Map, Y.Text)
-- [CodeMirror 6](https://codemirror.net) — editor, with `y-codemirror.next` for Yjs binding
-- [just-bash](https://github.com/nicolo-ribaudo/just-bash) — bash interpreter in TypeScript
-- [Better Auth](https://better-auth.com) — authentication
-- [Tailwind CSS](https://tailwindcss.com) — styling
-- [Cloudflare Workers + Durable Objects](https://developers.cloudflare.com/durable-objects/) — sync server
-- `@epicenter/workspace` — CRDT-backed tables, versioning, E2E encryption
-- `@epicenter/filesystem` — POSIX filesystem layer over Yjs
+- [SvelteKit](https://kit.svelte.dev): UI framework
+- [Yjs](https://yjs.dev): CRDT engine (Y.Doc, Y.Array, Y.Map, Y.Text)
+- [CodeMirror 6](https://codemirror.net): editor, with `y-codemirror.next` for Yjs binding
+- [just-bash](https://github.com/nicolo-ribaudo/just-bash): bash interpreter in TypeScript
+- [Better Auth](https://better-auth.com): authentication
+- [Tailwind CSS](https://tailwindcss.com): styling
+- [Cloudflare Workers + Durable Objects](https://developers.cloudflare.com/durable-objects/): sync server
+- `@epicenter/workspace`: CRDT-backed tables, versioning, E2E encryption
+- `@epicenter/filesystem`: POSIX filesystem layer over Yjs
 
 ---
 

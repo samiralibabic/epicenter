@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { FEATURE_IDS } from '@epicenter/api/billing-plans';
 	import * as Card from '@epicenter/ui/card';
 	import * as Chart from '@epicenter/ui/chart';
 	import * as Empty from '@epicenter/ui/empty';
@@ -7,12 +8,12 @@
 	import { createQuery } from '@tanstack/svelte-query';
 	import { scaleUtc } from 'd3-scale';
 	import { curveMonotoneX } from 'd3-shape';
-	import { Area, AreaChart, LinearGradient } from 'layerchart';
-	import { usageQueryOptions } from '$lib/query/billing';
+	import { AreaChart } from 'layerchart';
+	import { billing } from '$lib/query/billing';
 
 	type Range = '7d' | '30d' | '90d';
 
-	/** Chart color palette — up to 8 series (matches shadcn chart vars). */
+	/** Chart color palette: up to 8 series (matches shadcn chart vars). */
 	const CHART_COLORS = [
 		'var(--chart-1)',
 		'var(--chart-2)',
@@ -25,14 +26,16 @@
 	];
 
 	let selectedRange = $state<Range>('30d');
+	const featureKey = FEATURE_IDS.aiUsage;
 
-	const usage = createQuery(() =>
-		usageQueryOptions({
-			range: selectedRange,
-			binSize: selectedRange === '7d' ? 'hour' : 'day',
-			groupBy: 'properties.model',
-			maxGroups: 8,
-		}),
+	const usage = createQuery(
+		() =>
+			billing.usage({
+				range: selectedRange,
+				binSize: selectedRange === '7d' ? 'hour' : 'day',
+				groupBy: 'properties.model',
+				maxGroups: 8,
+			}).options,
 	);
 
 	const rangeOptions = [
@@ -51,9 +54,9 @@
 		const totals: Record<string, number> = {};
 		for (const period of usage.data?.list ?? []) {
 			for (const [model, count] of Object.entries(
-				period.grouped_values?.ai_usage ?? {},
+				period.groupedValues?.[featureKey] ?? {},
 			)) {
-				totals[model] = (totals[model] ?? 0) + (count as number);
+				totals[model] = (totals[model] ?? 0) + count;
 			}
 		}
 		return Object.entries(totals)
@@ -71,18 +74,13 @@
 				date: new Date(period.period),
 			};
 			for (const model of modelNames) {
-				row[model] =
-					(
-						period.grouped_values?.ai_usage as
-							| Record<string, number>
-							| undefined
-					)?.[model] ?? 0;
+				row[model] = period.groupedValues?.[featureKey]?.[model] ?? 0;
 			}
 			return row;
 		}),
 	);
 
-	/** Dynamic chart config — one entry per model with assigned colors. */
+	/** Dynamic chart config: one entry per model with assigned colors. */
 	const chartConfig = $derived(
 		Object.fromEntries(
 			modelNames.map((name, i) => [
@@ -163,33 +161,7 @@
 								v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v),
 						},
 					}}
-				>
-					{#snippet tooltip()}
-						<Chart.Tooltip
-							indicator="dot"
-							labelFormatter={(v: Date) =>
-								v.toLocaleDateString('en-US', {
-									month: 'long',
-									day: 'numeric',
-								})}
-						/>
-					{/snippet}
-					{#snippet marks({ series: chartSeries, getAreaProps })}
-						{#each chartSeries as s, i (s.key)}
-							<LinearGradient
-								stops={[
-									s.color ?? '',
-									`color-mix(in lch, ${s.color} 10%, transparent)`,
-								]}
-								vertical
-							>
-								{#snippet children({ gradient })}
-									<Area {...getAreaProps(s, i)} fill={gradient} />
-								{/snippet}
-							</LinearGradient>
-						{/each}
-					{/snippet}
-				</AreaChart>
+				/>
 			</Chart.Container>
 
 			<div

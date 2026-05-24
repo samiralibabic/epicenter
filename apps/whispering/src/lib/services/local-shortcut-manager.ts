@@ -52,7 +52,6 @@ const shortcuts = new Map<
  * The manager handles the complexity of tracking pressed keys, matching
  * key combinations, and managing shortcut lifecycles.
  */
-export type LocalShortcutManager = typeof LocalShortcutManagerLive;
 
 export const LocalShortcutManagerLive = {
 	/**

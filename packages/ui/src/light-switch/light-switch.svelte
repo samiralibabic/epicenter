@@ -6,7 +6,7 @@
 	import MoonIcon from '@lucide/svelte/icons/moon';
 	import SunIcon from '@lucide/svelte/icons/sun';
 	import { toggleMode } from 'mode-watcher';
-	import { Button } from '#/button/index.js';
+	import { Button } from '../button/index.js';
 
 	type LightSwitchProps = {
 		variant?: 'ghost' | 'outline';

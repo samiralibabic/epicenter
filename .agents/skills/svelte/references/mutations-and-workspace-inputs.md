@@ -1,0 +1,252 @@
+# Svelte Mutations And Workspace Inputs
+
+Detailed Svelte guidance for TanStack Query mutation placement, inline template actions, and commit-on-blur workspace field editing.
+
+# Mutation Patterns
+
+## In Svelte Files (.svelte)
+
+Always prefer `createMutation` from TanStack Query for mutations. This provides:
+
+- Loading states (`isPending`)
+- Error states (`isError`)
+- Success states (`isSuccess`)
+- Better UX with automatic state management
+
+### The Preferred Pattern
+
+Pass `onSuccess` and `onError` as the second argument to `.mutate()` to get maximum context:
+
+```svelte
+<script lang="ts">
+	import { createMutation } from '@tanstack/svelte-query';
+	import * as rpc from '$lib/query';
+
+	// Wrap .options in accessor function, no parentheses on .options
+	// Name it after what it does, NOT with a "Mutation" suffix (redundant)
+	const deleteSession = createMutation(
+		() => rpc.sessions.deleteSession.options,
+	);
+
+	// Local state that we can access in callbacks
+	let isDialogOpen = $state(false);
+</script>
+
+<Button
+	onclick={() => {
+		// Pass callbacks as second argument to .mutate()
+		deleteSession.mutate(
+			{ sessionId },
+			{
+				onSuccess: () => {
+					// Access local state and context
+					isDialogOpen = false;
+					toast.success('Session deleted');
+					goto('/sessions');
+				},
+				onError: (error) => {
+					toast.error(error.title, { description: error.description });
+				},
+			},
+		);
+	}}
+	disabled={deleteSession.isPending}
+>
+	{#if deleteSession.isPending}
+		Deleting...
+	{:else}
+		Delete
+	{/if}
+</Button>
+```
+
+### Why This Pattern?
+
+- **More context**: Access to local variables and state at the call site
+- **Better organization**: Success/error handling is co-located with the action
+- **Flexibility**: Different calls can have different success/error behaviors
+
+## In TypeScript Files (.ts)
+
+Always use `.execute()` since createMutation requires component context:
+
+```typescript
+// In a .ts file (e.g., load function, utility)
+const result = await rpc.sessions.createSession.execute({
+	body: { title: 'New Session' },
+});
+
+const { data, error } = result;
+if (error) {
+	// Handle error
+} else if (data) {
+	// Handle success
+}
+```
+
+## Exception: When to Use .execute() in Svelte Files
+
+Only use `.execute()` in Svelte files when:
+
+1. You don't need loading states
+2. You're performing a one-off operation
+3. You need fine-grained control over async flow
+
+## Single-Use Functions: Inline or Document
+
+If a function is defined in the script tag and used only once in the template, inline it at the call site. This applies to event handlers, callbacks, and any other single-use logic.
+
+### Why Inline?
+
+Single-use extracted functions add indirection: the reader jumps between the function definition and the template to understand what happens on click/keydown/etc. Inlining keeps cause and effect together at the point where the action happens.
+
+```svelte
+<!-- BAD: Extracted single-use function with no JSDoc or semantic value -->
+<script>
+	function handleShare() {
+		share.mutate({ id });
+	}
+
+	function handleSelectItem(itemId: string) {
+		goto(`/items/${itemId}`);
+	}
+</script>
+
+<Button onclick={handleShare}>Share</Button>
+<Item onclick={() => handleSelectItem(item.id)} />
+
+<!-- GOOD: Inlined at the call site -->
+<Button onclick={() => share.mutate({ id })}>Share</Button>
+<Item onclick={() => goto(`/items/${item.id}`)} />
+```
+
+This also applies to longer handlers. If the logic is linear (guard clauses + branches, not deeply nested), inline it even if it's 10-15 lines:
+
+```svelte
+<!-- GOOD: Inlined keyboard shortcut handler -->
+<svelte:window onkeydown={(e) => {
+	const meta = e.metaKey || e.ctrlKey;
+	if (!meta) return;
+	if (e.key === 'k') {
+		e.preventDefault();
+		commandPaletteOpen = !commandPaletteOpen;
+		return;
+	}
+	if (e.key === 'n') {
+		e.preventDefault();
+		notesState.createNote();
+	}
+}} />
+```
+
+### The Exception: JSDoc + Semantic Name
+
+Keep a single-use function extracted **only** when both conditions are met:
+
+1. It has **JSDoc** explaining why it exists as a named unit.
+2. The name provides a **clear semantic meaning** that makes the template more readable than the inlined version would be.
+
+```svelte
+<script lang="ts">
+	/**
+	 * Navigate the note list with arrow keys, wrapping at boundaries.
+	 * Operates on the flattened display-order ID list to respect date grouping.
+	 */
+	function navigateWithArrowKeys(e: KeyboardEvent) {
+		// 15 lines of keyboard navigation logic...
+	}
+</script>
+
+<!-- The semantic name communicates intent better than inlined logic would -->
+<div onkeydown={navigateWithArrowKeys} tabindex="-1">
+```
+
+Without JSDoc and a meaningful name, extract it anyway: the indirection isn't earning its keep.
+
+### Multi-Use Functions
+
+Functions used **2 or more times** should always stay extracted: this rule only applies to single-use functions.
+
+# Commit-on-Blur for Workspace String Fields
+
+For plain string fields backed by a workspace table or Y.Map row (title, subtitle, name, description, license, label), **commit on `onblur`, not `oninput`**. Per-keystroke writes turn one typing session into N Yjs transactions, N IDB writes, N sync messages, and N BroadcastChannel posts. Commit-on-blur collapses that to one.
+
+The pattern has two halves: the **per-input handler** and the **app-wide safety net**. Both are required: the safety net is what makes commit-on-blur survive Cmd+W mid-edit.
+
+## The handler
+
+```svelte
+<input
+  type="text"
+  value={entry.title}
+  onblur={(e) => {
+    const next = e.currentTarget.value;
+    if (next !== entry.title) updateEntry({ title: next });
+  }}
+/>
+```
+
+The compare-then-write guard avoids a no-op Yjs transaction when focus passes through an unchanged field. For factories that update many fields, extract a small `commit(field, next)` helper that does the compare internally.
+
+## The safety net (app-wide, in `+layout.svelte`)
+
+```svelte
+<script lang="ts">
+  function flushPendingEdits() {
+    if (
+      document.visibilityState === 'hidden' &&
+      document.activeElement instanceof HTMLElement
+    ) {
+      document.activeElement.blur();
+    }
+  }
+</script>
+
+<svelte:document onvisibilitychange={flushPendingEdits} />
+<svelte:window onpagehide={flushPendingEdits} />
+```
+
+When the page is being hidden (tab close, Cmd+W, tab switch, window minimize, iOS app-switch, bfcache), `.blur()` on the focused element synchronously dispatches its blur event, which synchronously runs your commit handler, which synchronously updates the Y.Doc: all before the page tears down. Six lines, one place, every `<input onblur>` in the app inherits the resilience.
+
+`visibilitychange` is a document event, `pagehide` is a window event. Per Svelte's `packages/svelte/elements.d.ts`, `onvisibilitychange` lives on `SvelteDocumentAttributes` and `onpagehide` lives on `SvelteWindowAttributes`: keep them on the right element. Listen to both: visibilitychange is more reliable on iOS Safari, pagehide catches bfcache navigations.
+
+## The default for new apps
+
+Every new app under `apps/*` should ship the safety net in `+layout.svelte` as part of scaffolding. Treat it like `<Toaster />` or `<ModeWatcher />`: a layout-level concern that's free once installed. See `workspace-app-layout` for where this fits in the `+layout.svelte` checklist.
+
+## When NOT to use commit-on-blur
+
+| Field type | Pattern |
+|---|---|
+| Plain string Y.Map field (title, subtitle, name, description, license) | **commit-on-blur** |
+| Y.Text bound through y-prosemirror / y-codemirror / tiptap | per-keystroke (CRDT operates at character level) |
+| Discrete selectors (radio, checkbox, datepicker, tag pickers) | inline event handler: already one event per action |
+| Search box / filter that doesn't persist | local `$state` only, no commit |
+| Component-local form state submitted on a button click | accumulate in `$state`, commit in the click handler |
+
+For Y.Text fields you specifically want every keystroke to participate in operational transform: commit-on-blur defeats the point of the CRDT.
+
+## Defensive variant: local state + focus flag
+
+If a sibling tab editing the same row could clobber in-progress typing (rare in personal apps), reach for a local-state buffer with a focus flag: but only if the clobber actually shows up:
+
+```svelte
+<script lang="ts">
+  let localTitle = $state(entry.title);
+  let editing = $state(false);
+  $effect(() => { if (!editing) localTitle = entry.title; });
+</script>
+
+<input
+  bind:value={localTitle}
+  onfocus={() => (editing = true)}
+  onblur={() => {
+    editing = false;
+    if (localTitle !== entry.title) commit(localTitle);
+  }}
+/>
+```
+
+For true conflict-free text editing across tabs, switch the field to Y.Text + a CRDT-aware editor binding instead.
+
+See `docs/articles/commit-on-blur-survives-tab-close.md` for the full rationale, persistence-layer reliability table, and the page-lifecycle guarantees behind the safety net.

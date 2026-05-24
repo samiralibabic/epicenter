@@ -11,7 +11,7 @@ export const FileId = type('string').as<FileId>();
 
 ## The Hover Effect
 
-Here's the underrated part. When you hover over `FileId` in your IDE—whether you're looking at the type annotation or the const—you get the same JSDoc. TypeScript merges them. Write a JSDoc block on the type, and consumers see it everywhere the name appears: in function signatures, in schema definitions, in imports.
+Here's the underrated part. When you hover over `FileId` in your IDE, whether you're looking at the type annotation or the const, you get the same JSDoc. TypeScript merges them. Write a JSDoc block on the type, and consumers see it everywhere the name appears: in function signatures, in schema definitions, in imports.
 
 ```typescript
 /**
@@ -23,7 +23,7 @@ export type TabCompositeId = string & Brand<'TabCompositeId'>;
 export const TabCompositeId = type('string').as<TabCompositeId>();
 ```
 
-Hover over `TabCompositeId` anywhere in the codebase and you'll see that doc comment. Whether it's used as a type annotation on a function parameter, or as a runtime schema passed into `defineTable`—same hover, same docs.
+Hover over `TabCompositeId` anywhere in the codebase and you'll see that doc comment. Whether it's used as a type annotation on a function parameter, or as a runtime schema passed into `defineTable`: same hover, same docs.
 
 This matters more than it sounds. In a large codebase, discoverability is everything. When a colleague sees `windowId: WindowCompositeId` in a function signature, they hover it, they understand what it is, and they know what to pass. No grepping, no documentation site, no Slack messages.
 
@@ -58,6 +58,35 @@ type Tab = InferTableRow<typeof tabs>;
 
 One name flows through the entire system: schema definition, type inference, function signatures, IDE hovers. No `tabCompositeIdSchema` anywhere.
 
+The same rule applies when the schema comes from another package. Do not alias the runtime value just to make room for a type import:
+
+```typescript
+import {
+	EncryptionKeys as EncryptionKeysSchema,
+	type EncryptionKeys,
+} from '@epicenter/encryption';
+
+const Session = type({
+	encryptionKeys: EncryptionKeysSchema,
+});
+```
+
+Import the shared name once. TypeScript knows which namespace you mean from the position where the identifier appears.
+
+```typescript
+import { EncryptionKeys } from '@epicenter/encryption';
+
+const Session = type({
+	encryptionKeys: EncryptionKeys,
+});
+
+type SessionResponse = {
+	encryptionKeys: EncryptionKeys;
+};
+```
+
+The first `EncryptionKeys` in the object literal is the schema value. The second `EncryptionKeys` in the type annotation is the inferred type. There is no collision because values and types do not share a namespace.
+
 ## The Pattern in Practice
 
 We use this across the codebase for different purposes.
@@ -82,11 +111,11 @@ export function Id(value: string): Id {
 }
 ```
 
-The JSDoc on the type surfaces everywhere—in function signatures, hover tooltips, and import completions. The function provides runtime construction with the same name. When someone writes `Id('abc')`, the return type is `Id`, the hover shows the docs, and there's nothing else to name.
+The JSDoc on the type surfaces everywhere: in function signatures, hover tooltips, and import completions. The function provides runtime construction with the same name. When someone writes `Id('abc')`, the return type is `Id`, the hover shows the docs, and there's nothing else to name.
 
 ### Shadowed type with a validator + separate constructor
 
-Sometimes the value-side name is taken by a schema validator (for deserialization, table definitions, etc.), but you also need a constructor that does real work—accepting component parts and assembling the final value. In that case, use a `createType` function alongside the shadowed pair:
+Sometimes the value-side name is taken by a schema validator (for deserialization, table definitions, etc.), but you also need a constructor that does real work: accepting component parts and assembling the final value. In that case, use a `createType` function alongside the shadowed pair:
 
 ````typescript
 /**
@@ -114,9 +143,10 @@ export function createTabCompositeId(
 }
 ````
 
-Here `TabCompositeId` (the type) and `TabCompositeId` (the const) handle the two-namespace pattern—the type brands your strings, the const validates them in schema definitions. `createTabCompositeId` is the constructor that does real work: it takes the component parts and joins them. The `create` prefix makes intent obvious at call sites.
+Here `TabCompositeId` (the type) and `TabCompositeId` (the const) handle the two-namespace pattern. The type brands your strings; the const validates them in schema definitions. `createTabCompositeId` is the constructor that does real work: it takes the component parts and joins them. The `create` prefix makes intent obvious at call sites.
 
 This three-part split arises when the validator and the constructor have different jobs. The validator says "this string is already a `TabCompositeId`" (deserialization from Y.Doc). The constructor says "build me a new one from these parts." They don't collapse into one function because they serve different callers.
+
 ### Shadowed type with a validator + generator
 
 The variant for IDs generated from scratch. The validator handles deserialization (Y.Doc reads), the generator wraps `generateId()` so the double-cast lives in exactly one place:
@@ -129,7 +159,7 @@ export const generateSavedTabId = (): SavedTabId =>
   generateId() as SavedTabId;
 ````
 
-Three parts, three jobs. The type brands the string. The const validates it in `defineTable()` schemas. The generator creates new ones. Call sites just write `generateSavedTabId()`—no casts, no imports of `generateId`.
+Three parts, three jobs. The type brands the string. The const validates it in `defineTable()` schemas. The generator creates new ones. Call sites just write `generateSavedTabId()`: no casts, no imports of `generateId`.
 
 The `generate` prefix distinguishes these from `create` factories that compose from parts (like `createTabCompositeId(deviceId, tabId)`). `generate` means "new ID from scratch"; `create` means "assemble from inputs."
 
@@ -174,4 +204,4 @@ It also doesn't help for types that don't have a natural runtime counterpart. A 
 
 ## The Takeaway
 
-If you're naming your schema `fooSchema` and your type `Foo`, you're paying a naming tax on every abstraction. TypeScript already solved this—types and values can share a name because they live in different namespaces. ArkType leans into this by design. The result is one name that works everywhere: type annotations, runtime validation, schema composition, and IDE hovers all showing the same docs.
+If you're naming your schema `fooSchema` and your type `Foo`, you're paying a naming tax on every abstraction. TypeScript already solved this: types and values can share a name because they live in different namespaces. ArkType leans into this by design. The result is one name that works everywhere: type annotations, runtime validation, schema composition, and IDE hovers all showing the same docs.

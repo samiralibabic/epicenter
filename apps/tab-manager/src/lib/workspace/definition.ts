@@ -5,7 +5,7 @@
  * This file can be safely imported by the CLI daemon or any Node/Bun process.
  *
  * The extension-bound wiring lives in `lib/tab-manager/extension.ts`, which
- * imports this schema and composes every attachment inside its `openTabManager`
+ * imports this schema and composes every attachment inside its `openTabManagerBrowser`
  * factory.
  */
 
@@ -18,6 +18,8 @@ import {
 import { type } from 'arktype';
 import type { Brand } from 'wellcrafted/brand';
 import type { JsonValue } from 'wellcrafted/json';
+
+export const TAB_MANAGER_ID = 'epicenter.tab-manager';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branded ID Types
@@ -262,8 +264,8 @@ export type ChatMessage = InferTableRow<typeof chatMessagesTable>;
  * Tools not in this table default to 'ask' (show approval UI). Users can
  * escalate to 'always' (auto-approve) via the inline approval buttons.
  *
- * The `id` is the tool name (e.g. 'tabs_close') — the same string used
- * in action paths and tool definitions.
+ * The `id` is the flat action name used by CLI and RPC surfaces
+ * (e.g. `tabs_close`).
  */
 const toolTrustTable = defineTable(
 	type({
@@ -279,9 +281,11 @@ export type ToolTrust = InferTableRow<typeof toolTrustTable>;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Table definitions for the tab-manager workspace. Composed in `client.ts`
- * via `attachTables(ydoc, tabManagerTables)`. Kept separate so actions and
- * future consumers can derive their input types from one source of truth.
+ * Table definitions for the tab-manager workspace. Composed in
+ * `lib/tab-manager/extension.ts` via `encryption.attachTables(tabManagerTables)`
+ * against an `attachEncryption(ydoc, { keyring })` attachment.
+ * Kept separate so actions and future consumers can derive their input
+ * types from one source of truth.
  */
 export const tabManagerTables = {
 	devices: devicesTable,
@@ -291,4 +295,3 @@ export const tabManagerTables = {
 	chatMessages: chatMessagesTable,
 	toolTrust: toolTrustTable,
 };
-

@@ -5,7 +5,7 @@ import {
 } from 'wellcrafted/error';
 import { Err, Ok, type Result, tryAsync } from 'wellcrafted/result';
 
-const MIGRATION_KEY = 'whispering:db-migration';
+const MIGRATION_KEY = 'whispering.db.migration';
 export type DbMigrationState = 'pending' | 'done';
 
 type MigrationCounts = {

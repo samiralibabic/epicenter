@@ -4,9 +4,12 @@
 */
 
 import type { Snippet } from 'svelte';
-import type { HTMLButtonAttributes } from 'svelte/elements';
-import type { ButtonSize, ButtonVariant } from '#/button';
-import type { UseClipboard } from '#/hooks/use-clipboard.svelte';
+import type {
+	ButtonProps,
+	ButtonSize,
+	ButtonVariant,
+} from '../button/index.js';
+import type { UseClipboard } from '../hooks/use-clipboard.svelte.js';
 
 export type CopyFn = (text: string) => Promise<void>;
 
@@ -24,4 +27,7 @@ export type CopyButtonPropsWithoutHTML = {
 };
 
 export type CopyButtonProps = CopyButtonPropsWithoutHTML &
-	Omit<HTMLButtonAttributes, 'children'>;
+	Omit<
+		ButtonProps,
+		'children' | 'href' | 'ref' | 'size' | 'variant' | 'tooltip'
+	>;

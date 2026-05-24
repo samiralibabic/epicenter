@@ -5,18 +5,21 @@
 	"version": "0.0.1",
 	"type": "module",
 	"exports": {
-		"./workspace": "./src/lib/workspace/index.ts"
+		".": "./workspace.ts",
+		"./daemon": "./daemon.ts"
 	},
 	"scripts": {
 		"dev": "bun run dev:local",
-		"dev:local": "bun --bun vite dev",
-		"dev:remote": "bun --bun vite dev --mode production",
-		"build": "bun --bun vite build",
-		"preview": "bun --bun vite preview",
-		"typecheck": "svelte-check",
+		"dev:local": "vite dev",
+		"build": "NODE_ENV=production vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"test": "bun test ./src/routes/'(signed-in)'/zhongwen",
+		"typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"deploy": "bun run build && wrangler deploy"
 	},
 	"dependencies": {
+		"@epicenter/auth": "workspace:*",
 		"@epicenter/auth-svelte": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
@@ -29,6 +32,7 @@
 		"@tanstack/ai-gemini": "catalog:",
 		"@tanstack/ai-grok": "catalog:",
 		"@tanstack/ai-openai": "catalog:",
+		"@tanstack/ai-svelte": "^0.6.7",
 		"arktype": "catalog:",
 		"dompurify": "^3.3.3",
 		"marked": "^17.0.5",
@@ -43,13 +47,13 @@
 		"@sveltejs/kit": "catalog:",
 		"@sveltejs/vite-plugin-svelte": "catalog:",
 		"@tailwindcss/vite": "catalog:",
+		"@types/bun": "catalog:",
 		"@types/dompurify": "^3.2.0",
-		"@types/node": "catalog:",
 		"svelte": "catalog:",
 		"svelte-check": "catalog:",
 		"tailwindcss": "catalog:",
 		"typescript": "catalog:",
 		"vite": "catalog:"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

@@ -145,8 +145,6 @@ export const FfmpegServiceLive = {
 	},
 };
 
-export type FfmpegService = typeof FfmpegServiceLive;
-
 /**
  * Builds a complete FFmpeg compression command string.
  * Creates a command that compresses an input audio file using the specified options.

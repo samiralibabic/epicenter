@@ -1,6 +1,6 @@
 ---
 name: two-factor-authentication-best-practices
-description: Configure TOTP authenticator apps, send OTP codes via email/SMS, manage backup codes, handle trusted devices, and implement 2FA sign-in flows using Better Auth's twoFactor plugin. Use when users need MFA, multi-factor authentication, authenticator setup, or login security with Better Auth.
+description: 'Better Auth twoFactor plugin: TOTP, OTP, backup codes, trusted devices, and 2FA sign-in. Use when adding MFA, authenticator setup, two-factor enrollment, backup codes, or trusted-device flows.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -22,9 +22,15 @@ Use this pattern when you need to:
 
 - [Better Auth](https://github.com/better-auth/better-auth) — TypeScript authentication framework with plugins
 
+## Upstream Grounding
+
+When Better Auth two-factor plugin API shape, redirect behavior, TOTP verification, backup-code handling, trusted-device cookies, or security defaults affect correctness, ask DeepWiki a narrow question against `better-auth/better-auth` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for stable setup basics already documented below.
+
 1. Add `twoFactor()` plugin to server config with `issuer`
 2. Add `twoFactorClient()` plugin to client config
-3. Run `npx @better-auth/cli migrate`
+3. Run `bun x @better-auth/cli migrate`
 4. Verify: check that `twoFactorSecret` column exists on user table
 
 ```ts

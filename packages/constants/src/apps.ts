@@ -9,8 +9,17 @@
  * consumer picks it up automatically.
  */
 
+/**
+ * Canonical production origin for the Epicenter API. Used by the `API` entry
+ * and as the fallback for {@link EPICENTER_API_URL}. The dashboard SPA is
+ * served at `api.epicenter.so/dashboard` (same origin as the API) so it does
+ * not get its own APPS entry; its dev port lives inline in
+ * `apps/dashboard/vite.config.ts`.
+ */
+const PRODUCTION_API_URL = 'https://api.epicenter.so';
+
 export const APPS = {
-	API: { port: 8787, urls: ['https://api.epicenter.so'] },
+	API: { port: 8787, urls: [PRODUCTION_API_URL] },
 	SH: { port: 5173, urls: ['https://epicenter.sh'] },
 	AUDIO: { port: 1420, urls: ['https://whispering.epicenter.so'] },
 	FUJI: { port: 5174, urls: ['https://fuji.epicenter.so'] },
@@ -20,7 +29,25 @@ export const APPS = {
 		urls: ['https://opensidian.com', 'https://opensidian.epicenter.so'],
 	},
 	ZHONGWEN: { port: 8888, urls: ['https://zhongwen.epicenter.so'] },
-	DASHBOARD: { port: 5178, urls: ['https://api.epicenter.so'] },
 } as const;
 
 export type AppId = keyof typeof APPS;
+
+/**
+ * Local dev URL for an app, derived from its `port`. Single owner for the
+ * `http://localhost:<port>` shape: CORS trusted origins, the API runtime's
+ * dev classifier, and the OAuth seed all read this.
+ */
+export function localUrl(app: { port: number }): string {
+	return `http://localhost:${app.port}`;
+}
+
+/**
+ * Default API base URL for Node consumers (CLI, daemon, tests). The constant
+ * resolves to `process.env.EPICENTER_API_URL` when set, else
+ * {@link PRODUCTION_API_URL}. Browsers and Workers lack `process.env`, so
+ * they fall through to the production default automatically.
+ */
+export const EPICENTER_API_URL =
+	(typeof process !== 'undefined' && process.env?.EPICENTER_API_URL) ||
+	PRODUCTION_API_URL;

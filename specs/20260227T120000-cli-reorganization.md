@@ -5,6 +5,8 @@
 **Author**: AI-assisted
 **Builds on**: `specs/20260225T210000-workspace-apps-orchestrator.md`
 
+> **Path note (2026-05-22):** The `~/.epicenter/auth.json`, PID file, and `EPICENTER_HOME` path model in this completed historical spec is superseded. New code should not use top-level `~/.epicenter/` for machine auth, persistence, installed workspaces, or daemon process files.
+
 ## Overview
 
 Reorganize the CLI from a two-tier hack (manual `argv[0]` string matching) into proper command groups, add the ability to start both local and remote servers as sibling commands, drop Eden in favor of a plain typed fetch client, and unify the `serve`/`run` split.

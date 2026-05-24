@@ -1,6 +1,19 @@
+import {
+	createSkillsActions,
+	openSkills,
+	referenceContentDocGuid,
+	skillInstructionsDocGuid,
+} from '@epicenter/skills';
+import {
+	attachBroadcastChannel,
+	attachIndexedDb,
+	attachPlainText,
+	createDisposableCache,
+	onLocalUpdate,
+} from '@epicenter/workspace';
 import { Ok, tryAsync } from 'wellcrafted/result';
-import { skillsActions } from '@epicenter/skills';
-import { opensidian } from '$lib/opensidian/client';
+import * as Y from 'yjs';
+import type { OpensidianBrowser } from '$lib/opensidian/browser';
 
 /** A global skill loaded from the @epicenter/skills workspace. */
 type GlobalSkill = { name: string; instructions: string };
@@ -23,7 +36,7 @@ type VaultSkill = { name: string; content: string };
  *    them ideal for project-specific instructions, notes, and overrides.
  *
  * When the system prompt is composed, the global layer provides the stable,
- * cross-app baseline—things like house style, workflow rules, and reusable
+ * cross-app baseline: things like house style, workflow rules, and reusable
  * patterns. The vault layer adds local context that belongs to this specific
  * vault. Keeping both layers separate avoids conflating "shared Epicenter
  * conventions" with "instructions that should live next to the user's notes."
@@ -36,13 +49,14 @@ type VaultSkill = { name: string; content: string };
  *
  * @example
  * ```typescript
- * await skillState.loadAllSkills();
+ * await skills.loadAllSkills();
  *
- * const globalLayer = skillState.globalSkills;
- * const vaultLayer = skillState.vaultSkills;
+ * const globalLayer = skills.globalSkills;
+ * const vaultLayer = skills.vaultSkills;
  * ```
  */
-function createSkillState() {
+export function createSkillState({ binding }: { binding: OpensidianBrowser }) {
+	const globalSkillsWorkspace = openGlobalSkillsWorkspace();
 	let globalSkills = $state<GlobalSkill[]>([]);
 	let vaultSkills = $state<VaultSkill[]>([]);
 	let loading = $state(false);
@@ -52,9 +66,12 @@ function createSkillState() {
 
 		const { data } = await tryAsync({
 			try: async () => {
-				const catalog = skillsActions.listSkills();
+				await globalSkillsWorkspace.idb.whenLoaded;
+				const catalog = globalSkillsWorkspace.actions.list_skills();
 				const loadedSkills = await Promise.all(
-					catalog.map(({ id }) => skillsActions.getSkill({ id })),
+					catalog.map(({ id }) =>
+						globalSkillsWorkspace.actions.get_skill({ id }),
+					),
 				);
 
 				return loadedSkills
@@ -75,7 +92,7 @@ function createSkillState() {
 
 		const { data } = await tryAsync({
 			try: async () => {
-				const entries = await opensidian.fs.readdir('/skills');
+				const entries = await binding.fs.readdir('/skills');
 				const markdownEntries = entries.filter((entry) =>
 					entry.endsWith('.md'),
 				);
@@ -83,7 +100,7 @@ function createSkillState() {
 				return Promise.all(
 					markdownEntries.map(async (entry) => ({
 						name: entry.replace('.md', ''),
-						content: await opensidian.fs.readFile(`/skills/${entry}`),
+						content: await binding.fs.readFile(`/skills/${entry}`),
 					})),
 				);
 			},
@@ -127,7 +144,86 @@ function createSkillState() {
 				loading = false;
 			}
 		},
+
+		[Symbol.dispose]() {
+			globalSkillsWorkspace[Symbol.dispose]();
+		},
 	};
 }
 
-export const skillState = createSkillState();
+export type SkillState = ReturnType<typeof createSkillState>;
+
+function openGlobalSkillsWorkspace() {
+	const doc = openSkills();
+	const idb = attachIndexedDb(doc.ydoc);
+	attachBroadcastChannel(doc.ydoc);
+
+	const instructionsDocs = createDisposableCache((skillId: string) => {
+		const ydoc = new Y.Doc({
+			guid: skillInstructionsDocGuid({
+				workspaceId: doc.ydoc.guid,
+				skillId,
+			}),
+			gc: true,
+		});
+		onLocalUpdate(ydoc, () =>
+			doc.tables.skills.update(skillId, { updatedAt: Date.now() }),
+		);
+		const childIdb = attachIndexedDb(ydoc);
+		return {
+			ydoc,
+			instructions: attachPlainText(ydoc),
+			idb: childIdb,
+			[Symbol.dispose]() {
+				ydoc.destroy();
+			},
+		};
+	});
+
+	const referenceDocs = createDisposableCache((referenceId: string) => {
+		const ydoc = new Y.Doc({
+			guid: referenceContentDocGuid({
+				workspaceId: doc.ydoc.guid,
+				referenceId,
+			}),
+			gc: true,
+		});
+		onLocalUpdate(ydoc, () =>
+			doc.tables.references.update(referenceId, { updatedAt: Date.now() }),
+		);
+		const childIdb = attachIndexedDb(ydoc);
+		return {
+			ydoc,
+			content: attachPlainText(ydoc),
+			idb: childIdb,
+			[Symbol.dispose]() {
+				ydoc.destroy();
+			},
+		};
+	});
+
+	const actions = createSkillsActions({
+		tables: doc.tables,
+		async readInstructions(skillId) {
+			using handle = instructionsDocs.open(skillId);
+			await handle.idb.whenLoaded;
+			return handle.instructions.read();
+		},
+		async readReference(referenceId) {
+			using handle = referenceDocs.open(referenceId);
+			await handle.idb.whenLoaded;
+			return handle.content.read();
+		},
+	});
+
+	return {
+		...doc,
+		idb,
+		actions,
+		[Symbol.dispose]() {
+			instructionsDocs[Symbol.dispose]();
+			referenceDocs[Symbol.dispose]();
+			doc[Symbol.dispose]();
+		},
+	};
+}

@@ -4,7 +4,7 @@ import {
 	type CompletionContext,
 	type CompletionResult,
 } from '@codemirror/autocomplete';
-import { makeEpicenterLink } from '@epicenter/workspace';
+import { makeEpicenterLink } from '@epicenter/workspace/links';
 
 /**
  * Configuration for the wikilink autocomplete extension.

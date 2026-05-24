@@ -1,6 +1,6 @@
 ---
 name: method-shorthand-jsdoc
-description: Move helper functions into return objects using method shorthand for proper JSDoc preservation. Use when factory functions have internal helpers that should expose documentation to consumers, or when hovering over returned methods shows no JSDoc.
+description: Method shorthand in return objects for JSDoc preservation. Use when factory functions have internal helpers that should expose docs, or hovering over returned methods shows no JSDoc.
 metadata:
   author: epicenter
   version: '1.0'
@@ -86,6 +86,14 @@ function createHeadDoc(options: { workspaceId: string }) {
 ```
 
 Now hovering over `head.getEpoch()` shows the full JSDoc.
+
+This matters even more when the public type derives from the factory:
+
+```typescript
+export type HeadDoc = ReturnType<typeof createHeadDoc>;
+```
+
+With `ReturnType`, the returned object is the public type source. Put consumer-facing JSDoc directly on the returned method or getter so hover, completion, and Go to Definition all land on the same member.
 
 ## Why This Works
 

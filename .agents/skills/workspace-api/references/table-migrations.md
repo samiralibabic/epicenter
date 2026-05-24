@@ -76,7 +76,7 @@ See `specs/20260312T180000-branded-id-convention.md` for the full inventory and 
 ```typescript
 import {
 	attachTables,
-	createDocumentFactory,
+	createDisposableCache,
 	defineTable,
 	type InferTableRow,
 } from '@epicenter/workspace';
@@ -103,9 +103,9 @@ const postsTable = defineTable(
 );
 export type Post = InferTableRow<typeof postsTable>;
 
-// ─── Document factory + singleton ───────────────────────────────────────
+// Document cache + singleton
 
-const myDoc = createDocumentFactory((id: string) => {
+const myDoc = createDisposableCache((id: string) => {
 	const ydoc = new Y.Doc({ guid: id });
 	const tables = attachTables(ydoc, { users: usersTable, posts: postsTable });
 	return {
@@ -132,7 +132,7 @@ export const workspace = myDoc.open('my-workspace');
 
 ```typescript
 // BAD: Tables inline, types derived through deep indirection off the handle
-const myDoc = createDocumentFactory((id) => {
+const myDoc = createDisposableCache((id) => {
 	const ydoc = new Y.Doc({ guid: id });
 	const tables = attachTables(ydoc, {
 		users: defineTable(type({ id: 'string', email: 'string', _v: '1' })),
@@ -146,7 +146,7 @@ export type User = InferTableRow<Tables['users']>;
 const usersTable = defineTable(type({ id: UserId, email: 'string', _v: '1' }));
 export type User = InferTableRow<typeof usersTable>;
 
-const myDoc = createDocumentFactory((id) => {
+const myDoc = createDisposableCache((id) => {
 	const ydoc = new Y.Doc({ guid: id });
 	const tables = attachTables(ydoc, { users: usersTable });
 	return { id, ydoc, tables };

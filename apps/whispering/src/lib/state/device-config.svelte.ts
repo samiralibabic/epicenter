@@ -133,10 +133,6 @@ const DEVICE_DEFINITIONS = {
 type DeviceConfigDefs = typeof DEVICE_DEFINITIONS;
 export type DeviceConfigKey = keyof DeviceConfigDefs & string;
 
-/** Infer the value type for a device config key from its definition. */
-export type InferDeviceValue<K extends DeviceConfigKey> =
-	DeviceConfigDefs[K]['defaultValue'];
-
 // ── Singleton ────────────────────────────────────────────────────────────────
 
 export const deviceConfig: PersistedMap<typeof DEVICE_DEFINITIONS> =

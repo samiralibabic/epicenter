@@ -9,7 +9,7 @@
 
 ## Overview
 
-Replace the deployment-wide encryption key (`SHA-256(BETTER_AUTH_SECRET)`) with per-user-per-workspace keys derived via two-level HKDF. The server derives a per-user key and sends it in the session. The client derives per-workspace keys locally. No new endpoints, no new database tables, no key storage—keys are deterministically derived from a server secret. The actual implementation uses an `ENCRYPTION_SECRETS` env var with versioned keyring entries (`version:secret` pairs) to support key rotation without re-encrypting existing data.
+Replace the deployment-wide encryption key (`SHA-256(BETTER_AUTH_SECRET)`) with per-user-per-workspace keys derived via two-level HKDF. The server derives a per-user key and sends it in the session. The client derives per-workspace keys locally. No new endpoints, no new database tables, no key storage—keys are deterministically derived from a server secret. The actual implementation uses an `ENCRYPTION_SECRETS` env var with versioned keyring entries (`version:secret` pairs). When a newer version becomes current, workspace activation can decrypt old-version blobs through the keyring and rewrite them under the current version.
 
 ## Motivation
 
@@ -348,7 +348,9 @@ activateEncryption(key: Uint8Array): void;
 
 ### Secret rotation
 
-Not planned. If `BETTER_AUTH_SECRET` is ever rotated (breach scenario), all derived keys change. Existing ciphertext becomes undecryptable. Since auth is also compromised in that scenario, a full data reset is expected. No keyring or migration mechanism is needed unless production encrypted data exists at scale.
+Auth and encryption rotation are separate. `BETTER_AUTH_SECRET` can rotate for auth without changing workspace encryption keys. Workspace encryption rotates through `ENCRYPTION_SECRETS`: add a new highest-version entry, keep older entries in the keyring, and return every derived user key version in the session.
+
+On activation, the workspace picks the highest version as current. Plaintext entries are encrypted, decryptable old-version blobs are rewritten under the current version, current-version blobs are skipped, and blobs whose version is absent from the keyring remain unreadable until a future activation includes the needed key.
 
 ### User loses access to workspace
 

@@ -1,3 +1,5 @@
+> **Path note (2026-05-22):** This draft's top-level `~/.epicenter/` layout is superseded. Do not copy its `~/.epicenter/workspaces`, `~/.epicenter/node_modules`, `~/.epicenter/data`, or `~/.epicenter/jsrepo.json` instructions into new work. Current durable user data uses platform directories, runtime sockets use the OS runtime directory, and generated project data stays under `<projectDir>/.epicenter/`.
+
 # Local Server Plugin Architecture — JSRepo + Bun Compiled Binary
 
 **Date**: 2026-02-24

@@ -3,7 +3,7 @@
  *
  * These tests verify how CLI JSON input is sourced and parsed across positional
  * values (inline JSON or `@file.json`) and stdin. `parseJsonInput` throws on
- * error (no Result wrapping — see the function's jsdoc for rationale).
+ * error (no Result wrapping; see the function's jsdoc for rationale).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';

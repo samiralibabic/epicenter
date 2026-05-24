@@ -4,6 +4,8 @@
 **Status**: Superseded by [20260222T073156-unified-cli-server-sidecar.md](./20260222T073156-unified-cli-server-sidecar.md)
 **Author**: AI-assisted
 
+> **Path note (2026-05-22):** The `~/.epicenter/server.json` discovery-file plan in this superseded server architecture is stale. Do not recreate top-level `~/.epicenter` server or runtime files from this document.
+
 ## Overview
 
 A Bun HTTP server that serves the Svelte frontend, filesystem/workspace API, and Yjs CRDT sync — running identically whether launched as a Tauri sidecar (desktop mode) or standalone (web mode). Tauri provides the native webview shell and a minimal set of Rust IPC commands for OS-level operations (audio recording, global shortcuts, etc.) that can't be done from JavaScript. The frontend talks to Bun via HTTP/WebSocket and to Rust via `invoke()`, both simultaneously from the same page.

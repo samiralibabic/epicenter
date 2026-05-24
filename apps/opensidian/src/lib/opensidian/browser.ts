@@ -1,208 +1,186 @@
-import type { AuthClient } from '@epicenter/auth-svelte';
-import { APP_URLS } from '@epicenter/constants/vite';
+/**
+ * Opensidian browser composition.
+ *
+ * Single source of truth for "how Opensidian mounts in a browser." Calls
+ * Tier 1 primitives inline so every line is visible top-to-bottom:
+ *
+ *  1. workspace root doc (encrypted tables + KV via attachEncryption)
+ *  2. local storage + cloud sync for root (attachLocalStorage + openCollaboration)
+ *  3. per-file child content docs (plaintext timeline + encrypted IDB storage)
+ *  4. file system, sqlite index, bash, and action registry
+ *  5. wipe / dispose teardown
+ *
+ * `openCollaboration` owns reconnect-on-auth-change internally, so this file
+ * has no per-app onStateChange listener.
+ *
+ * The bundle's `wipe()` drops every encrypted IDB database for this subject;
+ * `Symbol.dispose` tears down the root + cached child Y.Docs without touching
+ * local storage.
+ */
+
 import {
 	attachYjsFileSystem,
-	createFileContentDoc,
 	createSqliteIndex,
 	type FileId,
 } from '@epicenter/filesystem';
+import type { SignedIn } from '@epicenter/svelte';
 import {
-	attachBroadcastChannel,
-	attachIndexedDb,
-	attachSync,
+	attachEncryption,
+	attachLocalStorage,
+	attachTimeline,
 	createDisposableCache,
-	defineMutation,
-	defineQuery,
-	type DeviceDescriptor,
-	toWsUrl,
+	onLocalUpdate,
+	openCollaboration,
+	roomWsUrl,
+	wipeLocalStorage,
 } from '@epicenter/workspace';
 import { Bash } from 'just-bash';
-import Type from 'typebox';
-import { Ok } from 'wellcrafted/result';
-import { openOpensidian as openOpensidianDoc } from './index';
+import {
+	OPENSIDIAN_ID,
+	opensidianFileContentDocGuid,
+	opensidianTables,
+} from 'opensidian';
+import * as Y from 'yjs';
+import { createOpensidianActions } from './actions';
 
-export function openOpensidian({
-	auth,
-	device,
+export function openOpensidianBrowser({
+	signedIn,
+	installationId,
 }: {
-	auth: AuthClient;
-	device: DeviceDescriptor;
+	signedIn: SignedIn;
+	installationId: string;
 }) {
-	const doc = openOpensidianDoc();
+	const ydoc = new Y.Doc({ guid: OPENSIDIAN_ID, gc: true });
+	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
+	const tables = encryption.attachTables(opensidianTables);
+	const kv = encryption.attachKv({});
 
-	const idb = attachIndexedDb(doc.ydoc);
-	attachBroadcastChannel(doc.ydoc);
+	const idb = attachLocalStorage(ydoc, {
+		server: signedIn.server,
+		owner: signedIn.owner,
+		keyring: signedIn.keyring,
+	});
 
-	const fileContentDocs = createDisposableCache(
-		(fileId: FileId) =>
-			createFileContentDoc({
-				fileId,
-				workspaceId: doc.ydoc.guid,
-				filesTable: doc.tables.files,
-				attachPersistence: (d) => attachIndexedDb(d),
+	const fileContentDocs = createDisposableCache((fileId: FileId) => {
+		const childYdoc = new Y.Doc({
+			guid: opensidianFileContentDocGuid(fileId),
+			gc: true,
+		});
+		onLocalUpdate(childYdoc, () =>
+			tables.files.update(fileId, { updatedAt: Date.now() }),
+		);
+		const childIdb = attachLocalStorage(childYdoc, {
+			server: signedIn.server,
+			owner: signedIn.owner,
+			keyring: signedIn.keyring,
+		});
+		// File bodies sync through Cloud so device loss doesn't drop the largest
+		// data class.
+		const childSync = openCollaboration(childYdoc, {
+			url: roomWsUrl({
+				baseURL: signedIn.auth.baseURL,
+				owner: signedIn.owner,
+				guid: childYdoc.guid,
+				installationId,
 			}),
-		{ gcTime: 5_000 },
-	);
-
-	const sqliteIndex = createSqliteIndex(fileContentDocs)({ tables: doc.tables }).exports;
-	const fs = attachYjsFileSystem(doc.tables.files, fileContentDocs);
-	const bash = new Bash({ fs, cwd: '/' });
-
-	const actions = {
-		files: {
-			search: defineQuery({
-				title: 'Search Notes',
-				description:
-					'Search notes by content using full-text search. Returns matching file paths and content snippets.',
-				input: Type.Object({
-					query: Type.String({ description: 'The search query string' }),
-				}),
-				handler: async ({ query }) => Ok(await sqliteIndex.search(query)),
-			}),
-			read: defineQuery({
-				title: 'Read File',
-				description:
-					'Read the full content of a file by its absolute path (e.g. "/notes/meeting.md").',
-				input: Type.Object({
-					path: Type.String({
-						description: 'Absolute file path starting with /',
-					}),
-				}),
-				handler: async ({ path }) => {
-					const content = await fs.readFile(path);
-					const MAX_LENGTH = 50_000;
-					if (content.length > MAX_LENGTH) {
-						return Ok({
-							content: content.slice(0, MAX_LENGTH),
-							truncated: true,
-							totalLength: content.length,
-							note: `Content truncated at ${MAX_LENGTH} chars. Use bash head/tail for specific sections.`,
-						});
-					}
-					return Ok({ content, truncated: false });
-				},
-			}),
-			list: defineQuery({
-				title: 'List Directory',
-				description:
-					'List files and folders in a directory. Use "/" for the root.',
-				input: Type.Object({
-					path: Type.Optional(
-						Type.String({ description: 'Directory path. Defaults to "/"' }),
-					),
-				}),
-				handler: async ({ path }) => {
-					const entries = await fs.readdir(path ?? '/');
-					return Ok({ entries });
-				},
-			}),
-			write: defineMutation({
-				title: 'Write File',
-				description:
-					'Write content to a file. Creates the file if it does not exist, overwrites if it does.',
-				input: Type.Object({
-					path: Type.String({ description: 'Absolute file path' }),
-					content: Type.String({ description: 'The content to write' }),
-				}),
-				handler: async ({ path, content }) => {
-					await fs.writeFile(path, content);
-					return Ok({ success: true, path });
-				},
-			}),
-			create: defineMutation({
-				title: 'Create File',
-				description: 'Create a new empty file at the given path.',
-				input: Type.Object({
-					path: Type.String({
-						description: 'Absolute file path for the new file',
-					}),
-				}),
-				handler: async ({ path }) => {
-					await fs.writeFile(path, '');
-					return Ok({ success: true, path });
-				},
-			}),
-			delete: defineMutation({
-				title: 'Delete File',
-				description: 'Delete a file or directory at the given path.',
-				input: Type.Object({
-					path: Type.String({ description: 'Absolute path to delete' }),
-				}),
-				handler: async ({ path }) => {
-					await fs.rm(path);
-					return Ok({ success: true, path });
-				},
-			}),
-			move: defineMutation({
-				title: 'Move/Rename File',
-				description: 'Move or rename a file from one path to another.',
-				input: Type.Object({
-					src: Type.String({ description: 'Current file path' }),
-					dst: Type.String({ description: 'New file path' }),
-				}),
-				handler: async ({ src, dst }) => {
-					await fs.mv(src, dst);
-					return Ok({ success: true, from: src, to: dst });
-				},
-			}),
-			mkdir: defineMutation({
-				title: 'Create Directory',
-				description: 'Create a new directory at the given path.',
-				input: Type.Object({
-					path: Type.String({ description: 'Absolute directory path' }),
-				}),
-				handler: async ({ path }) => {
-					await fs.mkdir(path);
-					return Ok({ success: true, path });
-				},
-			}),
+			openWebSocket: signedIn.auth.openWebSocket,
+			onReconnectSignal: signedIn.auth.onStateChange,
+			waitFor: childIdb.whenLoaded,
+			actions: {},
+		});
+		return {
+			ydoc: childYdoc,
+			content: attachTimeline(childYdoc),
+			idb: childIdb,
+			sync: childSync,
+			/**
+			 * Child disposer rejections do not propagate; bundle.wipe() relies on
+			 * IDB's deleteDatabase native blocking as belt-and-suspenders for
+			 * storage deletion.
+			 */
+			[Symbol.dispose]() {
+				childYdoc.destroy();
+			},
+		};
+	});
+	const fileContent = {
+		async read(fileId: FileId) {
+			await using handle = fileContentDocs.open(fileId);
+			await handle.idb.whenLoaded;
+			return handle.content.read();
 		},
-		bash: {
-			exec: defineMutation({
-				title: 'Execute Bash Command',
-				description:
-					'Execute a bash command against the virtual filesystem. Supports standard Unix commands (ls, cat, grep, echo, etc.).',
-				input: Type.Object({
-					command: Type.String({
-						description: 'The bash command to execute',
-					}),
-				}),
-				handler: async ({ command }) => {
-					const result = await bash.exec(command);
-					return Ok({
-						stdout: result.stdout,
-						stderr: result.stderr,
-						exitCode: result.exitCode,
-					});
-				},
-			}),
+		async write(fileId: FileId, text: string) {
+			await using handle = fileContentDocs.open(fileId);
+			await handle.idb.whenLoaded;
+			handle.content.write(text);
+		},
+		async append(fileId: FileId, text: string) {
+			await using handle = fileContentDocs.open(fileId);
+			await handle.idb.whenLoaded;
+			handle.content.appendText(text);
+			return handle.content.read();
 		},
 	};
+	const sqliteIndex = createSqliteIndex({
+		readContent: fileContent.read,
+	})({
+		tables,
+	});
+	const sqliteIndexExports = sqliteIndex.exports;
+	const fs = attachYjsFileSystem(ydoc, tables.files, fileContent);
+	const bash = new Bash({ fs, cwd: '/' });
+	const actions = createOpensidianActions({
+		fs,
+		sqliteIndex: sqliteIndexExports,
+		bash,
+	});
 
-	const sync = attachSync(
-		{ ydoc: doc.ydoc, actions },
-		{
-			url: toWsUrl(`${APP_URLS.API}/workspaces/${doc.ydoc.guid}`),
-			waitFor: idb,
-			device,
-			getToken: () => auth.getToken(),
-		},
-	);
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl({
+			baseURL: signedIn.auth.baseURL,
+			owner: signedIn.owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
+		openWebSocket: signedIn.auth.openWebSocket,
+		onReconnectSignal: signedIn.auth.onStateChange,
+		waitFor: idb.whenLoaded,
+		actions,
+	});
+
+	let docsTornDown = false;
+
+	function teardownDocs() {
+		if (docsTornDown) return;
+		docsTornDown = true;
+		fileContentDocs[Symbol.dispose]();
+		sqliteIndex[Symbol.dispose]();
+		ydoc.destroy();
+	}
 
 	return {
-		...doc,
+		ydoc,
+		tables,
+		kv,
 		idb,
 		fileContentDocs,
-		sqliteIndex,
+		sqliteIndex: sqliteIndexExports,
 		fs,
 		bash,
 		actions,
-		sync,
-		/**
-		 * Resolves when IndexedDB has hydrated the local snapshot — the UI can
-		 * render with persisted data. Does NOT gate sync (the WebSocket can
-		 * connect at any time, including never if the user is offline).
-		 */
-		whenReady: idb.whenLoaded,
+		collaboration,
+		async wipe() {
+			teardownDocs();
+			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
+			await wipeLocalStorage({
+				server: signedIn.server,
+				owner: signedIn.owner,
+			});
+		},
+		[Symbol.dispose]() {
+			teardownDocs();
+		},
 	};
 }
+
+export type OpensidianBrowser = ReturnType<typeof openOpensidianBrowser>;

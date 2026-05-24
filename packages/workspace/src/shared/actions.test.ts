@@ -1,25 +1,28 @@
 /**
  * Tests for the action system primitives in `actions.ts`.
  *
- * Currently focused on `invokeAction` — the canonical "given an action
- * and an input, return Promise<Result<T, RpcError>>" util used by every
- * consumer that doesn't know the handler shape ahead of time (AI bridge,
- * CLI dispatch, inbound RPC handler).
+ * `invokeAction` is the in-process invoker: raw return values get Ok-wrapped,
+ * existing `Result`s pass through, thrown errors become `Err(cause)` with the
+ * raw thrown value preserved. The RPC wire boundary lives in
+ * `document/rpc.ts` and has its own coverage.
  */
 
 import { describe, expect, test } from 'bun:test';
 import Type from 'typebox';
 import { Err, Ok } from 'wellcrafted/result';
-import { isRpcError } from '@epicenter/sync';
+import { expectErr, expectOk } from 'wellcrafted/testing';
 import {
+	ACTION_KEY_PATTERN,
+	type ActionRegistry,
+	defineActions,
 	defineMutation,
 	defineQuery,
 	invokeAction,
 } from './actions.js';
 
-// ────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // invokeAction
-// ────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 describe('invokeAction', () => {
 	describe('return shape normalization', () => {
@@ -27,101 +30,86 @@ describe('invokeAction', () => {
 			const action = defineMutation({
 				handler: () => ({ count: 7 }),
 			});
-			const result = await invokeAction<{ count: number }>(action);
-			expect(result.error).toBeNull();
-			expect(result.data).toEqual({ count: 7 });
+			const data = expectOk(
+				await invokeAction<{ count: number }>(action, undefined),
+			);
+			expect(data).toEqual({ count: 7 });
 		});
 
 		test('Ok-wraps a raw return value from an async handler', async () => {
 			const action = defineMutation({
 				handler: async () => ({ count: 11 }),
 			});
-			const result = await invokeAction<{ count: number }>(action);
-			expect(result.error).toBeNull();
-			expect(result.data).toEqual({ count: 11 });
+			const data = expectOk(
+				await invokeAction<{ count: number }>(action, undefined),
+			);
+			expect(data).toEqual({ count: 11 });
 		});
 
 		test('passes through an Ok from a Result-returning handler unchanged', async () => {
 			const action = defineMutation({
 				handler: () => Ok({ ok: true }),
 			});
-			const result = await invokeAction<{ ok: boolean }>(action);
-			expect(result.error).toBeNull();
-			expect(result.data).toEqual({ ok: true });
+			const data = expectOk(
+				await invokeAction<{ ok: boolean }>(action, undefined),
+			);
+			expect(data).toEqual({ ok: true });
 		});
 
 		test('passes through an Err from a Result-returning handler unchanged', async () => {
 			const customError = { name: 'CustomFailure', message: 'bad' };
 			const action = defineMutation({
-				handler: () =>
-					Err(customError) as unknown as ReturnType<typeof Ok>,
+				handler: () => Err(customError) as unknown as ReturnType<typeof Ok>,
 			});
-			const result = await invokeAction(action);
-			expect(result.data).toBeNull();
-			// The handler's typed Err leaks through invokeAction's
-			// declared `RpcError` error type — that's the cost of generic
-			// normalization. Cast to compare structurally.
-			expect(result.error as unknown).toEqual(customError);
+			const error = expectErr(await invokeAction(action, undefined));
+			expect(error as unknown).toEqual(customError);
 		});
 
-		test('isResult discrimination is structural — any {data,error}-shaped value passes through unchanged', async () => {
+		test('isResult discrimination is structural and passes through {data,error}-shaped values', async () => {
 			// wellcrafted's isResult is structural: any object with both
 			// `data` and `error` properties is treated as a Result. There
 			// is no brand. So a {data,error}-shaped return passes through
-			// to the caller as-is — invokeAction does NOT double-wrap.
+			// to the caller as-is. invokeAction does NOT double-wrap.
 			const lookalike = { data: 'fake', error: null };
 			const action = defineMutation({
 				handler: () => lookalike as unknown as ReturnType<typeof Ok>,
 			});
-			const result = await invokeAction<string>(action);
-			expect(result.error).toBeNull();
-			expect(result.data).toBe('fake');
+			const data = expectOk(await invokeAction<string>(action, undefined));
+			expect(data).toBe('fake');
 		});
 	});
 
 	describe('error handling', () => {
-		test('catches a thrown Error and returns Err(ActionFailed) with cause', async () => {
+		test('catches a thrown Error and returns Err(cause) with the raw cause', async () => {
 			const cause = new Error('handler exploded');
 			const action = defineMutation({
 				handler: () => {
 					throw cause;
 				},
 			});
-			const result = await invokeAction(action);
-			expect(result.data).toBeNull();
-			expect(isRpcError(result.error)).toBe(true);
-			expect(result.error?.name).toBe('ActionFailed');
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.cause).toBe(cause);
-			}
+			const error = expectErr(await invokeAction(action, undefined));
+			expect(error).toBe(cause);
 		});
 
-		test('catches an async rejection and returns Err(ActionFailed) with cause', async () => {
+		test('catches an async rejection and returns Err(cause) with the raw cause', async () => {
 			const cause = new Error('async boom');
 			const action = defineMutation({
 				handler: async () => {
 					throw cause;
 				},
 			});
-			const result = await invokeAction(action);
-			expect(result.data).toBeNull();
-			expect(result.error?.name).toBe('ActionFailed');
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.cause).toBe(cause);
-			}
+			const error = expectErr(await invokeAction(action, undefined));
+			expect(error).toBe(cause);
 		});
 
-		test('catches a thrown non-Error value and preserves it as cause', async () => {
+		test('catches a thrown non-Error value and preserves it as-is', async () => {
 			const action = defineMutation({
 				handler: () => {
 					throw 'string-throw';
 				},
 			});
-			const result = await invokeAction(action);
-			expect(result.error?.name).toBe('ActionFailed');
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.cause).toBe('string-throw');
-			}
+			const error = expectErr(await invokeAction(action, undefined));
+			expect(error).toBe('string-throw');
 		});
 	});
 
@@ -148,54 +136,9 @@ describe('invokeAction', () => {
 					return input.x * 2;
 				},
 			});
-			const result = await invokeAction<number>(action, { x: 21 });
+			const data = expectOk(await invokeAction<number>(action, { x: 21 }));
 			expect(seenInputs).toEqual([{ x: 21 }]);
-			expect(result.data).toBe(42);
-		});
-	});
-
-	describe('errorLabel', () => {
-		test('uses provided errorLabel on Err(ActionFailed).action', async () => {
-			const action = defineMutation({
-				title: 'Title Override',
-				handler: () => {
-					throw new Error('x');
-				},
-			});
-			const result = await invokeAction(
-				action,
-				undefined,
-				'tabs.close',
-			);
-			expect(result.error?.name).toBe('ActionFailed');
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.action).toBe('tabs.close');
-			}
-		});
-
-		test('falls back to action.title when no errorLabel provided', async () => {
-			const action = defineMutation({
-				title: 'My Action',
-				handler: () => {
-					throw new Error('x');
-				},
-			});
-			const result = await invokeAction(action);
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.action).toBe('My Action');
-			}
-		});
-
-		test('falls back to "anonymous" when neither errorLabel nor title is set', async () => {
-			const action = defineMutation({
-				handler: () => {
-					throw new Error('x');
-				},
-			});
-			const result = await invokeAction(action);
-			if (result.error?.name === 'ActionFailed') {
-				expect(result.error.action).toBe('anonymous');
-			}
+			expect(data).toBe(42);
 		});
 	});
 
@@ -207,12 +150,129 @@ describe('invokeAction', () => {
 			const mutation = defineMutation({
 				handler: () => ({ kind: 'mutation' as const }),
 			});
-			const queryResult = await invokeAction<{ kind: 'query' }>(query);
-			const mutationResult = await invokeAction<{ kind: 'mutation' }>(
-				mutation,
+			const queryData = expectOk(
+				await invokeAction<{ kind: 'query' }>(query, undefined),
 			);
-			expect(queryResult.data).toEqual({ kind: 'query' });
-			expect(mutationResult.data).toEqual({ kind: 'mutation' });
+			const mutationData = expectOk(
+				await invokeAction<{ kind: 'mutation' }>(mutation, undefined),
+			);
+			expect(queryData).toEqual({ kind: 'query' });
+			expect(mutationData).toEqual({ kind: 'mutation' });
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Registry shape
+// ---------------------------------------------------------------------------
+
+describe('ActionRegistry', () => {
+	test('registry keys are addresses; flat string lookup, no recursion', () => {
+		const actions = {
+			entries_create: defineMutation({ handler: () => ({ id: 'x' }) }),
+			entries_update: defineMutation({ handler: () => ({ id: 'x' }) }),
+		} satisfies ActionRegistry;
+
+		expect(Object.keys(actions).sort()).toEqual([
+			'entries_create',
+			'entries_update',
+		]);
+		expect(actions.entries_create).toBeDefined();
+		// No segment walking. The key is the address.
+	});
+
+	test('action keys must match ACTION_KEY_PATTERN', () => {
+		expect(ACTION_KEY_PATTERN.test('tabs_close')).toBe(true);
+		expect(ACTION_KEY_PATTERN.test('entries_bulk_create')).toBe(true);
+		expect(ACTION_KEY_PATTERN.test(['tabs', 'close'].join('.'))).toBe(false);
+		expect(ACTION_KEY_PATTERN.test('TabsClose')).toBe(false);
+		expect(ACTION_KEY_PATTERN.test('0tabs')).toBe(false);
+		expect(ACTION_KEY_PATTERN.test('_tabs')).toBe(false);
+		expect(ACTION_KEY_PATTERN.test('a'.repeat(65))).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// defineActions
+// ---------------------------------------------------------------------------
+
+describe('defineActions', () => {
+	test('returns the input record verbatim for valid snake_case keys', () => {
+		const actions = defineActions({
+			tabs_close: defineMutation({ handler: () => ({ closed: 1 }) }),
+			tabs_list: defineQuery({ handler: () => [] }),
+		});
+		expect(Object.keys(actions).sort()).toEqual(['tabs_close', 'tabs_list']);
+	});
+
+	test('preserves Action type narrowing for type extraction', () => {
+		const actions = defineActions({
+			entries_update: defineMutation({
+				input: Type.Object({ id: Type.String() }),
+				handler: ({ id }) => ({ id }),
+			}),
+		});
+		type UpdateInput = Parameters<typeof actions.entries_update>[0];
+		const ok: UpdateInput = { id: 'x' };
+		expect(ok.id).toBe('x');
+	});
+
+	test('throws at construction when a dynamic key fails the pattern', () => {
+		const dynamic = {
+			'tabs.close': defineMutation({ handler: () => null }),
+		} as unknown as Parameters<typeof defineActions>[0];
+		// Cast simulates `Object.fromEntries(...)` or `as ActionRegistry` bypass.
+		expect(() => defineActions(dynamic)).toThrow(
+			/Invalid action key "tabs.close"/,
+		);
+	});
+
+	test('throws on a name longer than 64 chars', () => {
+		const longKey = `a${'b'.repeat(64)}`;
+		const dynamic = {
+			[longKey]: defineMutation({ handler: () => null }),
+		} as unknown as Parameters<typeof defineActions>[0];
+		expect(() => defineActions(dynamic)).toThrow(/Invalid action key/);
+	});
+
+	test('compile-time type-check rejects dotted keys (and runtime throws if bypassed)', () => {
+		const action = defineMutation({ handler: () => null });
+		expect(() =>
+			defineActions({
+				// @ts-expect-error: 'tabs.close' fails IsSnakeCaseKey -> branded error type
+				'tabs.close': action,
+				tabs_open: action,
+			}),
+		).toThrow(/Invalid action key "tabs.close"/);
+	});
+
+	test('compile-time type-check rejects camelCase keys (and runtime throws if bypassed)', () => {
+		const action = defineMutation({ handler: () => null });
+		expect(() =>
+			defineActions({
+				// @ts-expect-error: 'TabsClose' fails IsSnakeCaseKey (capital letters)
+				TabsClose: action,
+			}),
+		).toThrow(/Invalid action key "TabsClose"/);
+	});
+
+	test('compile-time type-check rejects leading digit (and runtime throws)', () => {
+		const action = defineMutation({ handler: () => null });
+		expect(() =>
+			defineActions({
+				// @ts-expect-error: '0tab' fails IsSnakeCaseKey (leading digit)
+				'0tab': action,
+			}),
+		).toThrow(/Invalid action key "0tab"/);
+	});
+
+	test('compile-time type-check rejects leading underscore (and runtime throws)', () => {
+		const action = defineMutation({ handler: () => null });
+		expect(() =>
+			defineActions({
+				// @ts-expect-error: '_x' fails IsSnakeCaseKey (leading underscore)
+				_x: action,
+			}),
+		).toThrow(/Invalid action key "_x"/);
 	});
 });

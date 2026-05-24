@@ -1,8 +1,15 @@
 # system.describe + wire-trim manifest
 
-**Status**: ready to execute
+**Status**: Superseded
 **Date**: 2026-04-26
 **Supersedes (partial)**: `specs/20260426T190000-cli-actions-unification.md` (the unified `ActionManifestEntry === ActionMeta` is preserved at the type level, but the wire shape narrows — `input` no longer travels in the manifest)
+
+**Superseded By**: `20260426T230000-drop-manifest-from-awareness.md`
+
+**Review 2026-05-01**: This halfway design should not be executed. The current
+architecture removed action manifests from awareness entirely. `system.describe`
+now takes no input and returns the full action manifest through
+`createRemoteClient({ peerDirectory, rpc }).describe(peerId)`.
 
 ## Problem
 

@@ -1,9 +1,17 @@
-export { AuthSession, StoredUser } from './auth-types.ts';
+export { type AuthClient, type AuthState } from './auth-contract.js';
+export * from './auth-errors.js';
 export {
-	type AuthCore,
-	AuthError,
-	createAuth,
-	type CreateAuthConfig,
-	type SocialTokenPayload,
-} from './create-auth.ts';
-export type { SessionStore } from './session-store.ts';
+	ApiSessionResponse,
+	AuthUser,
+	type OAuthTokenGrant,
+	PersistedAuth,
+} from './auth-types.js';
+export {
+	type AuthFetch,
+	type CreateOAuthAppAuthConfig,
+	createOAuthAppAuth,
+	type OAuthSignInLauncher,
+	type PersistedAuthStorage,
+} from './create-oauth-app-auth.js';
+export { createTestAuth } from './create-test-auth.js';
+export { Owner, type OwnerKind, ownerId } from './owner.js';

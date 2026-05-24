@@ -4,11 +4,15 @@
 	import { Textarea } from '@epicenter/ui/textarea';
 	import SendIcon from '@lucide/svelte/icons/send';
 	import SquareIcon from '@lucide/svelte/icons/square';
-	import { aiChatState } from '$lib/chat/chat-state.svelte';
 	import { PROVIDER_MODELS, type Provider } from '$lib/chat/providers';
 
+	import { requireOpensidian } from '$lib/session';
+
+	const opensidian = requireOpensidian();
 	const providers = Object.keys(PROVIDER_MODELS) as Provider[];
-	const models = $derived(aiChatState.modelsForProvider(aiChatState.provider));
+	const models = $derived(
+		opensidian.state.chat.modelsForProvider(opensidian.state.chat.provider),
+	);
 
 	let inputValue = $state('');
 
@@ -16,7 +20,7 @@
 		const content = inputValue.trim();
 		if (!content) return;
 		inputValue = '';
-		aiChatState.sendMessage(content);
+		opensidian.state.chat.sendMessage(content);
 	}
 </script>
 
@@ -25,13 +29,13 @@
 	<div class="flex gap-2">
 		<Select.Root
 			type="single"
-			value={aiChatState.provider}
+			value={opensidian.state.chat.provider}
 			onValueChange={(v) => {
-				if (v) aiChatState.provider = v as Provider;
+				if (v) opensidian.state.chat.provider = v as Provider;
 			}}
 		>
 			<Select.Trigger size="sm" class="w-[120px]">
-				{aiChatState.provider || 'Provider\u2026'}
+				{opensidian.state.chat.provider || 'Provider\u2026'}
 			</Select.Trigger>
 			<Select.Content>
 				{#each providers as p (p)}
@@ -42,13 +46,15 @@
 
 		<Select.Root
 			type="single"
-			value={aiChatState.model}
+			value={opensidian.state.chat.model}
 			onValueChange={(v) => {
-				if (v) aiChatState.model = v;
+				if (v) opensidian.state.chat.model = v;
 			}}
 		>
 			<Select.Trigger size="sm" class="flex-1">
-				<span class="truncate">{aiChatState.model || 'Model\u2026'}</span>
+				<span class="truncate"
+					>{opensidian.state.chat.model || 'Model\u2026'}</span
+				>
 			</Select.Trigger>
 			<Select.Content>
 				{#each models as m (m)}
@@ -79,12 +85,12 @@
 				}
 			}}
 		/>
-		{#if aiChatState.isLoading}
+		{#if opensidian.state.chat.isLoading}
 			<Button
 				variant="outline"
 				size="icon-lg"
 				type="button"
-				onclick={() => aiChatState.stop()}
+				onclick={() => opensidian.state.chat.stop()}
 			>
 				<SquareIcon />
 			</Button>

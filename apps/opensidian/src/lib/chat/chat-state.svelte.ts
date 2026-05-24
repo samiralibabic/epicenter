@@ -1,7 +1,16 @@
+import type { AuthClient } from '@epicenter/auth';
 import { AiChatHttpError } from '@epicenter/constants/ai-chat-errors';
 import { APP_URLS } from '@epicenter/constants/vite';
 import { createAiChatFetch, fromTable } from '@epicenter/svelte';
+import { actionsToAiTools } from '@epicenter/workspace/ai';
 import { createChat, fetchServerSentEvents } from '@tanstack/ai-svelte';
+import {
+	type ChatMessageId,
+	type Conversation,
+	type ConversationId,
+	generateChatMessageId,
+	generateConversationId,
+} from 'opensidian';
 import type { JsonValue } from 'wellcrafted/json';
 import {
 	DEFAULT_MODEL,
@@ -15,16 +24,9 @@ import {
 	OPENSIDIAN_SYSTEM_PROMPT,
 } from '$lib/chat/system-prompt';
 import { toUiMessage } from '$lib/chat/ui-message';
-import { auth, opensidian, workspaceAiTools } from '$lib/opensidian/client';
-import { skillState } from '$lib/state/skill-state.svelte';
-import {
-	type ChatMessageId,
-	type Conversation,
-	type ConversationId,
-	generateChatMessageId,
-	generateConversationId,
-} from '$lib/workspace/definition';
+import type { OpensidianBrowser } from '$lib/opensidian/browser';
 import { searchParams } from '$lib/search-params.svelte';
+import type { SkillState } from '$lib/state/skill-state.svelte';
 
 function getStringValue(value: JsonValue | undefined, fallback: string) {
 	return typeof value === 'string' ? value : fallback;
@@ -34,13 +36,32 @@ function getNumberValue(value: JsonValue | undefined, fallback = 0) {
 	return typeof value === 'number' ? value : fallback;
 }
 
-function createAiChatState() {
-	const conversationsMap = fromTable(opensidian.tables.conversations);
+function getProviderValue(value: JsonValue | undefined): Provider {
+	return typeof value === 'string' && value in PROVIDER_MODELS
+		? (value as Provider)
+		: DEFAULT_PROVIDER;
+}
+
+type SessionAiTools = ReturnType<
+	typeof actionsToAiTools<OpensidianBrowser['collaboration']['actions']>
+>;
+export type SessionTools = SessionAiTools['tools'];
+
+export function createAiChatState({
+	auth,
+	binding,
+	skills,
+}: {
+	auth: AuthClient;
+	binding: OpensidianBrowser;
+	skills: SkillState;
+}) {
+	const sessionAiTools = actionsToAiTools(binding.collaboration.actions);
+	const conversationsMap = fromTable(binding.tables.conversations);
 	const conversations = $derived(
-		[...conversationsMap.values()]
-			.sort(
-				(a, b) => getNumberValue(b.updatedAt) - getNumberValue(a.updatedAt),
-			),
+		[...conversationsMap.values()].sort(
+			(a, b) => getNumberValue(b.updatedAt) - getNumberValue(a.updatedAt),
+		),
 	);
 
 	function ensureDefaultConversation(): ConversationId | undefined {
@@ -49,7 +70,7 @@ function createAiChatState() {
 		const id = generateConversationId();
 		const now = Date.now();
 
-		opensidian.tables.conversations.set({
+		binding.tables.conversations.set({
 			id,
 			title: 'New Chat',
 			provider: DEFAULT_PROVIDER,
@@ -66,14 +87,14 @@ function createAiChatState() {
 		conversationId: ConversationId,
 		patch: Partial<Omit<Conversation, 'id'>>,
 	) {
-		opensidian.tables.conversations.update(conversationId, {
+		binding.tables.conversations.update(conversationId, {
 			...patch,
 			updatedAt: Date.now(),
 		});
 	}
 
 	function loadMessages(conversationId: ConversationId) {
-		return opensidian.tables.chatMessages
+		return binding.tables.chatMessages
 			.filter((message) => message.conversationId === conversationId)
 			.sort((a, b) => a.createdAt - b.createdAt)
 			.map(toUiMessage);
@@ -83,15 +104,13 @@ function createAiChatState() {
 		ConversationId,
 		ReturnType<typeof createConversationHandle>
 	>();
-	const destroyFns = new Map<ConversationId, () => void>();
-	const refreshFns = new Map<ConversationId, () => void>();
 
 	function createConversationHandle(conversationId: ConversationId) {
 		const metadata = $derived(conversationsMap.get(conversationId));
 
 		const chat = createChat({
 			initialMessages: loadMessages(conversationId),
-			tools: workspaceAiTools.tools,
+			tools: sessionAiTools.tools,
 			connection: fetchServerSentEvents(
 				`${APP_URLS.API}/ai/chat`,
 				async () => ({
@@ -104,25 +123,25 @@ function createAiChatState() {
 							systemPrompts: [
 								OPENSIDIAN_SYSTEM_PROMPT,
 								buildGlobalSkillsPrompt(
-									skillState.globalSkills.map((skill) => ({
+									skills.globalSkills.map((skill) => ({
 										name: skill.name,
 										instructions: skill.instructions,
 									})),
 								),
 								buildVaultSkillsPrompt(
-									skillState.vaultSkills.map((skill) => ({
+									skills.vaultSkills.map((skill) => ({
 										name: skill.name,
 										content: skill.content,
 									})),
 								),
 							].filter(Boolean),
-							tools: workspaceAiTools.definitions,
+							tools: sessionAiTools.definitions,
 						},
 					},
 				}),
 			),
 			onFinish: (message) => {
-				opensidian.tables.chatMessages.set({
+				binding.tables.chatMessages.set({
 					id: message.id as ChatMessageId,
 					conversationId,
 					role: 'assistant',
@@ -143,13 +162,11 @@ function createAiChatState() {
 			},
 		});
 
-		destroyFns.set(conversationId, () => chat.stop());
-		refreshFns.set(conversationId, () => {
-			if (chat.isLoading) return;
-			chat.setMessages(loadMessages(conversationId));
-		});
-
 		return {
+			[Symbol.dispose]() {
+				chat.stop();
+			},
+
 			get id() {
 				return conversationId;
 			},
@@ -159,7 +176,7 @@ function createAiChatState() {
 			},
 
 			get provider() {
-				return getStringValue(metadata?.provider, DEFAULT_PROVIDER);
+				return getProviderValue(metadata?.provider);
 			},
 			set provider(value: Provider) {
 				const models = PROVIDER_MODELS[value];
@@ -214,13 +231,6 @@ function createAiChatState() {
 				);
 			},
 
-			get isModelRestricted() {
-				return (
-					chat.error instanceof AiChatHttpError &&
-					chat.error.detail.name === 'ModelRequiresPaidPlan'
-				);
-			},
-
 			sendMessage(content: string) {
 				if (!content.trim()) return;
 
@@ -231,7 +241,7 @@ function createAiChatState() {
 					id: userMessageId,
 				});
 
-				opensidian.tables.chatMessages.set({
+				binding.tables.chatMessages.set({
 					id: userMessageId,
 					conversationId,
 					role: 'user',
@@ -253,7 +263,7 @@ function createAiChatState() {
 			reload() {
 				const lastMessage = chat.messages.at(-1);
 				if (lastMessage?.role === 'assistant') {
-					opensidian.tables.chatMessages.delete(lastMessage.id as ChatMessageId);
+					binding.tables.chatMessages.delete(lastMessage.id as ChatMessageId);
 				}
 
 				void chat.reload();
@@ -270,13 +280,16 @@ function createAiChatState() {
 			denyToolCall(approvalId: string) {
 				void chat.addToolApprovalResponse({ id: approvalId, approved: false });
 			},
+
+			refreshMessages() {
+				if (chat.isLoading) return;
+				chat.setMessages(loadMessages(conversationId));
+			},
 		};
 	}
 
 	function destroyConversation(conversationId: ConversationId) {
-		destroyFns.get(conversationId)?.();
-		destroyFns.delete(conversationId);
-		refreshFns.delete(conversationId);
+		handles.get(conversationId)?.[Symbol.dispose]();
 		handles.delete(conversationId);
 	}
 
@@ -300,28 +313,28 @@ function createAiChatState() {
 
 		const newActiveId = firstConversation.id as ConversationId;
 		searchParams.update({ chat: newActiveId });
-		refreshFns.get(newActiveId)?.();
+		handles.get(newActiveId)?.refreshMessages();
 	}
 
 	const activeConversationId = $derived(
 		(searchParams.chat ?? '') as ConversationId,
 	);
 
-	const _unobserveConversations = opensidian.tables.conversations.observe(() => {
+	const _unobserveConversations = binding.tables.conversations.observe(() => {
 		reconcileHandles();
 	});
-	const _unobserveChatMessages = opensidian.tables.chatMessages.observe(() => {
-		refreshFns.get(activeConversationId)?.();
+	const _unobserveChatMessages = binding.tables.chatMessages.observe(() => {
+		handles.get(activeConversationId)?.refreshMessages();
 	});
 
-	void opensidian.whenReady.then(() => {
-		void skillState.loadAllSkills();
+	void binding.idb.whenLoaded.then(() => {
+		void skills.loadAllSkills();
 		reconcileHandles();
 
 		const newId = ensureDefaultConversation();
 		if (newId) {
 			searchParams.update({ chat: newId });
-			refreshFns.get(newId)?.();
+			handles.get(newId)?.refreshMessages();
 			return;
 		}
 
@@ -330,7 +343,7 @@ function createAiChatState() {
 
 		const activeId = firstConversation.id as ConversationId;
 		searchParams.update({ chat: activeId });
-		refreshFns.get(activeId)?.();
+		handles.get(activeId)?.refreshMessages();
 	});
 
 	reconcileHandles();
@@ -340,7 +353,7 @@ function createAiChatState() {
 		const now = Date.now();
 		const active = handles.get(activeConversationId);
 
-		opensidian.tables.conversations.set({
+		binding.tables.conversations.set({
 			id,
 			title: 'New Chat',
 			provider: active?.provider ?? DEFAULT_PROVIDER,
@@ -351,35 +364,23 @@ function createAiChatState() {
 		});
 
 		searchParams.update({ chat: id });
-		refreshFns.get(id)?.();
+		handles.get(id)?.refreshMessages();
 
 		return id;
 	}
 
-	const conversationList = $derived(
-		conversations
-			.map((conversation) => handles.get(conversation.id))
-			.filter(
-				(handle): handle is ReturnType<typeof createConversationHandle> =>
-					handle !== undefined,
-			),
-	);
-
 	return {
+		[Symbol.dispose]() {
+			_unobserveConversations();
+			_unobserveChatMessages();
+			conversationsMap[Symbol.dispose]();
+			for (const conversationId of [...handles.keys()]) {
+				destroyConversation(conversationId);
+			}
+		},
+
 		get active() {
 			return handles.get(activeConversationId);
-		},
-
-		get conversations() {
-			return conversationList;
-		},
-
-		get(id: ConversationId) {
-			return handles.get(id);
-		},
-
-		get messages() {
-			return handles.get(activeConversationId)?.messages ?? [];
 		},
 
 		get isLoading() {
@@ -412,28 +413,10 @@ function createAiChatState() {
 			handles.get(activeConversationId)?.sendMessage(content);
 		},
 
-		approveToolCall(approvalId: string) {
-			handles.get(activeConversationId)?.approveToolCall(approvalId);
-		},
-
-		denyToolCall(approvalId: string) {
-			handles.get(activeConversationId)?.denyToolCall(approvalId);
-		},
-
 		stop() {
 			handles.get(activeConversationId)?.stop();
-		},
-
-		reload() {
-			handles.get(activeConversationId)?.reload();
 		},
 
 		newConversation,
 	};
 }
-
-export const aiChatState = createAiChatState();
-
-export type ConversationHandle = NonNullable<
-	ReturnType<(typeof aiChatState)['get']>
->;

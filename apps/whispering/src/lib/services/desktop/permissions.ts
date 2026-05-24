@@ -88,5 +88,3 @@ export const PermissionsServiceLive = {
 		},
 	},
 };
-
-export type PermissionsService = typeof PermissionsServiceLive;

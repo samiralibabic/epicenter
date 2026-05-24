@@ -1,101 +1,114 @@
 # @epicenter/skills
 
-`@epicenter/skills` gives Epicenter apps a shared workspace for skills and references. It exists so prompts, conventions, and supporting docs can live in the same CRDT-backed system as everything else instead of being trapped in loose markdown files. Apps like Opensidian read from this workspace to assemble layered system prompts, while the dedicated skills app edits and syncs the same data.
+`@epicenter/skills` defines the shared skills data model: table schemas, row
+types, the pure skills workspace factory, per-row document guid helpers, and
+read action factories. It does not own browser storage. Browser apps compose
+IndexedDB, BroadcastChannel, and `createDisposableCache` at the app boundary.
 
-## Quick usage
-
-Opensidian wires it up like this in `apps/opensidian/src/lib/client.ts`:
-
-```typescript
-import { createSkillsWorkspace } from '@epicenter/skills';
-
-// createSkillsWorkspace() is a defineDocument(builder).open(id) shortcut that
-// attaches IndexedDB persistence internally. See packages/skills/src/client.ts
-// for the full composition if you need to customize sync or encryption.
-export const skillsWorkspace = createSkillsWorkspace();
-```
-
-The workspace ships with read actions for progressive disclosure. This example comes from `packages/skills/src/workspace.ts`:
+## Root Export
 
 ```typescript
-const skills = ws.actions.listSkills();
-const result = await ws.actions.getSkill({ id: 'abc123' });
-if (result) systemPrompt += result.instructions;
+import {
+	SKILLS_WORKSPACE_ID,
+	createSkillsActions,
+	openSkills,
+	referenceContentDocGuid,
+	referencesTable,
+	skillInstructionsDocGuid,
+	skillsTable,
+} from '@epicenter/skills';
 ```
 
-That split is deliberate. You can browse the catalog cheaply, load one skill when you need it, or fetch the full skill plus references when you're building a prompt.
+The root export is intentionally runtime-neutral. It is safe to use from
+browser apps, Node scripts, and package-level tests because it does not import
+IndexedDB or file-system APIs.
 
-## Data model
+`openSkills()` builds the shared encrypted Y.Doc, tables, KV, and batch helper.
+It does not create instruction or reference document caches, because those
+caches own runtime persistence and browser cleanup.
 
-The package defines two tables under the `epicenter.skills` workspace ID.
+## Browser Composition
+
+Browser callers layer browser lifecycle wiring on top of `openSkills()`:
+
+```typescript
+const doc = openSkills();
+const idb = attachIndexedDb(doc.ydoc);
+attachBroadcastChannel(doc.ydoc);
+
+const instructionsDocs = createDisposableCache(
+	(skillId: string) => {
+		const ydoc = new Y.Doc({
+			guid: skillInstructionsDocGuid({
+				workspaceId: doc.ydoc.guid,
+				skillId,
+			}),
+			gc: true,
+		});
+		onLocalUpdate(ydoc, () =>
+			doc.tables.skills.update(skillId, { updatedAt: Date.now() }),
+		);
+		const idb = attachIndexedDb(ydoc);
+		return {
+			ydoc,
+			instructions: attachPlainText(ydoc),
+			idb,
+			[Symbol.dispose]() {
+				ydoc.destroy();
+			},
+		};
+	},
+	{ gcTime: 5_000 },
+);
+
+async function clearInstructionsLocalData() {
+	await Promise.all(
+		doc.tables.skills.getAllValid().map((skill) =>
+			clearDocument(
+				skillInstructionsDocGuid({
+					workspaceId: doc.ydoc.guid,
+					skillId: skill.id,
+				}),
+			),
+		),
+	);
+}
+```
+
+That inline cache source is deliberate. `openSkills()` owns the root document,
+the app owns child document construction, and `skillInstructionsDocGuid()` owns
+the stable storage address.
+
+## Node Composition
+
+Use `@epicenter/skills/node` when disk import/export actions are needed:
+
+```typescript
+import { openSkillsNodeWorkspace } from '@epicenter/skills/node';
+
+using workspace = openSkillsNodeWorkspace({ workspaceId: 'epicenter.skills' });
+await workspace.actions.import_from_disk({ dir: '.agents/skills' });
+await workspace.actions.export_to_disk({ dir: '.agents/skills' });
+```
+
+Node opens instruction and reference docs per operation. The browser cache
+exists for shared live identity, refcounting, and IndexedDB reset; the Node
+import/export path does not need those lifecycle rules.
+
+## Data Model
 
 ```text
 skills row
-  ├─ metadata columns
-  └─ instructions document
+  metadata columns
+  instructions document
 
 references row
-  ├─ skillId -> points at a skill row
-  └─ content document
+  skillId
+  content document
 ```
 
-`skillsTable` stores one row per skill. Frontmatter fields like `description`, `license`, `compatibility`, `metadata`, and `allowed-tools` map to columns. The markdown body is not stored in a plain string column—it lives in a per-row Y.Doc attached as `instructions`.
-
-`referencesTable` stores one row per file in a skill's `references/` directory. Each reference also gets its own attached Y.Doc, exposed as `content`.
-
-That design keeps the catalog small and queryable while still letting editors collaborate on large markdown bodies with Yjs.
-
-## API overview
-
-### `createSkillsWorkspace()`
-
-Creates an isomorphic workspace client with three read actions already attached:
-
-- `listSkills()` for the cheap catalog view
-- `getSkill({ id })` for one skill plus instructions
-- `getSkillWithReferences({ id })` for the full skill bundle
-
-The returned value is a live document handle. Apps that need a different persistence target or their own sync configuration can copy the builder at `packages/skills/src/client.ts` and compose their own `defineDocument(builder)` with different `attach*` calls.
-
-### `skillsTable`
-
-The table definition for skill metadata, with a document attachment for `instructions`.
-
-### `referencesTable`
-
-The table definition for reference metadata, with a document attachment for `content`.
-
-### `Skill` and `Reference`
-
-Row types inferred from the two table definitions.
-
-### `skillsDefinition`
-
-The prebuilt workspace definition for `epicenter.skills`. Most callers want `createSkillsWorkspace()` instead, but the definition is exported for custom embedding.
-
-## Relationship to the monorepo
-
-This package is the shared data model behind Epicenter's skill system.
-
-- `packages/skills` defines the workspace, tables, and read actions.
-- `apps/skills` uses it as the editor and manager UI.
-- `apps/opensidian` mounts a second workspace just for global skills and reads from it during prompt assembly.
-- `@epicenter/workspace` provides the CRDT tables, documents, and builder underneath it all.
-
-There is also a `@epicenter/skills/node` subpath. That version adds disk I/O actions like `importFromDisk()` and `exportToDisk()` so skill folders on disk can round-trip into the workspace and back out again.
-
-## Source entry point
-
-The root export in `src/index.ts` is small on purpose:
-
-```typescript
-export { createSkillsWorkspace } from './workspace.js';
-export { skillsDefinition } from './definition.js';
-export { skillsTable, referencesTable } from './tables.js';
-export type { Skill, Reference } from './tables.js';
-```
-
-If you only need a shared skills workspace in an app, that's enough.
+The catalog stays small and queryable. Markdown bodies live in per-row Y.Docs
+so editors can load and collaborate on them on demand.
 
 ## License
 

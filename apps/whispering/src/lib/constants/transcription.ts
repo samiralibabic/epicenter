@@ -218,14 +218,6 @@ export const TRANSCRIPTION_SERVICE_IDS = Object.keys(
 	TRANSCRIPTION,
 ) as TranscriptionServiceId[];
 
-/** UI dropdown options for service selection. */
-export const TRANSCRIPTION_SERVICE_OPTIONS = TRANSCRIPTION_SERVICE_IDS.map(
-	(id) => ({
-		value: id,
-		label: TRANSCRIPTION[id].label,
-	}),
-);
-
 /** Lookup: service ID → display label. */
 export const TRANSCRIPTION_SERVICE_ID_TO_LABEL = Object.fromEntries(
 	TRANSCRIPTION_SERVICE_IDS.map((id) => [id, TRANSCRIPTION[id].label]),

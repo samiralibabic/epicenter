@@ -1,6 +1,6 @@
 ---
 name: query-layer
-description: Query layer patterns for consuming services with TanStack Query, error transformation, and runtime dependency injection. Use when the user mentions createQuery, createMutation, TanStack Query, or when implementing queries/mutations, transforming errors for UI, or adding reactive data management.
+description: Query layer with TanStack Query, error transformation, runtime DI. Use for createQuery, createMutation, queries/mutations, reactive data management.
 metadata:
   author: epicenter
   version: '2.0'
@@ -11,6 +11,12 @@ metadata:
 ## Reference Repositories
 
 - [TanStack Query](https://github.com/tanstack/query) — Async state management for data fetching
+
+## Upstream Grounding
+
+When TanStack Query behavior, Svelte adapter types, cache invalidation semantics, optimistic updates, or mutation lifecycle callbacks affect correctness, ask DeepWiki a narrow question against `tanstack/query` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for stable basics and repo-local patterns already documented below.
 
 The query layer is the reactive bridge between UI components and the service layer. It wraps pure service functions with caching, reactivity, and state management using TanStack Query and WellCrafted factories.
 

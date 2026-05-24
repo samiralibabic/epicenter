@@ -20,7 +20,7 @@ A string your code stores (localStorage, memory, a file) and manually attaches t
 
 ```
 Sign-in response → { token: "abc123" }
-You store it: localStorage.setItem('app:authToken', 'abc123')
+You store it: localStorage.setItem('app.auth.token', 'abc123')
 You send it: Authorization: Bearer abc123  (manually, every request)
 ```
 
@@ -67,7 +67,7 @@ If an attacker has XSS on your app, they don't need to steal the token or forge 
 fetch('/api/sensitive-action', {
   method: 'POST',
   credentials: 'include',  // cookies sent automatically
-  headers: { 'Authorization': `Bearer ${localStorage.getItem('app:authToken')}` }
+  headers: { 'Authorization': `Bearer ${localStorage.getItem('app.auth.token')}` }
 });
 ```
 
