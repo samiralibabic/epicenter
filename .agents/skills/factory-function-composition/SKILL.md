@@ -1,6 +1,6 @@
 ---
 name: factory-function-composition
-description: Apply factory function patterns to compose clients and services with proper separation of concerns. Use when creating functions that depend on external clients, wrapping resources with domain-specific methods, or refactoring code that mixes client/service/method options together.
+description: Factory function patterns to compose clients and services. Use when wrapping resources with domain methods or refactoring mixed client/service/method options.
 metadata:
   author: epicenter
   version: '1.0'
@@ -206,6 +206,29 @@ function createSomething({ db, cache }, options?) {
 
 Zones 1 and 2 can merge when there's little state. Zone 3 is empty for small factories. But the return object is always last—it's the complete public API.
 
+### Public Return Types Derive From Zone 4
+
+When the exported type is just the handle returned by one factory, derive the type from the factory instead of annotating the factory with the type.
+
+```typescript
+export type RemoteClient = ReturnType<typeof createRemoteClient>;
+
+export function createRemoteClient(options: RemoteClientOptions) {
+	return {
+		actions<T>(peerId: string): RemoteActionProxy<T> {
+			// ...
+		},
+		describe(peerId: string): Promise<ActionManifest> {
+			// ...
+		},
+	};
+}
+```
+
+Zone 4 is already the public API. Duplicating it in a manual return type creates a second source of truth and changes editor navigation: Go to Definition tends to jump to the alias instead of the returned member. Keep method parameter and return annotations inside zone 4 when they make the public surface clearer.
+
+Do not use this for shared service contracts that several factories implement. Those contracts are vocabulary. Use `satisfies` at the return object when a factory needs to prove it matches an external contract while preserving the concrete returned shape.
+
 ### The `this` Decision Rule
 
 Inside the return object, public methods sometimes need to call other public methods. Use `this.method()` for that—method shorthand gives proper `this` binding.
@@ -219,6 +242,59 @@ If a function is called both by return-object methods *and* by pre-return initia
 | Both zones need it | Keep in zone 3, call by name everywhere |
 
 See [Closures Are Better Privacy Than Keywords](../../docs/articles/closures-are-better-privacy-than-keywords.md) for the full rationale and real codebase examples.
+
+## Structural Contracts: Factories That Satisfy External Interfaces
+
+A factory's return object can be designed to **structurally satisfy** an external contract, so it can be passed directly to a platform-agnostic core without an adapter.
+
+The canonical example is `createPersistedState` / `createStorageState`, whose return shape structurally satisfies the `SessionStore` contract that `@epicenter/auth`'s `createAuth` consumes:
+
+```ts
+// The contract (in a platform-agnostic core):
+type SessionStore = {
+  get(): T | null;
+  set(value: T | null): void;
+  watch(fn: (next: T | null) => void): () => void;
+};
+
+// The factory exposes BOTH a reactive accessor AND the contract methods:
+function createPersistedState(opts) {
+  let value = $state(readFromStorage());
+  // ...
+  return {
+    get current() { return value },         // reactive read for templates
+    set current(v) { setAndPersist(v) },
+    get(): T { return value },              // contract: sync read
+    set: setAndPersist,                     // contract: fire-and-forget write
+    watch(fn) { /* ... */ },                // contract: change notification
+  };
+}
+
+// Consumer — pass the factory result directly, no adapter:
+const session = createPersistedState({ key, schema, defaultValue });
+const auth = createAuth({ baseURL, session });
+```
+
+### The "collapsed adapter" rule
+
+If you find yourself writing a `fromX` translator that only renames or re-projects fields, **delete it and widen the factory's return shape instead**. The adapter is pure ceremony — the factory already holds the state; just expose both surfaces.
+
+Signs an adapter should be collapsed:
+
+- It's one-to-one with the factory (every caller wraps the factory result).
+- It only renames methods or adds a thin passthrough.
+- The factory and the contract disagree on shape but not on semantics (`.current` vs `.get()` — same value, different API).
+
+Signs an adapter should stay:
+
+- It does real work at the seam (e.g., sync-read-vs-async-get reconciliation, local-write fan-out because the underlying `watch` only fires on external change).
+- Multiple consumers with different contracts wrap the same factory.
+
+When in doubt: start without the adapter. Add one only when the seam actually earns its keep.
+
+### Why this works
+
+TypeScript's structural typing means the factory doesn't have to `implements SessionStore` or import the contract type. As long as the return shape matches, it's assignable. This keeps the factory package free of the consumer's dependencies — `createPersistedState` lives in `@epicenter/svelte` and has zero knowledge of `@epicenter/auth`.
 
 ## The Mental Model
 

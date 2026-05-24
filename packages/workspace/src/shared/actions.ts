@@ -1,68 +1,38 @@
 /**
- * Action System v2: Closure-based handlers for Epicenter.
+ * Actions: typed queries (reads) and mutations (writes) authored as a flat
+ * record keyed by snake_case key. `defineQuery`/`defineMutation` attach metadata
+ * to the handler and return it. The action callable IS the handler, so local
+ * callers see exactly what the author wrote (sync stays sync, `Result` stays
+ * `Result`).
  *
- * This module provides the core action definition system for Epicenter.
- * Actions are typed operations (queries for reads, mutations for writes) that
- * capture their dependencies via closures at definition time.
+ * One shape, two views:
  *
- * ## Design Pattern: Closure-Based Dependency Injection
+ *     ActionRegistry                       ActionManifest
+ *     flat, callable                       flat, metadata-only
+ *     local, in-memory                     wire form
  *
- * Actions close over their dependencies directly instead of receiving context as a parameter:
- * - Define actions **after** creating the client
- * - Handlers reference the client via closure: signature is `(input?) => output`
- * - Adapters (Server, CLI) receive both client and actions separately: `{ client, actions }`
+ *     {                                    {
+ *       tabs_close:   Action,                tabs_close:   { type, ... },
+ *       'ping':       Action,                'ping':       { type, ... },
+ *     }                                    }
  *
- * **Key benefits:**
- * - **Zero annotation ceremony**: TypeScript infers handler types naturally
- * - **Type-safe**: Full type inference for client and tables, not `unknown`
- * - **Simpler signatures**: `(input?) => output` instead of `(ctx, input?) => output`
- * - **Natural JavaScript**: Uses standard closures, no framework magic
- * - **Introspectable**: Callable functions with metadata properties for adapters
+ * Functions don't serialize, so the wire form drops them and keeps just the
+ * metadata. The wire form is "the registry minus handlers"; both views index
+ * by the same snake_case key. There is no walker, no segment loop, no path
+ * resolver: `Object.entries(actions)` is the iterator, `actions[key]` is
+ * the lookup.
  *
- * ## Exports
- *
- * - {@link defineQuery} - Define a read operation
- * - {@link defineMutation} - Define a write operation
- * - {@link isAction}, {@link isQuery}, {@link isMutation} - Type guards for action definitions
- * - {@link iterateActions} - Traverse and introspect action definition trees
- *
- * @example
- * ```typescript
- * import { createWorkspace, defineQuery, defineMutation } from '@epicenter/workspace';
- * import Type from 'typebox';
- *
- * // Step 1: Create the client (with all tables and extensions)
- * const client = createWorkspace({
- *   id: 'blog',
- *   tables: { posts: postsTable },
- * });
- *
- * // Step 2: Define actions that close over the client
- * export const actions = {
- *   posts: {
- *     getAll: defineQuery({
- *       handler: () => client.tables.posts.getAllValid(),
- *     }),
- *     create: defineMutation({
- *       input: Type.Object({ title: Type.String() }),
- *       handler: ({ title }) => {
- *         const id = generateId();
- *         client.tables.posts.upsert({ id, title });
- *         return { id };
- *       },
- *     }),
- *   },
- * };
- *
- * // Step 3: Pass both to adapters
- * createActionsRouter({ client, actions });
- * createCLI({ client, actions });
- * ```
+ * Local callers use `invokeAction`, which Ok-wraps raw values, preserves
+ * existing Results, and catches throws as `Err(cause)`. The dispatch wire
+ * boundary (`runInboundDispatch` in `document/dispatch.ts`) has its own
+ * inlined invoker that wraps thrown causes into `DispatchError.ActionFailed`
+ * before the response crosses the wire.
  *
  * @module
  */
 
 import type { Static, TSchema } from 'typebox';
+import { Err, isResult, Ok, type Result } from 'wellcrafted/result';
 
 // ════════════════════════════════════════════════════════════════════════════
 // ACTION DEFINITION TYPES
@@ -72,285 +42,249 @@ import type { Static, TSchema } from 'typebox';
  * The handler function type, conditional on whether input is provided.
  *
  * Uses variadic tuple args instead of conditional function signatures so that
- * when the type flows through `Action` (via the `Actions` constraint),
- * `any` distributes over both branches giving `[input: any] | []` — which
- * correctly allows calling with 0 arguments for no-input actions.
+ * `any` distributes over both branches giving `[input: any] | []`, which
+ * correctly allows calling with 0 arguments for no-input actions when the type
+ * flows through `Action` with wildcard parameters.
  *
- * When `TInput` extends `TSchema`, the handler takes validated input.
- * When `TInput` is `undefined`, the handler takes no arguments.
+ * Parameterized on `R` (the handler's actual return type) rather than splitting
+ * `TOutput`/`TError`: keeps the action's callable signature exactly equal to
+ * the handler's, so passthrough preserves precision (no widening to a
+ * `T | Result<T, E> | Promise<...>` union).
  */
 type ActionHandler<
 	TInput extends TSchema | undefined = TSchema | undefined,
-	TOutput = unknown,
-> = (
-	...args: TInput extends TSchema ? [input: Static<TInput>] : []
-) => TOutput;
+	R = unknown,
+> = (...args: TInput extends TSchema ? [input: Static<TInput>] : []) => R;
 
 /**
  * Configuration for defining an action (query or mutation).
- *
- * @typeParam TInput - The input schema type (TypeBox TSchema), or undefined for no input
- * @typeParam TOutput - The return type of the handler
- *
- * @property description - Human-readable description for introspection and documentation
- * @property input - Optional TypeBox schema for validating and typing input
- * @property handler - The action implementation. Handlers close over their dependencies and have signature `(input?) => output`
- *
- * @remarks
- * **Closure-based design**: Handlers capture their dependencies (client, tables, extensions, etc.)
- * via closure instead of receiving context as a parameter. This means:
- * - Handlers should be defined after the client they depend on is created
- * - Dependencies are accessed through closure, not as a parameter
- * - No type annotations needed—TypeScript infers everything naturally
- *
- * This is standard JavaScript closure mechanics, not framework magic.
- *
- * @example
- * ```typescript
- * // Assuming client is defined above:
- * // const client = createWorkspace({ id: 'blog', tables: { posts: ... } });
- *
- * // Action with input - closes over client via closure
- * const config: ActionConfig<typeof inputSchema, Post> = {
- *   input: type({ id: 'string' }),
- *   handler: ({ id }) => client.tables.posts.get(id),  // client captured by closure
- * };
- *
- * // Action without input
- * const configNoInput: ActionConfig<undefined, Post[]> = {
- *   handler: () => client.tables.posts.getAllValid(),  // client captured by closure
- * };
- * ```
  */
-type ActionConfig<
-	TInput extends TSchema | undefined = TSchema | undefined,
-	TOutput = unknown,
-> = {
-	/** Short, human-readable display name for UI surfaces (e.g. 'Close Tabs'). Falls back to path-derived name if omitted. */
+type ActionConfig<TInput extends TSchema | undefined, R> = {
+	/** Short, human-readable display name for UI surfaces (e.g. 'Close Tabs'). Optional; the action key is used when omitted. */
 	title?: string;
 	description?: string;
 	input?: TInput;
-	handler: ActionHandler<TInput, TOutput>;
+	handler: ActionHandler<TInput, R>;
 };
+
+type ActionType = 'query' | 'mutation';
 
 /**
  * Metadata properties attached to a callable action.
  *
- * These are the introspection properties available on the action function itself
- * (via `Object.assign`). The handler is NOT included — the action function IS
- * the handler. Call the action directly instead of accessing `.handler`.
+ * `input` (a live `TSchema`) is present whenever the action defines one.
+ * Action discovery returns this shape directly. There is no separate
+ * wire form.
  */
-type ActionMeta<TInput extends TSchema | undefined = TSchema | undefined> = {
-	type: 'query' | 'mutation';
-	/** Short, human-readable display name for UI surfaces (e.g. 'Close Tabs'). Falls back to path-derived name if omitted. */
+export type ActionMeta<
+	TInput extends TSchema | undefined = TSchema | undefined,
+	TType extends ActionType = ActionType,
+> = {
+	type: TType;
+	/** Short, human-readable display name for UI surfaces (e.g. 'Close Tabs'). Optional; the action key is used when omitted. */
 	title?: string;
 	description?: string;
 	input?: TInput;
 };
 
 /**
- * A query action definition (read operation).
- *
- * Queries are callable functions with metadata properties attached.
- * They are idempotent operations that read data without side effects.
- * When exposed via the server adapter, queries map to HTTP GET requests.
- *
- * @typeParam TInput - The input schema type, or undefined for no input
- * @typeParam TOutput - The return type of the handler
- *
- * @example
- * ```typescript
- * const getAll = defineQuery({ handler: () => client.tables.posts.getAllValid() });
- * const posts = getAll();      // call directly
- * getAll.type;                  // 'query'
- * getAll.input;                 // schema or undefined
- * ```
- *
- * @see {@link defineQuery} for creating query definitions
+ * Flat snake_case key to `ActionMeta` map. The metadata-only projection of an
+ * `ActionRegistry`, suitable for surfaces that cannot carry callable handlers
+ * (e.g. the daemon `/list` route).
  */
-export type Query<
-	TInput extends TSchema | undefined = TSchema | undefined,
-	TOutput = unknown,
-> = ActionHandler<TInput, TOutput> & ActionMeta<TInput> & { type: 'query' };
+export type ActionManifest = Record<string, ActionMeta>;
 
 /**
- * A mutation action definition (write operation).
- *
- * Mutations are callable functions with metadata properties attached.
- * They are operations that modify state or have side effects.
- * When exposed via the server adapter, mutations map to HTTP POST requests.
- *
- * @typeParam TInput - The input schema type, or undefined for no input
- * @typeParam TOutput - The return type of the handler
- *
- * @example
- * ```typescript
- * const createPost = defineMutation({
- *   input: type({ title: 'string' }),
- *   handler: ({ title }) => { client.tables.posts.upsert({ id: generateId(), title }); },
- * });
- * createPost({ title: 'Hello' }); // call directly
- * createPost.type;                 // 'mutation'
- * ```
- *
- * @see {@link defineMutation} for creating mutation definitions
- */
-export type Mutation<
-	TInput extends TSchema | undefined = TSchema | undefined,
-	TOutput = unknown,
-> = ActionHandler<TInput, TOutput> & ActionMeta<TInput> & { type: 'mutation' };
-
-/**
- * Union type of Query and Mutation action definitions.
- *
- * Use this when you need to handle any action regardless of type.
- *
- * @typeParam TInput - The input schema type, or undefined for no input
- * @typeParam TOutput - The return type of the handler
+ * A query or mutation action definition. Callable function with metadata
+ * properties attached. Queries are idempotent reads; mutations write. The
+ * `type` discriminant lives on the value, so the type stays a single union
+ * rather than three named aliases. The local callable shape IS the handler's
+ * signature (sync stays sync, raw stays raw); the RPC boundary normalizes
+ * the response to `Result<T, DispatchError>` before it crosses the wire.
  */
 export type Action<
 	TInput extends TSchema | undefined = TSchema | undefined,
-	TOutput = unknown,
-> = Query<TInput, TOutput> | Mutation<TInput, TOutput>;
+	R = unknown,
+	TType extends ActionType = ActionType,
+> = ActionHandler<TInput, R> & ActionMeta<TInput, TType>;
 
 /**
- * A tree of action definitions, supporting arbitrary nesting.
+ * Flat snake_case key to `Action` map. The single shape for an in-process
+ * action surface: keys are the local address, peer RPC method, daemon
+ * argument, CLI flag, and AI tool name. Author with `defineActions({...})`
+ * so the helper enforces the key shape at compile time and at construction;
+ * consumers iterate with `Object.entries` or index by string.
+ */
+export type ActionRegistry = Record<string, Action>;
+
+// ════════════════════════════════════════════════════════════════════════════
+// KEY VALIDATION (compile-time + runtime)
+// ════════════════════════════════════════════════════════════════════════════
+
+type Lower =
+	| 'a'
+	| 'b'
+	| 'c'
+	| 'd'
+	| 'e'
+	| 'f'
+	| 'g'
+	| 'h'
+	| 'i'
+	| 'j'
+	| 'k'
+	| 'l'
+	| 'm'
+	| 'n'
+	| 'o'
+	| 'p'
+	| 'q'
+	| 'r'
+	| 's'
+	| 't'
+	| 'u'
+	| 'v'
+	| 'w'
+	| 'x'
+	| 'y'
+	| 'z';
+type Digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
+type WordChar = Lower | Digit | '_';
+
+/** Recursive tail check: every remaining char must be `[a-z0-9_]`. */
+type IsActionKeyTail<S extends string> = S extends ''
+	? true
+	: S extends `${WordChar}${infer Rest}`
+		? IsActionKeyTail<Rest>
+		: false;
+
+/**
+ * `true` iff `S` matches `^[a-z][a-z0-9_]*$` at the type level. Length is
+ * not checked here; the regex catches >64 at runtime. Verified empirically:
+ * `arkregex` falls back to `string` for `[a-z]`-class patterns, so we
+ * hand-write the template literal walk.
+ */
+type IsSnakeCaseKey<S extends string> = S extends `${Lower}${infer Rest}`
+	? IsActionKeyTail<Rest> extends true
+		? true
+		: false
+	: false;
+
+/**
+ * Branded type-level error returned from `ValidatedKey<S>` when `S` is not
+ * a valid snake_case action key.
  *
- * Actions can be organized into namespaces for better organization.
- * Each handler closes over the client and dependencies from its enclosing scope.
+ * The trailing `​` (Unicode zero-width space) makes this literal
+ * structurally distinct from any plain string a user could type. TypeScript
+ * renders the message in IDE error tooltips without showing the invisible
+ * character, so the developer sees a clean English sentence:
+ *
+ *     Type 'Action' is not assignable to type
+ *     'Invalid action key "tabs.close", must be snake_case ASCII matching /^[a-z][a-z0-9_]*$/'.
+ *
+ * Same pattern `@ark/util`'s internal `ErrorMessage<M>` uses. Inlined here
+ * because that helper is not part of `arktype`'s public surface.
+ */
+type InvalidActionKey<S extends string> =
+	`Invalid action key "${S}", must be snake_case ASCII matching /^[a-z][a-z0-9_]*$/​`;
+
+/**
+ * Regex enforcing `^[a-z][a-z0-9_]{0,63}$` at runtime. Used by
+ * `defineActions` for the authoring boundary check and by
+ * `openCollaboration` for the construction-time defense against `as`
+ * casts. Exported so tests and future external validators can share the
+ * single source of truth.
+ */
+export const ACTION_KEY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+/**
+ * Author an `ActionRegistry` with compile-time + runtime key validation.
+ *
+ * Compile time: each key is checked against the snake_case template-literal
+ * type `IsSnakeCaseKey<K>`. A bad key (`'tabs.close'`, `'TabsClose'`,
+ * `'0tab'`, `'_x'`) gets typed to `InvalidActionKey<K>` (a branded error
+ * string) at that property, so the `Action` value the author wrote fails
+ * to assign and TypeScript surfaces the error message at the edit site.
+ *
+ * Runtime: each key is checked against `ACTION_KEY_PATTERN` so dynamic
+ * builders (`Object.fromEntries(...)`) and `as ActionRegistry` casts that
+ * bypass the type still fail fast at construction.
  *
  * @example
- * ```typescript
- * // Define after creating client: const client = createWorkspace({ ... });
- *
- * const actions: Actions = {
- *   posts: {
- *     getAll: defineQuery({
- *       handler: () => client.tables.posts.getAllValid()  // closes over client
- *     }),
- *     create: defineMutation({
- *       handler: ({ title }) => {
- *         client.tables.posts.upsert({ id: generateId(), title });
- *         return { id };
- *       }
- *     }),
- *   },
- *   users: {
- *     profile: {
- *       get: defineQuery({
- *         handler: () => client.tables.users.getCurrentProfile()  // closes over client
- *       }),
- *     },
- *   },
- * };
+ * ```ts
+ * export function createFujiActions(tables: FujiTables) {
+ *   return defineActions({
+ *     entries_create: defineMutation({ ... }),
+ *     entries_update: defineMutation({ ... }),
+ *   });
+ * }
+ * export type FujiActions = ReturnType<typeof createFujiActions>;
  * ```
  */
-export type Actions = {
-	[key: string]: Action | Actions;
-};
+export function defineActions<T extends ActionRegistry>(
+	actions: {
+		[K in keyof T & string]: IsSnakeCaseKey<K> extends true
+			? T[K]
+			: InvalidActionKey<K>;
+	},
+): T {
+	for (const key of Object.keys(actions)) {
+		if (!ACTION_KEY_PATTERN.test(key)) {
+			throw new Error(
+				`Invalid action key "${key}". Must match ${ACTION_KEY_PATTERN.source} (snake_case ASCII, starting with a letter, max 64 chars).`,
+			);
+		}
+	}
+	return actions as T;
+}
 
 /**
  * Define a query (read operation) with full type inference.
  *
- * Returns a callable function with metadata properties (`type`, `input`, `description`).
- * The `type: 'query'` discriminator is attached automatically.
- * Queries map to HTTP GET requests when exposed via the server adapter.
- *
- * The returned action IS the function — call it directly. There is no `.handler` property.
- * Pass `handler` in the config; it gets promoted to the callable root.
- *
- * @example
- * ```typescript
- * const getAllPosts = defineQuery({
- *   handler: () => client.tables.posts.getAllValid(),
- * });
- * getAllPosts();       // call directly
- * getAllPosts.type;    // 'query'
- *
- * const getPost = defineQuery({
- *   input: type({ id: 'string' }),
- *   handler: ({ id }) => client.tables.posts.get(id),
- * });
- * getPost({ id: '1' }); // call directly with typed input
- * ```
+ * Returns the handler with metadata attached. The action callable IS the
+ * handler. Local callers see whatever the handler returns (sync if sync,
+ * raw if raw, `Result` if explicit). Remote callers go through
+ * `collab.dispatch`, which normalizes the response to
+ * `Result<T, DispatchError>` before it crosses the wire.
  */
-/** No input — `TInput` is explicitly `undefined`. */
-export function defineQuery<TOutput = unknown>(
-	config: ActionConfig<undefined, TOutput>,
-): Query<undefined, TOutput>;
-/** With input — `TInput` inferred from the schema. */
-export function defineQuery<TInput extends TSchema, TOutput = unknown>(
-	config: ActionConfig<TInput, TOutput>,
-): Query<TInput, TOutput>;
-export function defineQuery({ handler, ...rest }: ActionConfig): Query {
-	return Object.assign(handler, {
-		type: 'query' as const,
-		...rest,
-	}) as unknown as Query;
+/** No input. `TInput` is explicitly `undefined`. */
+export function defineQuery<R>(
+	config: ActionConfig<undefined, R>,
+): Action<undefined, R, 'query'>;
+/** With input. `TInput` inferred from the schema. */
+export function defineQuery<TInput extends TSchema, R>(
+	config: ActionConfig<TInput, R>,
+): Action<TInput, R, 'query'>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function defineQuery({ handler, ...rest }: any): Action {
+	return Object.assign(handler, { type: 'query' as const, ...rest });
 }
 
 /**
  * Define a mutation (write operation) with full type inference.
  *
- * The `type: 'mutation'` discriminator is attached automatically.
- * Mutations map to HTTP POST requests when exposed via the server adapter.
- *
- * Handlers close over their dependencies (client, tables, extensions, etc.) instead
- * of receiving context as a parameter. Define mutations after creating the client.
- *
- * @example
- * ```typescript
- * // Assuming client is already created:
- * // const client = createWorkspace({ ... });
- *
- * // Mutation that creates a post - closes over client
- * const createPost = defineMutation({
- *   input: type({ title: 'string' }),
- *   handler: ({ title }) => {
- *     const id = generateId();
- *     client.tables.posts.upsert({ id, title });
- *     return { id };
- *   },
- * });
- *
- * // Mutation that syncs data - closes over client and extensions
- * const syncMarkdown = defineMutation({
- *   description: 'Sync markdown files to YJS',
- *   handler: () => client.extensions.markdown.pullFromMarkdown(),
- * });
- * ```
+ * Returns the handler with metadata attached. The action callable IS the
+ * handler. Local callers see whatever the handler returns; remote/AI/CLI
+ * consumers see uniform `Promise<Result>` via the boundary normalizers.
  */
-/** No input — `TInput` is explicitly `undefined`. */
-export function defineMutation<TOutput = unknown>(
-	config: ActionConfig<undefined, TOutput>,
-): Mutation<undefined, TOutput>;
-/** With input — `TInput` inferred from the schema. */
-export function defineMutation<TInput extends TSchema, TOutput = unknown>(
-	config: ActionConfig<TInput, TOutput>,
-): Mutation<TInput, TOutput>;
-export function defineMutation({ handler, ...rest }: ActionConfig): Mutation {
-	return Object.assign(handler, {
-		type: 'mutation' as const,
-		...rest,
-	}) as unknown as Mutation;
+/** No input. `TInput` is explicitly `undefined`. */
+export function defineMutation<R>(
+	config: ActionConfig<undefined, R>,
+): Action<undefined, R, 'mutation'>;
+/** With input. `TInput` inferred from the schema. */
+export function defineMutation<TInput extends TSchema, R>(
+	config: ActionConfig<TInput, R>,
+): Action<TInput, R, 'mutation'>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function defineMutation({ handler, ...rest }: any): Action {
+	return Object.assign(handler, { type: 'mutation' as const, ...rest });
 }
 
 /**
  * Type guard to check if a value is an action definition.
  *
- * Actions are callable functions with a `type` property of 'query' or 'mutation'.
- * Call the action directly — there is no `.handler` property.
- *
- * @param value - The value to check
- * @returns True if the value is an Action definition
- *
- * @example
- * ```typescript
- * if (isAction(value)) {
- *   console.log(value.type); // 'query' | 'mutation'
- *   value(input);            // call directly
- * }
- * ```
+ * Structural check: anything callable with a `type` of `'query'` or
+ * `'mutation'` is an action.
  */
 export function isAction(value: unknown): value is Action {
 	return (
@@ -362,59 +296,72 @@ export function isAction(value: unknown): value is Action {
 
 /**
  * Type guard to check if a value is a query action definition.
- *
- * @param value - The value to check
- * @returns True if the value is a Query definition
  */
-export function isQuery(value: unknown): value is Query {
+export function isQuery(
+	value: unknown,
+): value is Action<TSchema | undefined, unknown, 'query'> {
 	return isAction(value) && value.type === 'query';
 }
 
 /**
  * Type guard to check if a value is a mutation action definition.
- *
- * @param value - The value to check
- * @returns True if the value is a Mutation definition
  */
-export function isMutation(value: unknown): value is Mutation {
+export function isMutation(
+	value: unknown,
+): value is Action<TSchema | undefined, unknown, 'mutation'> {
 	return isAction(value) && value.type === 'mutation';
 }
 
 /**
- * Iterate over action definitions, yielding each action with its path.
+ * Project a callable action onto its wire-form metadata. Functions drop;
+ * live schemas, titles, and descriptions are kept. Used at the daemon
+ * `/list` route and any other surface that needs metadata without handlers.
+ */
+export function toActionMeta({
+	type,
+	input,
+	title,
+	description,
+}: Action): ActionMeta {
+	const meta: ActionMeta = { type };
+	if (input !== undefined) meta.input = input;
+	if (title !== undefined) meta.title = title;
+	if (description !== undefined) meta.description = description;
+	return meta;
+}
+
+/**
+ * Invoke an action when the caller does not statically know the handler
+ * return shape.
  *
- * Use this for adapters (CLI, Server) that need to introspect and invoke actions.
- * Each action is callable directly — just call `action(input)`.
- *
- * @param actions - The action tree to iterate over
- * @param path - Internal parameter for tracking the current path (default: [])
- * @yields Tuples of [action, path] where path is an array of keys
+ * Raw values get `Ok`-wrapped, existing `Result`s pass through, and thrown
+ * errors become `Err(cause)` with the raw thrown value under `.error`. The
+ * dispatch wire boundary (`runInboundDispatch` in `document/dispatch.ts`)
+ * is responsible for wrapping the cause into `DispatchError.ActionFailed`
+ * before the response crosses the wire; callers in-process see whatever
+ * the handler actually threw or returned.
  *
  * @example
- * ```typescript
- * // In a server adapter
- * for (const [action, path] of iterateActions(actions)) {
- *   const route = path.join('/');
- *   registerRoute(route, async (input) => action(input));
- * }
- *
- * // In a CLI adapter
- * for (const [action, path] of iterateActions(actions)) {
- *   const command = path.join(':');
- *   cli.command(command, async (input) => action(input));
- * }
+ * ```ts
+ * const result = await invokeAction<{ closedCount: number }>(
+ *   workspace.actions.tabs_close,
+ *   { tabIds: [1, 2] },
+ * );
+ * if (result.error) { ... }
+ * console.log(result.data.closedCount);
  * ```
  */
-export function* iterateActions(
-	actions: Actions,
-	path: string[] = [],
-): Generator<[Action, string[]]> {
-	for (const [key, value] of Object.entries(actions)) {
-		const currentPath = [...path, key];
-		if (isAction(value)) {
-			yield [value, currentPath];
-		} else {
-			yield* iterateActions(value as Actions, currentPath);
-		}
+export async function invokeAction<T = unknown>(
+	action: Action,
+	input: unknown | undefined,
+): Promise<Result<T, unknown>> {
+	try {
+		const ret =
+			action.input !== undefined
+				? await (action as (i: unknown) => unknown)(input)
+				: await (action as () => unknown)();
+		return (isResult(ret) ? ret : Ok(ret)) as Result<T, unknown>;
+	} catch (cause) {
+		return Err(cause);
 	}
 }

@@ -14,10 +14,7 @@ export const filesTable = defineTable(
 		trashedAt: 'number | null',
 		_v: '1',
 	}),
-).withDocument('content', {
-	guid: 'id',
-	onUpdate: () => ({ updatedAt: Date.now() }),
-});
+);
 
 /** File metadata row derived from the files table definition */
 export type FileRow = InferTableRow<typeof filesTable>;

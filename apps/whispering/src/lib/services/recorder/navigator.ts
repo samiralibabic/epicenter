@@ -12,7 +12,7 @@ import {
 import type {
 	DeviceAcquisitionOutcome,
 	DeviceIdentifier,
-} from '$lib/services/types';
+} from '$lib/services/recorder/types';
 import type { NavigatorRecordingParams, RecorderService } from './types';
 import { RecorderError } from './types';
 
@@ -184,8 +184,6 @@ export const NavigatorRecorderServiceLive: RecorderService = {
 		return Ok({ status: 'cancelled' });
 	},
 };
-
-export type NavigatorRecorderService = typeof NavigatorRecorderServiceLive;
 
 /**
  * Determines the best supported audio MIME type for the current browser.

@@ -1,6 +1,16 @@
 import type { Brand } from 'wellcrafted/brand';
 
 /**
+ * A value that may be synchronous or wrapped in a Promise.
+ */
+export type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * Flatten a mapped or conditional type for IDE hover output.
+ */
+export type Simplify<T> = { [K in keyof T]: T[K] } & {};
+
+/**
  * Branded type for absolute filesystem paths.
  *
  * Ensures paths have been resolved to absolute paths at the type level,

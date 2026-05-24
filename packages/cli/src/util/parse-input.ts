@@ -1,118 +1,75 @@
-import { readFileSync, readSync } from 'node:fs';
-import {
-	defineErrors,
-	extractErrorMessage,
-	type InferErrors,
-} from 'wellcrafted/error';
-import { Err, type Result, trySync } from 'wellcrafted/result';
+import { readFileSync } from 'node:fs';
+import { extractErrorMessage } from 'wellcrafted/error';
 
-export type ParseInputOptions = {
-	/** Positional argument (inline JSON or @file) */
+/**
+ * Parse JSON input from CLI sources.
+ *
+ * Priority: positional (inline JSON or `@file`) > stdin. Returns `undefined`
+ * when no source is populated. Throws `Error` with a human-readable message
+ * on invalid JSON or missing `@file`.
+ *
+ * The error-shape discrimination that `wellcrafted`'s Result-types would
+ * carry isn't useful here; the sole caller in `run.ts` rethrows
+ * `error.message` verbatim. Plain `throw` at a CLI boundary is the simpler
+ * equivalent.
+ */
+export function parseJsonInput<T = unknown>({
+	positional,
+	stdinContent,
+}: {
+	/** Positional argument: inline JSON, or `@file.json` (curl convention) */
 	positional?: string;
-	/** --file flag value */
-	file?: string;
-	/** Whether stdin has data (process.stdin.isTTY === false) */
-	hasStdin?: boolean;
-	/** Stdin content (if hasStdin) */
+	/** Stdin content (undefined = no piped input) */
 	stdinContent?: string;
-};
-
-const ParseInputError = defineErrors({
-	InvalidJson: ({ cause }: { cause: unknown }) => ({
-		message: `Invalid JSON: ${extractErrorMessage(cause)}`,
-		cause,
-	}),
-	FileNotFound: ({ path }: { path: string }) => ({
-		message: `File not found: ${path}`,
-		path,
-	}),
-	FileReadFailed: ({ path, cause }: { path: string; cause: unknown }) => ({
-		message: `Error reading file '${path}': ${extractErrorMessage(cause)}`,
-		path,
-		cause,
-	}),
-	NoInputProvided: () => ({
-		message:
-			'No input provided. Use inline JSON, --file, @file, or pipe via stdin.',
-	}),
-});
-type ParseInputError = InferErrors<typeof ParseInputError>;
-
-function parseJson<T>(input: string): Result<T, ParseInputError> {
-	return trySync({
-		try: () => JSON.parse(input) as T,
-		catch: (error) => ParseInputError.InvalidJson({ cause: error }),
-	});
+}): T | undefined {
+	if (positional) {
+		if (positional.startsWith('@')) {
+			const filePath = positional.slice(1);
+			return readJsonFile<T>(filePath);
+		}
+		return parseJson<T>(positional);
+	}
+	if (stdinContent) {
+		return parseJson<T>(stdinContent);
+	}
+	return undefined;
 }
 
-function readJsonFile<T>(filePath: string): Result<T, ParseInputError> {
-	const { data: content, error: readError } = trySync({
-		try: () => readFileSync(filePath, 'utf-8'),
-		catch: (error) => {
-			if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-				return ParseInputError.FileNotFound({ path: filePath });
-			}
-			return ParseInputError.FileReadFailed({
-				path: filePath,
-				cause: error,
-			});
-		},
-	});
+function parseJson<T>(input: string): T {
+	try {
+		return JSON.parse(input) as T;
+	} catch (error) {
+		throw new Error(`Invalid JSON: ${extractErrorMessage(error)}`);
+	}
+}
 
-	if (readError) return Err(readError);
-
+function readJsonFile<T>(filePath: string): T {
+	let content: string;
+	try {
+		content = readFileSync(filePath, 'utf-8');
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+			throw new Error(`File not found: ${filePath}`);
+		}
+		throw new Error(
+			`Error reading file '${filePath}': ${extractErrorMessage(error)}`,
+		);
+	}
 	return parseJson<T>(content);
 }
 
 /**
- * Parse JSON input from various sources.
- * Priority: positional > --file > stdin
+ * Read piped stdin content (for CLI use). Returns undefined when stdin
+ * is a TTY (interactive terminal, no pipe).
+ *
+ * Caveat: if stdin reports non-TTY but no writer is connected (pathological
+ * CI/Docker TTY-allocation shapes), `Bun.stdin.text()` blocks until the OS
+ * closes the fd. This is rare; the fix is environmental (redirect
+ * `</dev/null`) rather than adding per-invocation latency for the common
+ * healthy-pipe case.
  */
-export function parseJsonInput<T = unknown>(
-	options: ParseInputOptions,
-): Result<T, ParseInputError> {
-	// 1. Check positional (could be inline JSON or @file)
-	if (options.positional) {
-		if (options.positional.startsWith('@')) {
-			const filePath = options.positional.slice(1);
-			return readJsonFile<T>(filePath);
-		}
-		return parseJson<T>(options.positional);
-	}
-
-	// 2. Check --file flag
-	if (options.file) {
-		return readJsonFile<T>(options.file);
-	}
-
-	// 3. Check stdin
-	if (options.hasStdin && options.stdinContent) {
-		return parseJson<T>(options.stdinContent);
-	}
-
-	return ParseInputError.NoInputProvided();
-}
-
-/**
- * Read stdin content synchronously (for CLI use).
- * Returns undefined if stdin is a TTY (interactive).
- */
-export function readStdinSync(): string | undefined {
+export async function readStdin(): Promise<string | undefined> {
 	if (process.stdin.isTTY) return undefined;
-
-	try {
-		const chunks: Buffer[] = [];
-		const fd = 0; // stdin file descriptor
-		const buf = Buffer.alloc(1024);
-		let bytesRead: number;
-
-		// biome-ignore lint/suspicious/noAssignInExpressions: idiomatic read loop
-		while ((bytesRead = readSync(fd, buf, 0, buf.length, null)) > 0) {
-			chunks.push(buf.subarray(0, bytesRead));
-		}
-
-		return Buffer.concat(chunks).toString('utf-8').trim() || undefined;
-	} catch {
-		return undefined;
-	}
+	const text = await Bun.stdin.text();
+	return text.trim() || undefined;
 }

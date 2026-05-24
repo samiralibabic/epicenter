@@ -1,8 +1,9 @@
 import type { InferKvValue } from '@epicenter/workspace';
 import { SvelteMap } from 'svelte/reactivity';
-import { workspace } from '$lib/client';
+import { whispering } from '$lib/whispering/client';
+import { whisperingKv } from '$lib/workspace';
 
-const KV_DEFINITIONS = workspace.definitions.kv;
+const KV_DEFINITIONS = whisperingKv;
 type KvKey = keyof typeof KV_DEFINITIONS & string;
 
 type KvDefs = typeof KV_DEFINITIONS;
@@ -13,18 +14,18 @@ function createSettings() {
 	// Initialize SvelteMap with current values for ALL KV keys.
 	// kv.get() always returns a valid value (stored value or defaultValue).
 	for (const key of Object.keys(KV_DEFINITIONS) as KvKey[]) {
-		map.set(key, workspace.kv.get(key));
+		map.set(key, whispering.kv.get(key));
 	}
 
 	// Single observer for ALL KV changes (local or remote).
 	// Observer updates SvelteMap → components re-render per-key.
-	workspace.kv.observeAll((changes) => {
+	whispering.kv.observeAll((changes) => {
 		for (const [key, change] of changes) {
 			if (change.type === 'set') {
 				map.set(key, change.value);
 			} else if (change.type === 'delete') {
 				// On delete, restore default value so map always has a value
-				map.set(key, workspace.kv.get(key));
+				map.set(key, whispering.kv.get(key));
 			}
 		}
 	});
@@ -48,7 +49,7 @@ function createSettings() {
 			key: K,
 			value: InferKvValue<KvDefs[K]>,
 		) {
-			workspace.kv.set(key, value);
+			whispering.kv.set(key, value);
 		},
 
 		/**
@@ -57,7 +58,7 @@ function createSettings() {
 		 */
 		reset() {
 			for (const key of Object.keys(KV_DEFINITIONS) as KvKey[]) {
-				workspace.kv.set(key, KV_DEFINITIONS[key].defaultValue);
+				whispering.kv.set(key, KV_DEFINITIONS[key].defaultValue);
 			}
 		},
 	};

@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Test file conventions for setup functions, factory patterns, test organization, type testing, and naming. Use when the user says "write tests", "add a test", "fix this test", or when writing or modifying *.test.ts files, creating test setup functions, or reviewing test structure.
+description: 'Test file conventions: setup functions, factories, organization, type testing, naming. Use when: "write tests", "add a test", "fix this test", or modifying *.test.ts files.'
 metadata:
   author: epicenter
   version: '2.0'
@@ -17,6 +17,7 @@ Use this pattern when you need to:
 - Split large test files into focused behavior/type/scenario files.
 - Enforce behavior-based test naming and clear failure intent.
 - Add or review negative type tests using `@ts-expect-error`.
+- Audit a test file for assertions that cannot fail or fakes that don't earn their lines.
 
 ## References
 
@@ -25,16 +26,34 @@ Load these on demand based on what you're working on:
 - If working with **negative type tests** (`@ts-expect-error`, `bun:test` type strategy, no `as any`), read [references/type-testing.md](references/type-testing.md)
 - If working with **test setup architecture** (`setup()` patterns, composable setup, `beforeEach` avoidance, shared schemas), read [references/setup-pattern.md](references/setup-pattern.md)
 - If working with **test organization structure** (flat tests, `describe()` boundaries, helper-over-nesting), read [references/test-structure.md](references/test-structure.md)
+- If **auditing existing tests** for hedged assertions, pass-through getters, stalled fakes, dead fake surface, or docstrings that contradict the code, read [references/honest-tests.md](references/honest-tests.md)
 
 External reading:
 
-- Kent C. Dodds, ["Avoid Nesting When You're Testing"](https://kentcdodds.com/blog/avoid-nesting-when-youre-testing) — setup functions over beforeEach, flat tests
-- Kent C. Dodds, ["AHA Testing"](https://kentcdodds.com/blog/aha-testing) — avoid hasty abstractions in tests
-- Kent C. Dodds, [Testing JavaScript](https://testingjavascript.com) — Test Object Factory Pattern
-- Matt Pocock, ["How to test your types"](https://www.totaltypescript.com/how-to-test-your-types) — vitest `expectTypeOf` for type testing
-- Matt Pocock, [`shoehorn`](https://github.com/total-typescript/shoehorn) — partial mocks for test ergonomics
+- Kent C. Dodds, ["Avoid Nesting When You're Testing"](https://kentcdodds.com/blog/avoid-nesting-when-youre-testing) : setup functions over beforeEach, flat tests
+- Kent C. Dodds, ["AHA Testing"](https://kentcdodds.com/blog/aha-testing) : avoid hasty abstractions in tests
+- Kent C. Dodds, [Testing JavaScript](https://testingjavascript.com) : Test Object Factory Pattern
+- Matt Pocock, ["How to test your types"](https://www.totaltypescript.com/how-to-test-your-types) : vitest `expectTypeOf` for type testing
+- Matt Pocock, [`shoehorn`](https://github.com/total-typescript/shoehorn) : partial mocks for test ergonomics
 
 > **Related Skills**: See `services-layer` for the service patterns being tested. See `typescript` for type testing conventions.
+
+## Tests vs. Benchmarks
+
+Two distinct file extensions, two distinct purposes:
+
+- **`*.test.ts`** : asserts behavior with `expect()`. Runs under `bun test`
+  (repo default, CI). A test file without at least one `expect()` call does
+  not belong under this extension.
+- **`*.bench.ts`** : measures and reports. Prints tables, timings, or
+  storage sizes. Runs under `bun bench` only. No assertions required
+  (perf thresholds on shared hardware flake; prefer visual trends).
+
+A single file is one or the other, never both. Benchmarks live under
+`src/__benchmarks__/` within a package; tests are colocated with the module
+they cover. The `bun test` default-discovery glob picks up only `*.test.ts`
+and friends, so renaming a report from `.test.ts` → `.bench.ts` is what
+excludes it from CI.
 
 ## File-Level Doc Comments
 

@@ -1,24 +1,25 @@
 ---
 name: arktype
-description: Arktype patterns for runtime validation, discriminated unions with .merge() and .or(), spread key syntax, and type composition. Use when the user mentions arktype, type(), or when building union types, combining schemas with variants, or defining command/event schemas.
+description: 'Arktype: runtime validation, discriminated unions with .merge()/.or(), spread keys. Use when mentioning arktype, type(), union types, command/event schemas.'
 metadata:
   author: epicenter
   version: '1.0'
 ---
 
-# Arktype Discriminated Unions
+# Arktype Patterns
 
-Patterns for composing discriminated unions with arktype's `.merge()` and `.or()` methods.
+Patterns for composing arktype schemas, naming runtime schema values alongside inferred types, and building discriminated unions with `.merge()` and `.or()`.
 
 ## When to Apply This Skill
 
 - Defining a discriminated union schema (e.g., commands, events, actions)
 - Composing a base type with per-variant fields
 - Working with `defineTable()` schemas that use union types
+- Importing or exporting schema values that share a name with inferred types
 
 ## `base.merge(type.or(...))` Pattern (Recommended)
 
-Use when you have shared base fields and per-variant payloads discriminated on a literal key. `.merge()` distributes over unions — it merges the base into each branch of the union automatically.
+Use when you have shared base fields and per-variant payloads discriminated on a literal key. `.merge()` distributes over unions: it merges the base into each branch of the union automatically.
 
 ```typescript
 import { type } from 'arktype';
@@ -54,11 +55,11 @@ const Command = commandBase.merge(
 
 ### How it works
 
-1. `type.or(...)` creates a union of plain object definitions — each is a variant with its own fields.
+1. `type.or(...)` creates a union of plain object definitions. Each is a variant with its own fields.
 2. `commandBase.merge(union)` distributes the merge across each branch of the union. Internally, arktype calls `rNode.distribute()` to apply the merge to each branch individually ([source](https://github.com/arktypeio/arktype/blob/6d0639bf/ark/schema/roots/root.ts#L290-L302)).
 3. The result is a union where each branch has all `commandBase` fields plus its variant-specific fields.
 4. Arktype auto-detects the `action` key as a discriminant because each branch has a distinct literal value.
-5. `switch (cmd.action)` in TypeScript narrows the full union — payload fields and result types are type-safe per branch.
+5. `switch (cmd.action)` in TypeScript narrows the full union. Payload fields and result types are type-safe per branch.
 
 ### Why this pattern
 
@@ -66,10 +67,10 @@ const Command = commandBase.merge(
 | ---------------------- | -------------------------------------------------- |
 | Base is a real `Type`  | Reusable, composable, inspectable at runtime       |
 | `.merge()` distributes | No need to repeat `base.merge(...)` per variant    |
-| `type.or()` is flat    | All variants in one list — easy to read and add to |
-| Base appears once      | DRY — change base fields in one place              |
+| `type.or()` is flat    | All variants in one list, easy to read and add to  |
+| Base appears once      | DRY: change base fields in one place               |
 | Auto-discrimination    | No manual discriminant config needed               |
-| Flat payload           | No nested `payload` object — fields are top-level  |
+| Flat payload           | No nested `payload` object; fields are top-level   |
 
 ## `.merge().or()` Chaining Pattern (Good for 2-3 variants)
 
@@ -148,7 +149,7 @@ The static form avoids deeply nested chaining and creates the union in a single 
 `.merge()` distributes over unions on both sides. If you merge a union into an object type (or vice versa), the operation is applied to each branch individually:
 
 ```typescript
-// base.merge(union) — distributes merge across each branch
+// base.merge(union): distributes merge across each branch
 const Result = baseType.merge(type.or({ a: 'string' }, { b: 'number' }));
 // Equivalent to: type.or(baseType.merge({ a: 'string' }), baseType.merge({ b: 'number' }))
 ```
@@ -165,7 +166,7 @@ commandBase.merge(type.or({ a: 'string' }, { b: 'number' }));
 
 ## Optional Properties in Unions
 
-Use arktype's `'key?'` syntax for optional properties. Never use `| undefined` for optionals — it breaks JSON Schema conversion.
+Use arktype's `'key?'` syntax for optional properties. Never use `| undefined` for optionals because it breaks JSON Schema conversion.
 
 ```typescript
 // Good: optional property syntax
@@ -184,14 +185,14 @@ commandBase.merge({
 });
 ```
 
-The `'result?': type({...}).or('undefined')` pattern is correct — the `?` makes the key optional, and `.or('undefined')` allows the value to be explicitly `undefined` when present. This is the standard pattern for "pending = absent, done = has value" semantics.
+The `'result?': type({...}).or('undefined')` pattern is correct. The `?` makes the key optional, and `.or('undefined')` allows the value to be explicitly `undefined` when present. This is the standard pattern for "pending = absent, done = has value" semantics.
 
 ## Merge Behavior
 
 - **Override**: When both the base and merge argument define the same key, the merge argument wins
 - **Optional preservation**: If a key is optional (`'key?'`) in the base and required in the merge, the merge argument's optionality wins
-- **No deep merge**: `.merge()` is shallow — it replaces top-level keys, not nested objects
-- **Distributes over unions**: Both the base and the argument can be unions — merge is applied per-branch
+- **No deep merge**: `.merge()` is shallow. It replaces top-level keys, not nested objects
+- **Distributes over unions**: Both the base and the argument can be unions; merge is applied per branch
 
 ## Discriminant Detection
 
@@ -207,14 +208,14 @@ const AorB = type({ kind: "'A'", value: 'number' }).or({
 // Validation checks `kind` first, then validates only the matching branch
 ```
 
-This works with any literal type — string literals, number literals, or boolean literals.
+This works with any literal type: string literals, number literals, or boolean literals.
 
 ## Always Wrap Extracted Types with `type()`
 
-When extracting reusable arktype types into named constants, always wrap them with `type()` — even for simple string literal unions. This ensures the value is a proper arktype `Type` with `.infer`, `.or()`, `.merge()`, etc.
+When extracting reusable arktype types into named constants, always wrap them with `type()`, even for simple string literal unions. This ensures the value is a proper arktype `Type` with `.infer`, `.or()`, `.merge()`, etc.
 
 ```typescript
-// GOOD: wrapped with type() — composable, has .infer, works with .or()/.merge()
+// GOOD: wrapped with type(), composable, has .infer, works with .or()/.merge()
 const tabGroupColor = type(
 	"'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'",
 );
@@ -226,14 +227,47 @@ const commandBase = type({
 	_v: '1',
 });
 
-// BAD: plain string — not a Type, can't compose, no .infer
+// BAD: plain string, not a Type, can't compose, no .infer
 const tabGroupColor =
 	"'grey' | 'blue' | 'red' | 'yellow' | 'green' | 'pink' | 'purple' | 'cyan' | 'orange'";
 ```
 
 Both work when used as a value inside `type({...})` object literals (arktype coerces strings). But only the `type()`-wrapped version is a first-class `Type` that works in all positions.
 
-## `type.enumerated()` — Derive Unions from Const Arrays
+## Let Schema Values and Inferred Types Share a Name
+
+When an arktype schema exports both a runtime value and its inferred type with the same name, import that name once. TypeScript keeps value space and type space separate, so the same identifier can validate at runtime and annotate values at compile time.
+
+```typescript
+// Good: one import covers both namespaces
+import { EncryptionKeys } from '@epicenter/encryption';
+
+const Session = type({
+	encryptionKeys: EncryptionKeys,
+});
+
+type SessionResponse = {
+	encryptionKeys: EncryptionKeys;
+};
+```
+
+Avoid aliasing the runtime schema just to make room for the type import.
+
+```typescript
+// Bad: duplicates the name with an artificial Schema suffix
+import {
+	EncryptionKeys as EncryptionKeysSchema,
+	type EncryptionKeys,
+} from '@epicenter/encryption';
+
+const Session = type({
+	encryptionKeys: EncryptionKeysSchema,
+});
+```
+
+Reach for an alias only when two imported values genuinely collide in the same namespace. A runtime schema and its inferred type do not collide.
+
+## `type.enumerated()`: Derive Unions from Const Arrays
 
 Use `type.enumerated()` to create string literal unions from existing `as const` arrays. This keeps the workspace schema in sync with app constants automatically.
 
@@ -270,13 +304,13 @@ Combine with `base.merge(type.or(...))` to build unions where each variant's mod
 const transcriptionConfig = type.or(
 	{ service: "'OpenAI'", model: type.enumerated(...OPENAI_MODELS.map((m) => m.name)) },
 	{ service: "'Groq'", model: type.enumerated(...GROQ_MODELS.map((m) => m.name)) },
-	{ service: "'whispercpp'" },  // local — no model field
+	{ service: "'whispercpp'" },  // local: no model field
 );
 ```
 
 ### Why derive from constants
 
-- **Single source of truth**: Model lists are maintained in one place — the constant arrays
+- **Single source of truth**: Model lists are maintained in one place: the constant arrays
 - **Auto-sync**: Adding a model to the array automatically updates the workspace schema
 - **No string drift**: Impossible for the schema to list models that don't exist in the app
 
@@ -293,12 +327,12 @@ const Command = type({ ...baseFields, action: "'closeTabs'" }).or({
 });
 ```
 
-This works but `baseFields` is not an arktype `Type` — you can't call `.merge()`, `.or()`, or inspect it at runtime. Prefer `.merge()` when the base should be a proper type.
+This works but `baseFields` is not an arktype `Type`. You can't call `.merge()`, `.or()`, or inspect it at runtime. Prefer `.merge()` when the base should be a proper type.
 
 ### Repeating `base.merge(...)` per variant
 
 ```typescript
-// Bad: repetitive — base.merge repeated for every variant
+// Bad: repetitive, base.merge repeated for every variant
 type.or(
 	commandBase.merge({ action: "'closeTabs'", tabIds: 'string[]' }),
 	commandBase.merge({ action: "'openTab'", url: 'string' }),
@@ -327,7 +361,7 @@ commandBase.merge({ 'windowId?': 'string' });
 
 ## References
 
-- `apps/tab-manager/src/lib/workspace.ts` — Commands table using `commandBase.merge(type.or(...))`
-- `.agents/skills/typescript/SKILL.md` — Arktype optional properties section
-- `.agents/skills/workspace-api/SKILL.md` — `defineTable()` accepts union types
-- [arktype source: merge distributes](https://github.com/arktypeio/arktype/blob/6d0639bf/ark/schema/roots/root.ts#L290-L302) — `rNode.distribute()` in merge implementation
+- `apps/tab-manager/src/lib/workspace.ts`: Commands table using `commandBase.merge(type.or(...))`
+- `.agents/skills/typescript/SKILL.md`: Arktype optional properties section
+- `.agents/skills/workspace-api/SKILL.md`: `defineTable()` accepts union types
+- [arktype source: merge distributes](https://github.com/arktypeio/arktype/blob/6d0639bf/ark/schema/roots/root.ts#L290-L302): `rNode.distribute()` in merge implementation

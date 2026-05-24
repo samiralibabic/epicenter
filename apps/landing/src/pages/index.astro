@@ -111,7 +111,8 @@ const ecosystem = [
 	},
 ];
 
-const quickstartCodeHtml = `<span class="text-violet-400">import</span> { defineTable, defineWorkspace, createWorkspace } <span class="text-violet-400">from</span> <span class="text-emerald-400">'@epicenter/workspace'</span>
+const quickstartCodeHtml = `<span class="text-violet-400">import</span> { attachTables, defineDocument, defineTable } <span class="text-violet-400">from</span> <span class="text-emerald-400">'@epicenter/workspace'</span>
+<span class="text-violet-400">import</span> * <span class="text-violet-400">as</span> Y <span class="text-violet-400">from</span> <span class="text-emerald-400">'yjs'</span>
 
 <span class="text-violet-400">const</span> posts = <span class="text-amber-300">defineTable</span>({
   _v: <span class="text-amber-300">1</span>,
@@ -119,12 +120,13 @@ const quickstartCodeHtml = `<span class="text-violet-400">import</span> { define
   published: { schema: <span class="text-emerald-400">'boolean'</span>, default: <span class="text-amber-300">false</span> },
 })
 
-<span class="text-violet-400">const</span> workspace = <span class="text-amber-300">defineWorkspace</span>({
-  id: <span class="text-emerald-400">'my-app'</span>,
-  tables: { posts },
+<span class="text-violet-400">const</span> myApp = <span class="text-amber-300">defineDocument</span>(<span class="text-emerald-400">'my-app'</span>, () =&gt; {
+  <span class="text-violet-400">const</span> ydoc = <span class="text-violet-400">new</span> Y.<span class="text-amber-300">Doc</span>({ guid: <span class="text-emerald-400">'my-app'</span> })
+  <span class="text-violet-400">const</span> tables = <span class="text-amber-300">attachTables</span>(ydoc, { posts })
+  <span class="text-violet-400">return</span> { id: <span class="text-emerald-400">'my-app'</span>, ydoc, tables }
 })
 
-<span class="text-violet-400">const</span> client = <span class="text-amber-300">createWorkspace</span>(workspace)
+<span class="text-violet-400">const</span> client = myApp.<span class="text-amber-300">open</span>()
 client.tables.posts.<span class="text-amber-300">set</span>({ id: <span class="text-emerald-400">'hello'</span>, title: <span class="text-emerald-400">'Hello World'</span>, published: <span class="text-amber-300">true</span> })`;
 ---
 

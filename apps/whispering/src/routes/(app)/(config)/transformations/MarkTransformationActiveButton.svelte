@@ -3,7 +3,7 @@
 	import CheckCircleIcon from '@lucide/svelte/icons/check-circle';
 	import CircleIcon from '@lucide/svelte/icons/circle';
 	import { settings } from '$lib/state/settings.svelte';
-	import type { Transformation } from '$lib/state/transformations.svelte';
+	import type { Transformation } from '$lib/workspace';
 
 	let {
 		transformation,

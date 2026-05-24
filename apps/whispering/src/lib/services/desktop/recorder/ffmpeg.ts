@@ -18,16 +18,14 @@ import {
 } from '$lib/services/desktop/command';
 import { FsServiceLive } from '$lib/services/desktop/fs';
 import {
-	type FfmpegRecordingParams,
-	RecorderError,
-	type RecorderService,
-} from '$lib/services/recorder/types';
-import {
 	asDeviceIdentifier,
 	type Device,
 	type DeviceAcquisitionOutcome,
 	type DeviceIdentifier,
-} from '$lib/services/types';
+	type FfmpegRecordingParams,
+	RecorderError,
+	type RecorderService,
+} from '$lib/services/recorder/types';
 
 /**
  * Default FFmpeg global options.

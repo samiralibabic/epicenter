@@ -12,17 +12,41 @@ import {
 	type WhisperingResult,
 } from '$lib/result';
 import { services } from '$lib/services';
-import type {
-	TransformationRunCompleted,
-	TransformationRunFailed,
-	TransformationRunRunning,
-} from '$lib/services/db';
+import type { DeviceConfigKey } from '$lib/state/device-config.svelte';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
-import type { TransformationStep } from '$lib/state/transformation-steps.svelte';
+import { transformationRuns } from '$lib/state/transformation-runs.svelte';
 import { transformationSteps } from '$lib/state/transformation-steps.svelte';
-import type { Transformation } from '$lib/state/transformations.svelte';
 import { asTemplateString, interpolateTemplate } from '$lib/utils/template';
+import { whispering } from '$lib/whispering/client';
+import type {
+	Transformation,
+	TransformationRun,
+	TransformationStep,
+	TransformationStepRun,
+} from '$lib/workspace';
+
+type TransformationRunRunning = Extract<
+	TransformationRun,
+	{ status: 'running' }
+>;
+type TransformationRunCompleted = Extract<
+	TransformationRun,
+	{ status: 'completed' }
+>;
+type TransformationRunFailed = Extract<TransformationRun, { status: 'failed' }>;
+type TransformationStepRunRunning = Extract<
+	TransformationStepRun,
+	{ status: 'running' }
+>;
+type TransformationStepRunCompleted = Extract<
+	TransformationStepRun,
+	{ status: 'completed' }
+>;
+type TransformationStepRunFailed = Extract<
+	TransformationStepRun,
+	{ status: 'failed' }
+>;
 
 /**
  * Config map for standard completion providers that share the same
@@ -66,7 +90,7 @@ const STANDARD_PROVIDER_CONFIG = {
 				userPrompt: string;
 			}) => Promise<Result<string, { message: string }>>;
 		};
-		apiKeyPath: Parameters<typeof deviceConfig.get>[0];
+		apiKeyPath: DeviceConfigKey;
 		modelKey: keyof TransformationStep;
 	}
 >;
@@ -74,11 +98,11 @@ const STANDARD_PROVIDER_CONFIG = {
 export const TransformError = defineErrors({
 	InvalidInput: ({ message }: { message: string }) => ({ message }),
 	NoSteps: ({ message }: { message: string }) => ({ message }),
-	DbCreateRunFailed: ({ message }: { message: string }) => ({ message }),
-	DbAddStepFailed: ({ message }: { message: string }) => ({ message }),
-	DbFailStepFailed: ({ message }: { message: string }) => ({ message }),
-	DbCompleteStepFailed: ({ message }: { message: string }) => ({ message }),
-	DbCompleteRunFailed: ({ message }: { message: string }) => ({ message }),
+	CreateRunFailed: ({ message }: { message: string }) => ({ message }),
+	AddStepFailed: ({ message }: { message: string }) => ({ message }),
+	FailStepFailed: ({ message }: { message: string }) => ({ message }),
+	CompleteStepFailed: ({ message }: { message: string }) => ({ message }),
+	CompleteRunFailed: ({ message }: { message: string }) => ({ message }),
 });
 export type TransformError = InferErrors<typeof TransformError>;
 
@@ -93,12 +117,13 @@ export const transformer = {
 		mutationFn: async ({
 			input,
 			transformation,
-			steps,
 		}: {
 			input: string;
 			transformation: Transformation;
-			steps: TransformationStep[];
 		}): Promise<WhisperingResult<string>> => {
+			const steps = transformationSteps.getByTransformationId(
+				transformation.id,
+			);
 			const getTransformationOutput = async (): Promise<
 				Result<string, WhisperingError>
 			> => {
@@ -285,40 +310,38 @@ async function runTransformation({
 		});
 	}
 
+	const now = new Date().toISOString();
+	const runId = nanoid();
+
 	const transformationRun = {
-		id: nanoid(),
+		id: runId,
 		transformationId: transformation.id,
 		recordingId,
 		input,
-		startedAt: new Date().toISOString(),
+		startedAt: now,
 		completedAt: null,
 		status: 'running',
-		stepRuns: [],
+		_v: 1,
 	} satisfies TransformationRunRunning;
 
-	const { error: createTransformationRunError } =
-		await services.db.runs.create(transformationRun);
-
-	if (createTransformationRunError)
-		return TransformError.DbCreateRunFailed({
-			message: 'Unable to start transformation run',
-		});
+	transformationRuns.set(transformationRun);
 
 	let currentInput = input;
 
-	for (const step of steps) {
-		const {
-			data: newTransformationStepRun,
-			error: addTransformationStepRunError,
-		} = await services.db.runs.addStep(transformationRun, {
-			id: step.id,
+	for (const [stepIndex, step] of steps.entries()) {
+		const stepRunId = nanoid();
+		const stepRun = {
+			id: stepRunId,
+			transformationRunId: runId,
+			stepId: step.id,
+			order: stepIndex,
 			input: currentInput,
-		});
-
-		if (addTransformationStepRunError)
-			return TransformError.DbAddStepFailed({
-				message: 'Unable to initialize transformation step',
-			});
+			startedAt: new Date().toISOString(),
+			completedAt: null,
+			status: 'running',
+			_v: 1,
+		} satisfies TransformationStepRunRunning;
+		whispering.tables.transformationStepRuns.set(stepRun);
 
 		const handleStepResult = await handleStep({
 			input: currentInput,
@@ -326,46 +349,43 @@ async function runTransformation({
 		});
 
 		if (isErr(handleStepResult)) {
-			const {
-				data: markedFailedTransformationRun,
-				error: markTransformationRunAndRunStepAsFailedError,
-			} = await services.db.runs.failStep(
-				transformationRun,
-				newTransformationStepRun.id,
-				handleStepResult.error,
-			);
-			if (markTransformationRunAndRunStepAsFailedError)
-				return TransformError.DbFailStepFailed({
-					message: 'Unable to save failed transformation step result',
-				});
-			return Ok(markedFailedTransformationRun);
+			const failedNow = new Date().toISOString();
+			const failedStepRun = {
+				...stepRun,
+				status: 'failed',
+				completedAt: failedNow,
+				error: handleStepResult.error,
+			} satisfies TransformationStepRunFailed;
+			whispering.tables.transformationStepRuns.set(failedStepRun);
+			const failedRun = {
+				...transformationRun,
+				status: 'failed',
+				completedAt: failedNow,
+				error: handleStepResult.error,
+			} satisfies TransformationRunFailed;
+			transformationRuns.set(failedRun);
+			return Ok(failedRun);
 		}
 
 		const handleStepOutput = handleStepResult.data;
 
-		const { error: markTransformationRunStepAsCompletedError } =
-			await services.db.runs.completeStep(
-				transformationRun,
-				newTransformationStepRun.id,
-				handleStepOutput,
-			);
-
-		if (markTransformationRunStepAsCompletedError)
-			return TransformError.DbCompleteStepFailed({
-				message: 'Unable to save completed transformation step result',
-			});
+		const completedStepRun = {
+			...stepRun,
+			status: 'completed',
+			completedAt: new Date().toISOString(),
+			output: handleStepOutput,
+		} satisfies TransformationStepRunCompleted;
+		whispering.tables.transformationStepRuns.set(completedStepRun);
 
 		currentInput = handleStepOutput;
 	}
 
-	const {
-		data: markedCompletedTransformationRun,
-		error: markTransformationRunAsCompletedError,
-	} = await services.db.runs.complete(transformationRun, currentInput);
-
-	if (markTransformationRunAsCompletedError)
-		return TransformError.DbCompleteRunFailed({
-			message: 'Unable to save completed transformation run',
-		});
-	return Ok(markedCompletedTransformationRun);
+	const completedRun = {
+		...transformationRun,
+		status: 'completed',
+		completedAt: new Date().toISOString(),
+		output: currentInput,
+	} satisfies TransformationRunCompleted;
+	transformationRuns.set(completedRun);
+	return Ok(completedRun);
 }

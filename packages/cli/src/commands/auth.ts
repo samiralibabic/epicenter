@@ -1,171 +1,105 @@
 /**
- * `epicenter auth` — manage authentication with Epicenter servers.
+ * `epicenter auth`: manage authentication with Epicenter.
  *
- * Uses the RFC 8628 device code flow: the CLI prints a URL and one-time code,
- * the user approves in a browser, and the CLI picks up the session automatically.
+ * Uses an OOB (out-of-band) OAuth 2.1 authorization-code flow with PKCE.
+ * `auth login` prints a URL; the user signs in on the hosted portal,
+ * copies the one-time code from the success page, and pastes it into the
+ * terminal. Tokens and the local workspace identity live in the
+ * API-target-specific machine auth file with file mode 0o600.
  *
- * All sessions stored in the unified auth store at `$EPICENTER_HOME/auth/sessions.json`.
+ * Same shape and same source as the browser, dashboard, and extension
+ * clients (see specs/20260514T200000-api-me-three-field-token-bundle.md).
  */
 
-import type { Argv, CommandModule } from 'yargs';
-import { createAuthApi } from '../auth/api';
-import { defineCommand } from '../util/command';
+import * as machineAuth from '@epicenter/auth/node';
+import { cmd } from '../util/cmd.js';
+
+function failAuthCommand(error: { message: string }) {
+	console.error(error.message);
+	process.exitCode = 1;
+}
 
 /**
- * Create the `auth` command group.
+ * `auth` command group.
  *
  * @example
  * ```bash
- * epicenter auth login --server https://api.epicenter.so
- * epicenter auth logout
+ * epicenter auth login
  * epicenter auth status
+ * epicenter auth logout
  * ```
  */
-export function createAuthCommand() {
-	const sessions = createSessionStore();
+const loginCommand = cmd({
+	command: 'login',
+	describe: 'Log in to Epicenter',
+	handler: async () => {
+		const result = await machineAuth.loginWithOob({
+			print: (line) => console.log(line),
+		});
+		if (result.error) {
+			failAuthCommand(result.error);
+			return;
+		}
 
-	return defineCommand({
-		command: 'auth <subcommand>',
-		describe: 'Manage authentication with Epicenter servers',
-		builder: (yargs: Argv) =>
-			yargs
-				.command({
-					command: 'login',
-					describe: 'Log in to an Epicenter server (opens browser)',
-					builder: (y: Argv) =>
-						y.option('server', {
-							type: 'string',
-							description: 'Server URL (e.g. https://api.epicenter.so)',
-							demandOption: true,
-						}),
-					handler: async (argv: any) => {
-						const serverUrl = argv.server as string;
-						const api = createAuthApi(serverUrl);
-						const codeData = await api.requestDeviceCode();
+		const email = result.data.identity.user.email;
+		console.log(email ? `Signed in as ${email}.` : 'Signed in.');
+	},
+});
 
-						console.log(`\nVisit: ${codeData.verification_uri_complete}`);
-						console.log(`Enter code: ${codeData.user_code}\n`);
+const logoutCommand = cmd({
+	command: 'logout',
+	describe: 'Log out from Epicenter',
+	handler: async () => {
+		const result = await machineAuth.logout();
+		if (result.error) {
+			failAuthCommand(result.error);
+			return;
+		}
 
-						let interval = codeData.interval * 1000;
-						const deadline = Date.now() + codeData.expires_in * 1000;
+		if (result.data.status === 'signedOut') {
+			console.log('No active session.');
+			return;
+		}
 
-						while (Date.now() < deadline) {
-							await Bun.sleep(interval);
-							const tokenData = await api.pollDeviceToken(codeData.device_code);
+		console.log('Logged out.');
+	},
+});
 
-							if ('access_token' in tokenData) {
-								const authed = createAuthApi(serverUrl, tokenData.access_token);
-								const sessionData = await authed.getSession();
+const statusCommand = cmd({
+	command: 'status',
+	describe: 'Show current authentication status',
+	handler: async () => {
+		const result = await machineAuth.status();
+		if (result.error) {
+			failAuthCommand(result.error);
+			return;
+		}
 
-								await sessions.save(serverUrl, tokenData, sessionData);
+		if (result.data.status === 'signedOut') {
+			console.log('Not logged in.');
+			return;
+		}
 
-								const displayName =
-									sessionData.user?.name ??
-									sessionData.user?.email ??
-									serverUrl;
-								console.log(`✓ Logged in as ${displayName}`);
-								return;
-							}
+		const { identity } = result.data;
+		const label = identity.user.email || 'Account';
+		console.log(`Logged in as: ${label}`);
+		if (result.data.status === 'valid') {
+			console.log('Session:      verified');
+		} else {
+			console.log('Session:      stored, could not verify');
+			console.warn('Warning: Could not verify session with the Epicenter API.');
+		}
+	},
+});
 
-							switch (tokenData.error) {
-								case 'authorization_pending':
-									continue;
-								case 'slow_down':
-									interval += 5_000;
-									continue;
-								case 'expired_token':
-									throw new Error(
-										'Device code expired — please run login again',
-									);
-								case 'access_denied':
-									throw new Error(
-										'Authorization denied — you rejected the request',
-									);
-								default:
-									throw new Error(
-										tokenData.error_description ?? tokenData.error,
-									);
-							}
-						}
-						throw new Error('Device code expired — please run login again');
-					},
-				} as unknown as CommandModule)
-				.command({
-					command: 'logout',
-					describe: 'Log out from an Epicenter server',
-					builder: (y: Argv) =>
-						y.option('server', {
-							type: 'string',
-							description:
-								'Server URL to log out from (default: most recent session)',
-						}),
-					handler: async (argv: any) => {
-						const session = argv.server
-							? await sessions.load(argv.server)
-							: await sessions.loadDefault();
-
-						if (!session) {
-							console.log('No active session.');
-							return;
-						}
-
-						// Best-effort remote sign-out
-						try {
-							const api = createAuthApi(session.server, session.accessToken);
-							await api.signOut();
-						} catch {
-							// Remote may be unreachable
-						}
-
-						await sessions.clear(session.server);
-						console.log('✓ Logged out.');
-					},
-				} as unknown as CommandModule)
-				.command({
-					command: 'status',
-					describe: 'Show current authentication status',
-					builder: (y: Argv) =>
-						y.option('server', {
-							type: 'string',
-							description: 'Server URL to check (default: most recent session)',
-						}),
-					handler: async (argv: any) => {
-						const session = argv.server
-							? await sessions.load(argv.server)
-							: await sessions.loadDefault();
-
-						if (!session) {
-							console.log('Not logged in.');
-							return;
-						}
-
-						const api = createAuthApi(session.server, session.accessToken);
-
-						try {
-							const remote = await api.getSession();
-							const displayName = remote.user.name ?? remote.user.email;
-							console.log(
-								`Logged in as: ${displayName} (${remote.user.email})`,
-							);
-							console.log(`Server:       ${session.server}`);
-							console.log(`Session:      valid`);
-							if (remote.session.expiresAt) {
-								console.log(
-									`Expires at:   ${new Date(remote.session.expiresAt).toLocaleString()}`,
-								);
-							}
-						} catch {
-							const displayName =
-								session.user?.name ?? session.user?.email ?? '(unknown)';
-							console.log(`Logged in as: ${displayName} [stored]`);
-							console.log(`Server:       ${session.server}`);
-							console.warn(
-								'Warning: Could not verify session with remote server.',
-							);
-						}
-					},
-				} as unknown as CommandModule)
-				.demandCommand(1, 'Specify a subcommand: login, logout, or status'),
-		handler: () => {},
-	});
-}
+export const authCommand = cmd({
+	command: 'auth <subcommand>',
+	describe: 'Manage authentication with Epicenter',
+	builder: (yargs) =>
+		yargs
+			.command(loginCommand)
+			.command(logoutCommand)
+			.command(statusCommand)
+			.demandCommand(1, 'Specify a subcommand: login, logout, or status'),
+	handler: () => {},
+});

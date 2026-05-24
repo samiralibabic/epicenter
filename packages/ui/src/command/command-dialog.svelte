@@ -4,8 +4,8 @@
 		Dialog as DialogPrimitive,
 	} from 'bits-ui';
 	import type { Snippet } from 'svelte';
-	import * as Dialog from '#/dialog/index.js';
-	import type { WithoutChildrenOrChild } from '#/utils.js';
+	import * as Dialog from '../dialog/index.js';
+	import type { WithoutChildrenOrChild } from '../utils.js';
 	import Command from './command.svelte';
 
 	let {

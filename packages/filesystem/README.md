@@ -18,25 +18,80 @@ This package has a peer dependency on `yjs`.
 
 ## Quick usage
 
-The basic setup from the tests is short: define the `files` table in a workspace, then hand the table helper and document collection to `createYjsFileSystem`.
+The basic setup is short: attach the `files` table to a Y.Doc, define how to
+open a file content document at the app edge, then hand `attachYjsFileSystem`
+the content operations it needs.
 
 ```typescript
-import { createWorkspace } from '@epicenter/workspace';
-import { createYjsFileSystem, filesTable } from '@epicenter/filesystem';
+import {
+	attachTables,
+	attachTimeline,
+	onLocalUpdate,
+} from '@epicenter/workspace';
+import {
+	attachYjsFileSystem,
+	fileContentDocGuid,
+	filesTable,
+} from '@epicenter/filesystem';
+import * as Y from 'yjs';
 
-const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-const fs = createYjsFileSystem(ws.tables.files, ws.documents.files.content);
+const ydoc = new Y.Doc({ guid: 'test' });
+const tables = attachTables(ydoc, { files: filesTable });
 
-await fs.mkdir('/docs');
-await fs.writeFile('/docs/hello.txt', 'Hello World');
-await fs.appendFile('/docs/hello.txt', ' again');
-await fs.mv('/docs/hello.txt', '/docs/greeting.txt');
+function openContentDoc(fileId) {
+	const contentYdoc = new Y.Doc({
+		guid: fileContentDocGuid({ workspaceId: ydoc.guid, fileId }),
+		gc: true,
+	});
+	onLocalUpdate(contentYdoc, () =>
+		tables.files.update(fileId, { updatedAt: Date.now() }),
+	);
+	return {
+		ydoc: contentYdoc,
+		content: attachTimeline(contentYdoc),
+		whenReady: Promise.resolve(),
+		[Symbol.dispose]() {
+			contentYdoc.destroy();
+		},
+	};
+}
 
-const content = await fs.readFile('/docs/greeting.txt');
-const stats = await fs.stat('/docs/greeting.txt');
+const fileContent = {
+	async read(fileId) {
+		await using handle = openContentDoc(fileId);
+		await handle.whenReady;
+		return handle.content.read();
+	},
+	async write(fileId, text) {
+		await using handle = openContentDoc(fileId);
+		await handle.whenReady;
+		handle.content.write(text);
+	},
+	async append(fileId, text) {
+		await using handle = openContentDoc(fileId);
+		await handle.whenReady;
+		handle.content.appendText(text);
+		return handle.content.read();
+	},
+};
+
+const ws = {
+	fs: attachYjsFileSystem(ydoc, tables.files, fileContent),
+	[Symbol.dispose]() {
+		ydoc.destroy();
+	},
+};
+
+await ws.fs.mkdir('/docs');
+await ws.fs.writeFile('/docs/hello.txt', 'Hello World');
+await ws.fs.appendFile('/docs/hello.txt', ' again');
+await ws.fs.mv('/docs/hello.txt', '/docs/greeting.txt');
+
+const content = await ws.fs.readFile('/docs/greeting.txt');
+const stats = await ws.fs.stat('/docs/greeting.txt');
 ```
 
-That is the actual shape used in `src/file-system.test.ts`. The object returned by `createYjsFileSystem` matches the `just-bash` filesystem interface, with a few extra helpers layered on top.
+The object returned by `attachYjsFileSystem` matches the `just-bash` filesystem interface, with a few extra helpers layered on top.
 
 ## How the model works
 
@@ -57,16 +112,16 @@ It feels like a filesystem because the package keeps resolving paths, parents, a
 
 Main exports from `src/index.ts`:
 
-- `createYjsFileSystem()` and `YjsFileSystem` — the POSIX-like filesystem orchestrator
-- `filesTable`, `FileRow`, and `ColumnDefinition` — the shared metadata table and related types
-- `createFileTree()` and `createFileSystemIndex()` — path/index helpers for the metadata layer
-- `FS_ERRORS` and `FsErrorCode` — filesystem-style error helpers
-- `posixResolve()` — path normalization for slash-separated paths
+- `attachYjsFileSystem()` and `YjsFileSystem`: the POSIX-like filesystem orchestrator
+- `filesTable`, `FileRow`, and `ColumnDefinition`: the shared metadata table and related types
+- `attachFileTree()` and `attachFileSystemIndex()`: path/index helpers for the metadata layer
+- `FS_ERRORS` and `FsErrorCode`: filesystem-style error helpers
+- `posixResolve()`: path normalization for slash-separated paths
 - Markdown helpers like `parseFrontmatter()`, `serializeMarkdownWithFrontmatter()`, and `serializeXmlFragmentToMarkdown()`
 - Link helpers like `convertWikilinksToInternalLinks()` and `makeInternalHref()`
-- `createSqliteIndex()` — optional SQLite-backed indexing for search results
+- `createSqliteIndex()`: optional SQLite-backed indexing for search results
 
-If you only need the filesystem abstraction, start with `createYjsFileSystem()` and `filesTable`. The rest supports indexing, markdown, and tree-level operations.
+If you only need the filesystem abstraction, start with `attachYjsFileSystem()` and `filesTable`. The rest supports indexing, markdown, and tree-level operations.
 
 ## POSIX-style behavior
 
@@ -78,7 +133,7 @@ The surface area is intentionally familiar.
 - `rm` performs soft deletes, with recursive behavior for folders
 - `stat`, `lstat`, `exists`, `realpath`, and `resolvePath` cover inspection and path resolution
 
-There are a few deliberate limits. Symlinks and hard links always throw `ENOSYS`. Permissions are mostly a validated no-op. That is not an accident—it keeps the model aligned with a collaborative CRDT-backed store instead of pretending to be a full kernel filesystem.
+There are a few deliberate limits. Symlinks and hard links always throw `ENOSYS`. Permissions are mostly a validated no-op. That is not an accident: it keeps the model aligned with a collaborative CRDT-backed store instead of pretending to be a full kernel filesystem.
 
 ## Relationship to other packages
 
@@ -94,9 +149,9 @@ apps like Opensidian   markdown notes, paths, links, indexing
 
 In the monorepo, apps can treat shared workspace content as files without giving up Yjs collaboration. That is the point of this package.
 
-Most Epicenter apps use [`@epicenter/workspace`](../workspace) directly and don't need this package. Workspace tables are the right default when the app knows the shape of every record upfront—notes with titles, bookmarks with URLs, chat messages with timestamps. Reach for `@epicenter/filesystem` when the data model is inherently hierarchical files: a code editor, a note vault with nested folders, anything where users expect a file tree and path-based operations.
+Most Epicenter apps use [`@epicenter/workspace`](../workspace) directly and don't need this package. Workspace tables are the right default when the app knows the shape of every record upfront:notes with titles, bookmarks with URLs, chat messages with timestamps. Reach for `@epicenter/filesystem` when the data model is inherently hierarchical files: a code editor, a note vault with nested folders, anything where users expect a file tree and path-based operations.
 
-Honeycrisp (Apple Notes clone) uses only workspace tables. Opensidian (file-based editor with a bash terminal) uses both—`filesTable` from this package alongside plain workspace tables for chat and settings. See [Your Data Is Probably a Table, Not a File](../../docs/articles/your-data-is-probably-a-table-not-a-file.md) for the full comparison.
+Honeycrisp (Apple Notes clone) uses only workspace tables. Opensidian (file-based editor with a bash terminal) uses both: `filesTable` from this package alongside plain workspace tables for chat and settings. See [Your Data Is Probably a Table, Not a File](../../docs/articles/your-data-is-probably-a-table-not-a-file.md) for the full comparison.
 
 ## License
 

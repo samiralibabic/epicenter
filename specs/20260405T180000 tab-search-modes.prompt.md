@@ -39,7 +39,7 @@ import { type } from 'arktype';
 import { createStorageState } from './storage-state.svelte';
 
 /** Whether search matching is case-sensitive. */
-export const searchCaseSensitive = createStorageState('local:search.caseSensitive', {
+export const searchCaseSensitive = createStorageState('local:search.case.sensitive', {
   fallback: false,
   schema: type('boolean'),
 });
@@ -51,7 +51,7 @@ export const searchRegex = createStorageState('local:search.regex', {
 });
 
 /** Whether to match whole words (titles) or exact URLs. */
-export const searchExactMatch = createStorageState('local:search.exactMatch', {
+export const searchExactMatch = createStorageState('local:search.exact.match', {
   fallback: false,
   schema: type('boolean'),
 });

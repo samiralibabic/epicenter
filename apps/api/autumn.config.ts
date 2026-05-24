@@ -42,37 +42,37 @@ export const storageBytes = feature({
 // Plans — Monthly
 // ---------------------------------------------------------------------------
 
-const f = PLANS[PLAN_IDS.free];
+const freePlan = PLANS[PLAN_IDS.free];
 export const free = plan({
 	id: PLAN_IDS.free,
-	name: f.name,
-	group: f.group,
-	autoEnable: f.autoEnable,
+	name: freePlan.name,
+	group: freePlan.group,
+	autoEnable: freePlan.autoEnable,
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: f.credits.included,
-			reset: { interval: f.credits.reset },
+			included: freePlan.credits.included,
+			reset: { interval: freePlan.credits.reset },
 		}),
 		item({ featureId: storageBytes.id, included: 0 }),
 	],
 });
 
-const p = PLANS[PLAN_IDS.pro];
+const proPlan = PLANS[PLAN_IDS.pro];
 export const pro = plan({
 	id: PLAN_IDS.pro,
-	name: p.name,
-	group: p.group,
-	price: defined(p.price),
+	name: proPlan.name,
+	group: proPlan.group,
+	price: defined(proPlan.price),
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: p.credits.included,
+			included: proPlan.credits.included,
 			price: {
-				amount: p.credits.overage.amount,
-				billingUnits: p.credits.overage.billingUnits,
-				billingMethod: p.credits.overage.billingMethod,
-				interval: p.credits.reset,
+				amount: proPlan.credits.overage.amount,
+				billingUnits: proPlan.credits.overage.billingUnits,
+				billingMethod: proPlan.credits.overage.billingMethod,
+				interval: proPlan.credits.reset,
 			},
 		}),
 		item({
@@ -82,29 +82,29 @@ export const pro = plan({
 				amount: 1,
 				billingUnits: 1_000_000_000,
 				billingMethod: 'usage_based' as const,
-				interval: p.credits.reset,
+				interval: proPlan.credits.reset,
 			},
 		}),
 	],
 });
 
-const u = PLANS[PLAN_IDS.ultra];
+const ultraPlan = PLANS[PLAN_IDS.ultra];
 export const ultra = plan({
 	id: PLAN_IDS.ultra,
-	name: u.name,
-	group: u.group,
-	price: defined(u.price),
+	name: ultraPlan.name,
+	group: ultraPlan.group,
+	price: defined(ultraPlan.price),
 	freeTrial: { durationLength: 14, durationType: 'day', cardRequired: false },
 	autoEnable: true,
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: u.credits.included,
+			included: ultraPlan.credits.included,
 			price: {
-				amount: u.credits.overage.amount,
-				billingUnits: u.credits.overage.billingUnits,
-				billingMethod: u.credits.overage.billingMethod,
-				interval: u.credits.reset,
+				amount: ultraPlan.credits.overage.amount,
+				billingUnits: ultraPlan.credits.overage.billingUnits,
+				billingMethod: ultraPlan.credits.overage.billingMethod,
+				interval: ultraPlan.credits.reset,
 			},
 			rollover: { max: null, expiryDurationType: 'forever' },
 		}),
@@ -115,27 +115,27 @@ export const ultra = plan({
 				amount: 0.75,
 				billingUnits: 1_000_000_000,
 				billingMethod: 'usage_based' as const,
-				interval: u.credits.reset,
+				interval: ultraPlan.credits.reset,
 			},
 		}),
 	],
 });
 
-const m = PLANS[PLAN_IDS.max];
+const maxPlan = PLANS[PLAN_IDS.max];
 export const max = plan({
 	id: PLAN_IDS.max,
-	name: m.name,
-	group: m.group,
-	price: defined(m.price),
+	name: maxPlan.name,
+	group: maxPlan.group,
+	price: defined(maxPlan.price),
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: m.credits.included,
+			included: maxPlan.credits.included,
 			price: {
-				amount: m.credits.overage.amount,
-				billingUnits: m.credits.overage.billingUnits,
-				billingMethod: m.credits.overage.billingMethod,
-				interval: m.credits.reset,
+				amount: maxPlan.credits.overage.amount,
+				billingUnits: maxPlan.credits.overage.billingUnits,
+				billingMethod: maxPlan.credits.overage.billingMethod,
+				interval: maxPlan.credits.reset,
 			},
 			rollover: { max: null, expiryDurationType: 'forever' },
 		}),
@@ -146,24 +146,24 @@ export const max = plan({
 				amount: 0.5,
 				billingUnits: 1_000_000_000,
 				billingMethod: 'usage_based' as const,
-				interval: m.credits.reset,
+				interval: maxPlan.credits.reset,
 			},
 		}),
 	],
 });
 
-const t = PLANS[PLAN_IDS.creditTopUp];
+const creditTopUpPlan = PLANS[PLAN_IDS.creditTopUp];
 export const creditTopUp = plan({
 	id: PLAN_IDS.creditTopUp,
-	name: t.name,
-	addOn: t.addOn,
+	name: creditTopUpPlan.name,
+	addOn: creditTopUpPlan.addOn,
 	items: [
 		item({
 			featureId: aiCredits.id,
 			price: {
-				amount: defined(t.credits.overage).amount,
-				billingUnits: defined(t.credits.overage).billingUnits,
-				billingMethod: defined(t.credits.overage).billingMethod,
+				amount: defined(creditTopUpPlan.credits.overage).amount,
+				billingUnits: defined(creditTopUpPlan.credits.overage).billingUnits,
+				billingMethod: defined(creditTopUpPlan.credits.overage).billingMethod,
 				interval: 'month',
 			},
 		}),
@@ -174,20 +174,20 @@ export const creditTopUp = plan({
 // Plans — Annual (~17% discount, credits still reset monthly)
 // ---------------------------------------------------------------------------
 
-const pa = ANNUAL_PLANS[PLAN_IDS.proAnnual];
+const proAnnualPlan = ANNUAL_PLANS[PLAN_IDS.proAnnual];
 export const proAnnual = plan({
 	id: PLAN_IDS.proAnnual,
-	name: pa.name,
-	group: pa.group,
-	price: defined(pa.price),
+	name: proAnnualPlan.name,
+	group: proAnnualPlan.group,
+	price: defined(proAnnualPlan.price),
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: pa.credits.included,
+			included: proAnnualPlan.credits.included,
 			price: {
-				amount: pa.credits.overage.amount,
-				billingUnits: pa.credits.overage.billingUnits,
-				billingMethod: pa.credits.overage.billingMethod,
+				amount: proAnnualPlan.credits.overage.amount,
+				billingUnits: proAnnualPlan.credits.overage.billingUnits,
+				billingMethod: proAnnualPlan.credits.overage.billingMethod,
 				interval: 'month',
 			},
 		}),
@@ -204,20 +204,20 @@ export const proAnnual = plan({
 	],
 });
 
-const ua = ANNUAL_PLANS[PLAN_IDS.ultraAnnual];
+const ultraAnnualPlan = ANNUAL_PLANS[PLAN_IDS.ultraAnnual];
 export const ultraAnnual = plan({
 	id: PLAN_IDS.ultraAnnual,
-	name: ua.name,
-	group: ua.group,
-	price: defined(ua.price),
+	name: ultraAnnualPlan.name,
+	group: ultraAnnualPlan.group,
+	price: defined(ultraAnnualPlan.price),
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: ua.credits.included,
+			included: ultraAnnualPlan.credits.included,
 			price: {
-				amount: ua.credits.overage.amount,
-				billingUnits: ua.credits.overage.billingUnits,
-				billingMethod: ua.credits.overage.billingMethod,
+				amount: ultraAnnualPlan.credits.overage.amount,
+				billingUnits: ultraAnnualPlan.credits.overage.billingUnits,
+				billingMethod: ultraAnnualPlan.credits.overage.billingMethod,
 				interval: 'month',
 			},
 			rollover: { max: null, expiryDurationType: 'forever' },
@@ -235,20 +235,20 @@ export const ultraAnnual = plan({
 	],
 });
 
-const ma = ANNUAL_PLANS[PLAN_IDS.maxAnnual];
+const maxAnnualPlan = ANNUAL_PLANS[PLAN_IDS.maxAnnual];
 export const maxAnnual = plan({
 	id: PLAN_IDS.maxAnnual,
-	name: ma.name,
-	group: ma.group,
-	price: defined(ma.price),
+	name: maxAnnualPlan.name,
+	group: maxAnnualPlan.group,
+	price: defined(maxAnnualPlan.price),
 	items: [
 		item({
 			featureId: aiCredits.id,
-			included: ma.credits.included,
+			included: maxAnnualPlan.credits.included,
 			price: {
-				amount: ma.credits.overage.amount,
-				billingUnits: ma.credits.overage.billingUnits,
-				billingMethod: ma.credits.overage.billingMethod,
+				amount: maxAnnualPlan.credits.overage.amount,
+				billingUnits: maxAnnualPlan.credits.overage.billingUnits,
+				billingMethod: maxAnnualPlan.credits.overage.billingMethod,
 				interval: 'month',
 			},
 			rollover: { max: null, expiryDurationType: 'forever' },

@@ -1,38 +1,40 @@
 <script lang="ts">
 	import type { FileId } from '@epicenter/filesystem';
-	import { SyncStatusPopover } from '@epicenter/svelte/sync-status-popover';
+	import { AccountPopover } from '@epicenter/svelte/account-popover';
 	import { Button, buttonVariants } from '@epicenter/ui/button';
 	import * as Tabs from '@epicenter/ui/tabs';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { auth, workspace } from '$lib/client';
 	import GithubIcon from '$lib/components/icons/GithubIcon.svelte';
-	import { fsState } from '$lib/state/fs-state.svelte';
+	import { requireOpensidian } from '$lib/session';
+	import { auth } from '$platform/auth';
+
+	const opensidian = requireOpensidian();
 </script>
 
 <div class="flex items-center border-b">
-	{#if fsState.hasOpenFiles}
+	{#if opensidian.state.files.hasOpenFiles}
 		<Tabs.Root
-			value={fsState.activeFileId ?? ''}
-			onValueChange={(value) => fsState.selectFile(value as FileId)}
+			value={opensidian.state.files.activeFileId ?? ''}
+			onValueChange={(value) => opensidian.state.files.selectFile(value as FileId)}
 			class="flex-1 min-w-0"
 		>
 			<Tabs.List
 				class="w-full justify-start overflow-x-auto rounded-none border-0 bg-transparent p-0"
 			>
-				{#each fsState.openFileIds as fileId (fileId)}
-					{@const row = fsState.getFile(fileId)}
+				{#each opensidian.state.files.openFileIds as fileId (fileId)}
+					{@const row = opensidian.state.files.getFile(fileId)}
 					{#if row}
 						<Tabs.Trigger
 							value={fileId}
 							class="relative flex-none rounded-none border-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
-							onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); fsState.closeFile(fileId); } }}
+							onauxclick={(e) => { if (e.button === 1) { e.preventDefault(); opensidian.state.files.closeFile(fileId); } }}
 						>
 							<span class="mr-4">{row.name}</span>
 							<Button
 								variant="ghost"
 								size="icon-xs"
 								class="absolute right-1 top-1/2 -translate-y-1/2 opacity-50 hover:opacity-100"
-								onclick={(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); fsState.closeFile(fileId); }}
+								onclick={(e: MouseEvent) => { e.stopPropagation(); e.preventDefault(); opensidian.state.files.closeFile(fileId); }}
 								aria-label="Close {row.name}"
 							>
 								<XIcon aria-hidden="true" class="size-3" />
@@ -53,15 +55,11 @@
 		>
 			<GithubIcon class="size-4" />
 		</a>
-		<SyncStatusPopover
+		<AccountPopover
 			{auth}
-			{workspace}
+			collaboration={opensidian.collaboration}
 			syncNoun="notes"
-			onSocialSignIn={() =>
-				auth.signInWithSocialRedirect({
-					provider: 'google',
-					callbackURL: window.location.origin,
-				})}
+			onForgetDevice={() => opensidian.wipe()}
 		/>
 	</div>
 </div>

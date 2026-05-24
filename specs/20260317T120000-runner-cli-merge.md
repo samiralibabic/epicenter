@@ -3,6 +3,8 @@
 **Status**: Draft — awaiting review
 **Effort**: Medium (1–2 days)
 
+> **Path note (2026-05-22):** The `$EPICENTER_HOME/auth.json`, `$EPICENTER_HOME/auth/sessions.json`, and `$EPICENTER_HOME/workspaces/` migration guidance is stale. Do not copy these top-level home-directory paths into new auth, workspace discovery, or migration work.
+
 ## Problem
 
 Runner (`apps/runner`) and CLI (`packages/cli`) are two binaries that do overlapping things with incompatible conventions:

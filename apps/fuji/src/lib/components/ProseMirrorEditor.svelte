@@ -1,26 +1,26 @@
 <script lang="ts">
 	import { baseKeymap, toggleMark } from 'prosemirror-commands';
 	import {
-		inputRules,
-		wrappingInputRule,
-		textblockTypeInputRule,
-		smartQuotes,
-		emDash,
 		ellipsis,
+		emDash,
+		inputRules,
+		smartQuotes,
+		textblockTypeInputRule,
+		wrappingInputRule,
 	} from 'prosemirror-inputrules';
 	import { keymap } from 'prosemirror-keymap';
-	import { Schema, type MarkSpec } from 'prosemirror-model';
+	import { type MarkSpec, Schema } from 'prosemirror-model';
+	import { schema as basicSchema } from 'prosemirror-schema-basic';
 	import {
 		addListNodes,
-		splitListItem,
 		liftListItem,
 		sinkListItem,
+		splitListItem,
 	} from 'prosemirror-schema-list';
-	import { schema as basicSchema } from 'prosemirror-schema-basic';
 	import { EditorState, Plugin } from 'prosemirror-state';
 	import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 	import 'prosemirror-view/style/prosemirror.css';
-	import { ySyncPlugin, yUndoPlugin, undo, redo } from 'y-prosemirror';
+	import { redo, undo, ySyncPlugin, yUndoPlugin } from 'y-prosemirror';
 	import type * as Y from 'yjs';
 
 	let {
@@ -37,7 +37,7 @@
 
 	// ─── Schema ──────────────────────────────────────────────────────────────
 
-	const extraMarks: Record<string, MarkSpec> = {
+	const extraMarks = {
 		strikethrough: {
 			parseDOM: [
 				{ tag: 's' },
@@ -54,7 +54,7 @@
 				return ['u', 0];
 			},
 		},
-	};
+	} satisfies Record<string, MarkSpec>;
 
 	const schema = new Schema({
 		nodes: addListNodes(basicSchema.spec.nodes, 'paragraph block*', 'block'),

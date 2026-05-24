@@ -1,6 +1,6 @@
 ---
 name: progress-summary
-description: This skill should be used when the user asks questions like "can you summarize", "what happened", "what did we do", "what's the situation", "where are we at", "explain what's going on", "give me an overview", "what's been done", "tell me about this", "walk me through what happened", or any question asking to understand the current state of work or changes. Provides conversational, PR-style summaries with visual diagrams.
+description: 'Conversational PR-style summaries with visual diagrams. Use when: "can you summarize", "what happened", "where are we at", "give me an overview", "walk me through".'
 metadata:
   author: epicenter
   version: '1.0'
@@ -10,11 +10,13 @@ metadata:
 
 Generate conversational summaries of work in progress, using the same style as well-crafted PR descriptions.
 
+For newcomer-friendly architecture explanations, use [notebook-explanation](../notebook-explanation/SKILL.md) as the format: short working notes, tiny definitions, ASCII diagrams, concrete examples, and compressed rules.
+
 ## Core Principles
 
 ### Motivation First
 
-Every summary starts with WHY. Not what files changed, not how it works—WHY this work matters.
+Every summary starts with WHY. Not what files changed, not how it works:WHY this work matters.
 
 **Good opening**:
 > We've been tackling the session timeout issue that was logging users out mid-upload. The root cause was the session refresh only triggering on navigation, not during background activity.
@@ -79,85 +81,16 @@ and update the migration guide.
 
 ### Architecture Overview (explaining a complex change)
 
-For "explain what's happening here" on larger work:
+For "explain what's happening here" on larger work, use [notebook-explanation](../notebook-explanation/SKILL.md). It owns the mental model and diagram grammar: ownership, boundaries, flows, good/bad examples, durable rules, and the diagram-shape taxonomy.
 
-Use ASCII diagrams liberally. They're more scannable than prose.
-
-**Journey/Evolution Diagrams** (when work iterates on previous attempts):
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  First attempt: Direct Y.Map                                     │
-│  Problem: 524,985 bytes storage overhead                         │
-└───────────────────────────────────────┬─────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Second attempt: YKeyValue wrapper                               │
-│  Result: 271 bytes (1935x improvement!)                          │
-│  Problem: Unpredictable conflict resolution                      │
-└───────────────────────────────────────┬─────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Current: YKeyValue with LWW timestamps                          │
-│  Keeps the storage wins, adds predictable "latest wins"          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Layer Diagrams** (for architectural changes):
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  defineWorkspace() + workspace.create()                          │  ← High-level
-│    Creates Y.Doc internally, binds tables/kv/capabilities        │
-├─────────────────────────────────────────────────────────────────┤
-│  createTables(ydoc, {...}) / createKv(ydoc, {...})               │  ← Mid-level
-│    Binds to existing Y.Doc                                       │
-├─────────────────────────────────────────────────────────────────┤
-│  defineTable() / defineKv()                                      │  ← Low-level
-│    Pure schema definitions                                       │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Flow Diagrams** (for data/control flow):
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│  Client A (2:00pm)  ──┐                                        │
-│                       │──→  Sync  ──→  Winner: Client B        │
-│  Client B (3:00pm)  ──┘                                        │
-│                                                                │
-│  With timestamps: Latest always wins                           │
-│  Without: Whoever syncs first wins (unpredictable)             │
-└────────────────────────────────────────────────────────────────┘
-```
-
-**Comparison Tables** (for trade-offs):
-
-```
-┌────────────────────────────────────┬────────────────────────────┐
-│  Use Case                          │  Recommendation            │
-├────────────────────────────────────┼────────────────────────────┤
-│  Real-time collab, simple cases    │  YKeyValue (positional)    │
-│  Offline-first, multi-device       │  YKeyValueLww (timestamp)  │
-│  Clock sync unreliable             │  YKeyValue (no clock dep)  │
-└────────────────────────────────────┴────────────────────────────┘
-```
-
-## When to Use Diagrams
-
-- **Journey diagrams**: Work iterates on previous attempts or fixes past decisions
-- **Layer diagrams**: Architectural changes with distinct levels
-- **Comparison tables**: Trade-offs between approaches
-- **Flow diagrams**: How data or control moves between components
+`progress-summary` still frames the recap around it: what changed, why it changed, and what is still open.
 
 ## What to Avoid
 
-- **Listing files changed**: "Updated auth.ts, session.ts, and upload.ts" — just explain what and why
+- **Listing files changed**: "Updated auth.ts, session.ts, and upload.ts" : just explain what and why
 - **Corporate speak**: "This enhancement leverages our existing infrastructure"
 - **Marketing language**: "game-changing", "revolutionary", "seamless"
-- **Dramatic hyperbole**: "excruciating pain point" — stick to facts
+- **Dramatic hyperbole**: "excruciating pain point" : stick to facts
 - **Bullet point everything**: Use flowing paragraphs when possible
 - **Over-explaining simple changes**: Match the explanation depth to the complexity
 
@@ -181,9 +114,3 @@ git log --oneline --since="1 hour ago"
 For Conductor workspaces, use `GetWorkspaceDiff` to see the full diff.
 
 Read key files that were modified to understand the substance of changes, not just the diff stats.
-
-## ASCII Art Characters
-
-For clean diagrams: `┌ ┐ └ ┘ ─ │ ├ ┤ ┬ ┴ ┼ ▼ ▲ ◀ ▶ ──→ ←──`
-
-Keep box edges aligned. Use consistent spacing inside boxes.

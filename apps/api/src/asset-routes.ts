@@ -1,9 +1,11 @@
 /**
- * Asset upload, read, and delete routes.
+ * Asset routes: authenticated upload, list, usage, delete, and admin storage
+ * reconciliation, plus an unauthenticated read.
  *
- * Upload and delete require authentication + paid plan. Read is unauthenticated—
- * the unguessable URL (two 15-char nanoids) is the credential, same model as
- * Google Drive "anyone with the link", Discord CDN, and Supabase Storage.
+ * Upload and delete require authentication + a paid plan. Read is
+ * unauthenticated: the unguessable URL (two 15-char nanoids) is the
+ * credential, same model as Google Drive "anyone with the link", Discord
+ * CDN, and Supabase Storage.
  *
  * R2 bucket is private (no public domain, no r2.dev). All reads are proxied
  * through this Worker, which sets security headers and supports ETag/range.
@@ -17,6 +19,7 @@ import { customAlphabet } from 'nanoid';
  * Cloudflare Worker bundle, where wrangler can't resolve it.
  */
 const generateGuid = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 15);
+
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -26,7 +29,7 @@ import type { Env } from './app.js';
 import { createAutumn } from './autumn.js';
 import { FEATURE_IDS } from './billing-plans.js';
 import { MAX_ASSET_BYTES } from './constants.js';
-import * as schema from './db/schema.js';
+import * as schema from './db/schema/index.js';
 
 const ALLOWED_MIME_TYPES = new Set([
 	'image/png',
@@ -77,10 +80,10 @@ function sanitizeFilename(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Authenticated routes (mounted behind authGuard in app.ts)
+// Authenticated routes (mounted behind requireSession in app.ts)
 // ---------------------------------------------------------------------------
 
-/** Authenticated routes (upload + delete). Mounted behind authGuard in app.ts. */
+/** Authenticated routes (upload + delete). Mounted behind requireSession in app.ts. */
 export const assetAuthedRoutes = new Hono<Env>()
 	// POST / — Create (upload)
 	.post(
@@ -115,7 +118,6 @@ export const assetAuthedRoutes = new Hono<Env>()
 			const autumn = createAutumn(c.env);
 			await autumn.customers.getOrCreate({
 				customerId: c.var.user.id,
-				name: c.var.user.name ?? undefined,
 				email: c.var.user.email ?? undefined,
 			});
 
@@ -129,10 +131,14 @@ export const assetAuthedRoutes = new Hono<Env>()
 			}
 
 			// -- Store in R2 + Postgres --
+			// The R2 key is just the assetId. Ownership is tracked on the
+			// `asset` row, not in the key path: the unguessable 15-char
+			// nanoid IS the read credential, so embedding the userId in
+			// the key would only leak identity into the URL the row
+			// already implies.
 			const assetId = generateGuid();
-			const key = `${c.var.user.id}/${assetId}`;
 
-			await c.env.ASSETS_BUCKET.put(key, file.stream(), {
+			await c.env.ASSETS_BUCKET.put(assetId, file.stream(), {
 				httpMetadata: {
 					contentType: file.type,
 					contentDisposition: `inline; filename="${sanitizedFilename}"`,
@@ -150,7 +156,7 @@ export const assetAuthedRoutes = new Hono<Env>()
 				});
 			} catch (dbError) {
 				// Compensating delete — don't leave orphaned R2 objects
-				await c.env.ASSETS_BUCKET.delete(key).catch((r2Err) =>
+				await c.env.ASSETS_BUCKET.delete(assetId).catch((r2Err) =>
 					console.error('[upload] R2 cleanup failed:', r2Err),
 				);
 				throw dbError;
@@ -168,7 +174,7 @@ export const assetAuthedRoutes = new Hono<Env>()
 			return c.json(
 				{
 					id: assetId,
-					url: `/api/assets/${c.var.user.id}/${assetId}`,
+					url: `/api/assets/${assetId}`,
 					contentType: file.type,
 					size: file.size,
 					originalName: sanitizedFilename,
@@ -239,8 +245,7 @@ export const assetAuthedRoutes = new Hono<Env>()
 				return c.json(AssetError.NotFound(), 404);
 			}
 
-			const key = `${c.var.user.id}/${assetId}`;
-			await c.env.ASSETS_BUCKET.delete(key);
+			await c.env.ASSETS_BUCKET.delete(assetId);
 
 			// Credit storage back (fire-and-forget after response)
 			const autumn = createAutumn(c.env);
@@ -302,23 +307,29 @@ export const assetAuthedRoutes = new Hono<Env>()
 	);
 
 // ---------------------------------------------------------------------------
-// Public routes (mounted without authGuard in app.ts)
+// Public routes (mounted without requireSession in app.ts)
 // ---------------------------------------------------------------------------
 
-/** Public routes (read). Mounted without authGuard in app.ts. */
+/**
+ * Public routes (read). Mounted without requireSession in app.ts.
+ *
+ * The `:assetId` param is constrained to the exact 15-char lowercase
+ * alphanumeric pattern produced by `generateGuid` so the route does not
+ * shadow sibling management endpoints (`/usage`, `/reconcile`, `/`)
+ * mounted under the same `/api/assets` prefix.
+ */
 export const assetPublicRoutes = new Hono<Env>()
-	// GET /:userId/:assetId — Read (unauthenticated, unguessable URL)
+	// GET /:assetId — Read (unauthenticated; the unguessable 15-char id IS the credential)
 	.get(
-		'/:userId/:assetId',
+		'/:assetId{[a-z0-9]{15}}',
 		describeRoute({
 			description: 'Read an asset by ID (unauthenticated)',
 			tags: ['assets'],
 		}),
 		async (c) => {
-			const { userId, assetId } = c.req.param();
-			const key = `${userId}/${assetId}`;
+			const { assetId } = c.req.param();
 
-			const object = await c.env.ASSETS_BUCKET.get(key, {
+			const object = await c.env.ASSETS_BUCKET.get(assetId, {
 				onlyIf: c.req.raw.headers,
 				range: c.req.raw.headers,
 			});
@@ -332,6 +343,7 @@ export const assetPublicRoutes = new Hono<Env>()
 				const headers = new Headers();
 				object.writeHttpMetadata(headers);
 				headers.set('etag', object.httpEtag);
+				headers.set('referrer-policy', 'no-referrer');
 				return new Response(null, { status: 304, headers });
 			}
 
@@ -341,6 +353,10 @@ export const assetPublicRoutes = new Hono<Env>()
 			headers.set('etag', object.httpEtag);
 			headers.set('accept-ranges', 'bytes');
 			headers.set('x-content-type-options', 'nosniff');
+			// Capability URL: do not let outgoing sub-resource requests carry
+			// the asset URL as a Referer. The unguessable id is the credential;
+			// keep it out of third-party logs and analytics.
+			headers.set('referrer-policy', 'no-referrer');
 			if (object.uploaded) {
 				headers.set('last-modified', object.uploaded.toUTCString());
 			}

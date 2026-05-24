@@ -10,7 +10,7 @@ A discriminated union with three variants means every consumer writes the discri
 type Auth =
 	| { kind: 'none'; url: string }
 	| { kind: 'static'; url: string; token: string }
-	| { kind: 'dynamic'; url: string; getToken: () => Promise<string> };
+	| { kind: 'dynamic'; url: string; loadToken: () => Promise<string> };
 
 // Consumer has to write `kind` every time
 connect({ kind: 'none', url: 'ws://localhost:3913' });
@@ -18,11 +18,11 @@ connect({ kind: 'static', url: 'ws://my-server:3913', token: 'secret' });
 connect({
 	kind: 'dynamic',
 	url: 'wss://cloud.example.com',
-	getToken: fetchJwt,
+	loadToken: fetchJwt,
 });
 ```
 
-The `kind` field is load-bearing for the implementation but redundant for the caller. If you're passing a `token`, you already know the kind. If you're passing `getToken`, same thing. The discriminant is just restating what the arguments already say.
+The `kind` field is load-bearing for the implementation but redundant for the caller. If you're passing a `token`, you already know the kind. If you're passing `loadToken`, same thing. The discriminant is just restating what the arguments already say.
 
 ## The Fix
 
@@ -37,8 +37,8 @@ function staticToken(url: string, token: string): Auth {
 	return { kind: 'static', url, token };
 }
 
-function dynamicToken(url: string, getToken: () => Promise<string>): Auth {
-	return { kind: 'dynamic', url, getToken };
+function dynamicToken(url: string, loadToken: () => Promise<string>): Auth {
+	return { kind: 'dynamic', url, loadToken };
 }
 ```
 
@@ -59,10 +59,10 @@ You might think function overloads solve this:
 ```typescript
 function connect(url: string): void;
 function connect(url: string, token: string): void;
-function connect(url: string, getToken: () => Promise<string>): void;
+function connect(url: string, loadToken: () => Promise<string>): void;
 ```
 
-But `token` and `getToken` are both functions or strings in other contexts. Overloads rely on TypeScript distinguishing argument types at the call site, which gets fragile when types overlap or when you need to store the config before passing it. Separate functions are unambiguous: the name carries the intent, not the argument types.
+But `token` and `loadToken` are both functions or strings in other contexts. Overloads rely on TypeScript distinguishing argument types at the call site, which gets fragile when types overlap or when you need to store the config before passing it. Separate functions are unambiguous: the name carries the intent, not the argument types.
 
 The other advantage: the config object is a first-class value. You can store it, pass it around, serialize it. Overloads disappear at the call boundary.
 
@@ -111,4 +111,4 @@ One function per variant. The function name is the discriminant.
 
 ## Related
 
-- [Three Auth Modes, One Config Object, Zero Invalid States](./discriminated-unions-over-optional-fields.md) — the full progression from optional fields to discriminated unions to factory functions
+- [Three Auth Modes, One Config Object, Zero Invalid States](./discriminated-unions-over-optional-fields.md) : the full progression from optional fields to discriminated unions to factory functions

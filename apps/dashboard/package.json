@@ -7,7 +7,6 @@
 	"scripts": {
 		"dev": "bun run dev:local",
 		"dev:local": "vite dev",
-		"dev:remote": "vite dev --mode production",
 		"build": "NODE_ENV=production vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -15,6 +14,7 @@
 	},
 	"devDependencies": {
 		"@epicenter/ui": "workspace:*",
+		"@types/bun": "catalog:",
 		"@lucide/svelte": "catalog:",
 		"@sveltejs/adapter-static": "catalog:",
 		"@sveltejs/kit": "catalog:",
@@ -30,6 +30,8 @@
 	},
 	"dependencies": {
 		"@epicenter/api": "workspace:*",
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/auth-svelte": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
 		"@tanstack/svelte-query": "catalog:",

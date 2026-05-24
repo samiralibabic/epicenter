@@ -1,6 +1,6 @@
 <script lang="ts">
+	import { Spinner } from '@epicenter/ui/spinner';
 	import AlertCircleIcon from '@lucide/svelte/icons/circle-alert';
-	import LoaderCircleIcon from '@lucide/svelte/icons/loader-circle';
 	import type { ToolResultPart as TanStackToolResultPart } from '@tanstack/ai-client';
 
 	let {
@@ -16,7 +16,7 @@
 -->
 {#if part.state === 'streaming'}
 	<div class="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
-		<LoaderCircleIcon class="size-3 animate-spin" />
+		<Spinner class="size-3" />
 		Processing…
 	</div>
 {:else if part.state === 'error'}

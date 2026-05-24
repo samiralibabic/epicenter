@@ -75,6 +75,24 @@ epicenter/
 
 Currently, **Whispering** (`apps/whispering`) is the most mature application and the best place to start contributing. Check the [Whispering README](apps/whispering/README.md) for specific details about that application.
 
+### Working without Infisical access
+
+Most of the repo does not need Infisical. Whispering, the Tab Manager extension, the CLI, and every shared package (`@epicenter/workspace`, `@epicenter/ui`, and the rest) build and run from a fresh clone with nothing more than `bun install`.
+
+The only app that requires Infisical is `apps/api` (the hosted hub). Running it (`bun run dev:api` from the repo root, or `bun run dev` from `apps/api/`) needs real API keys and the auth secret, so the dev script refuses to start without an `infisical login`.
+
+You can still contribute to the API schema without Infisical access. From `apps/api/`:
+
+| Script | What it does |
+| --- | --- |
+| `bun run db:generate` | Generate a migration from schema files (no database touched) |
+| `bun run db:push:local` | Push the schema to your local Postgres |
+| `bun run db:studio:local` | Open Drizzle Studio against your local Postgres |
+
+Write the migration, push it locally, open a PR. A maintainer with Infisical prod access applies it via `bun run db:migrate:remote`.
+
+The convention in one line: `:local` works on a fresh clone, `:remote` wraps with `infisical run --env=prod` and is admin-only. See [`docs/articles/local-remote-script-convention.md`](docs/articles/local-remote-script-convention.md) for the full story.
+
 ## Development Workflow
 
 1. **Create a branch** for your feature or fix

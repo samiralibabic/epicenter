@@ -1,4 +1,4 @@
-import type { TableHelper } from '@epicenter/workspace';
+import type { Table } from '@epicenter/workspace';
 import { FS_ERRORS } from '../errors.js';
 import type { FileId } from '../ids.js';
 import type { FileRow } from '../table.js';
@@ -18,16 +18,17 @@ export function validateName(name: string): void {
  * Throws EEXIST if a duplicate exists.
  */
 export function assertUniqueName(
-	filesTable: TableHelper<FileRow>,
+	filesTable: Table<FileRow>,
 	siblingIds: FileId[],
 	name: string,
 	excludeId?: FileId,
 ): void {
 	const duplicate = siblingIds.find((id) => {
 		if (id === excludeId) return false;
-		const result = filesTable.get(id);
-		if (result.status !== 'valid') return false;
-		return result.row.name === name && result.row.trashedAt === null;
+		const { data: row, error } = filesTable.get(id);
+		if (error) return false; // can't determine name from invalid row
+		if (row === null) return false;
+		return row.name === name && row.trashedAt === null;
 	});
 	if (duplicate) {
 		throw FS_ERRORS.EEXIST(`${name} already exists in parent`);

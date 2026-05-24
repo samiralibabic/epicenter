@@ -1,6 +1,6 @@
 ---
 name: create-auth-skill
-description: Scaffold and implement authentication in TypeScript/JavaScript apps using Better Auth. Detect frameworks, configure database adapters, set up route handlers, add OAuth providers, and create auth UI pages. Use when users want to add login, sign-up, or authentication to a new or existing project with Better Auth.
+description: 'Scaffold Better Auth in TypeScript apps: framework handlers, DB adapters, OAuth, email/password, and auth UI. Use when adding login, sign-up, session handling, or Better Auth plugins.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -11,6 +11,12 @@ metadata:
 ## Reference Repositories
 
 - [Better Auth](https://github.com/better-auth/better-auth) — TypeScript authentication framework with plugins
+
+## Upstream Grounding
+
+When Better Auth API signatures, framework handlers, adapter setup, generated schema, plugin options, session behavior, or security defaults affect correctness, ask DeepWiki a narrow question against `better-auth/better-auth` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for stable planning steps and repo-local conventions already documented below.
 
 Guide for adding authentication to TypeScript/JavaScript applications using Better Auth.
 
@@ -167,7 +173,7 @@ At the end of implementation, guide users thoroughly on remaining next steps (e.
 
 ## Installation
 
-**Core:** `npm install better-auth`
+**Core:** `bun add better-auth`
 
 **Scoped packages (as needed):**
 | Package | Use case |
@@ -251,9 +257,9 @@ Add OAuth secrets as needed: `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE
 
 | Adapter | Command |
 |---------|---------|
-| Built-in Kysely | `npx @better-auth/cli@latest migrate` (applies directly) |
-| Prisma | `npx @better-auth/cli@latest generate --output prisma/schema.prisma` then `npx prisma migrate dev` |
-| Drizzle | `npx @better-auth/cli@latest generate --output src/db/auth-schema.ts` then `npx drizzle-kit push` |
+| Built-in Kysely | `bun x @better-auth/cli@latest migrate` (applies directly) |
+| Prisma | `bun x @better-auth/cli@latest generate --output prisma/schema.prisma` then `bun x prisma migrate dev` |
+| Drizzle | `bun x @better-auth/cli@latest generate --output src/db/auth-schema.ts` then `bun x drizzle-kit push` |
 
 **Re-run after adding plugins.**
 

@@ -60,8 +60,8 @@ export function Id(value: string): Id {
  * const id = generateId(); // "k7x9m2p4q8"
  * ```
  */
-export function generateId(): Id {
-	return nanoid10() as Id;
+export function generateId<T extends string = Id>(): T {
+	return nanoid10() as T;
 }
 
 /**

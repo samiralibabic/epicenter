@@ -5,20 +5,24 @@
 	"version": "0.0.1",
 	"type": "module",
 	"exports": {
-		"./workspace": "./src/lib/workspace/index.ts"
+		".": "./workspace.ts",
+		"./daemon": "./daemon.ts"
 	},
 	"scripts": {
 		"dev": "bun run dev:local",
-		"dev:local": "bun --bun vite dev",
-		"dev:remote": "bun --bun vite dev --mode production",
-		"build": "bun --bun vite build",
+		"dev:local": "vite dev",
+		"build": "vite build",
 		"deploy": "bun run build && wrangler deploy",
-		"preview": "bun --bun vite preview",
+		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+		"test": "bun test ./src/lib/opensidian",
+		"typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check": "bun run typecheck"
 	},
 	"dependencies": {
 		"@codemirror/autocomplete": "^6.20.1",
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/auth-svelte": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/skills": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
@@ -33,7 +37,8 @@
 		"better-auth": "catalog:",
 		"mode-watcher": "^1.1.0",
 		"typebox": "catalog:",
-		"wellcrafted": "catalog:"
+		"wellcrafted": "catalog:",
+		"y-indexeddb": "catalog:"
 	},
 	"devDependencies": {
 		"@codemirror/commands": "^6.10.3",
@@ -48,6 +53,7 @@
 		"@codemirror/view": "^6.41.0",
 		"@epicenter/filesystem": "workspace:*",
 		"@epicenter/ui": "workspace:*",
+		"@epicenter/util": "workspace:*",
 		"@epicenter/workspace": "workspace:*",
 		"@lezer/highlight": "^1.2.3",
 		"@lucide/svelte": "catalog:",
@@ -56,7 +62,7 @@
 		"@sveltejs/kit": "catalog:",
 		"@sveltejs/vite-plugin-svelte": "catalog:",
 		"@tailwindcss/vite": "catalog:",
-		"bun-types": "catalog:",
+		"@types/bun": "catalog:",
 		"just-bash": "^2.9.7",
 		"shiki": "^3.7.0",
 		"svelte": "catalog:",
@@ -67,7 +73,6 @@
 		"vite": "catalog:",
 		"vite-plugin-node-polyfills": "^0.26.0",
 		"y-codemirror.next": "^0.3.5",
-		"y-indexeddb": "catalog:",
 		"yjs": "catalog:"
 	},
 	"license": "MIT"

@@ -1,0 +1,1 @@
+../../../.agents/skills/workspace-app-layout/SKILL.md

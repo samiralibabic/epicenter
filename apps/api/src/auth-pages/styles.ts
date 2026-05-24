@@ -194,6 +194,23 @@ button:disabled,.btn:disabled{opacity:.5;cursor:not-allowed}
 	font-size:1.125rem;
 }
 
+/* ── CLI callback code block ──────────────────────────────── */
+
+.code-block{
+	margin:1rem 0;
+	padding:1rem;
+	background:#f9fafb;
+	border:1px solid oklch(0.929 0.013 255.508);
+	border-radius:8px;
+	overflow-x:auto;
+}
+.code-block code{
+	font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+	font-size:.9375rem;
+	letter-spacing:.05em;
+	word-break:break-all;
+}
+
 /* ── Signed-in state ──────────────────────────────────────── */
 
 .signed-in-center{

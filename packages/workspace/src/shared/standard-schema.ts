@@ -1,47 +1,51 @@
-import type {
-	StandardJSONSchemaV1,
-	StandardSchemaV1,
-} from '@standard-schema/spec';
+import type { StandardJSONSchemaV1 } from '@standard-schema/spec';
+import {
+	defineErrors,
+	extractErrorMessage,
+	type InferErrors,
+} from 'wellcrafted/error';
+import { createLogger } from 'wellcrafted/logger';
 import { Ok, trySync } from 'wellcrafted/result';
 
+const log = createLogger('standard-schema');
+
 /**
- * Epicenter-specific Standard Schema extensions.
+ * Errors produced by Standard-JSON-Schema conversion. The library recovers
+ * from every one of these (falling back to a permissive schema), so these
+ * ship to the logger, not through a Result.
+ */
+export const StandardSchemaError = defineErrors({
+	UnitFallback: ({ unit }: { unit: unknown }) => ({
+		message: `[arktype→JSON Schema] Unit type "${String(unit)}" (${typeof unit}) cannot be converted; using base schema as fallback`,
+		unit,
+	}),
+	DefaultFallback: ({
+		code,
+		base,
+	}: {
+		code: string;
+		base: Record<string, unknown>;
+	}) => ({
+		message: `[arktype→JSON Schema] Fallback triggered for code "${code}"; base schema: ${JSON.stringify(base)}`,
+		code,
+		base,
+	}),
+	ConversionFailed: ({ cause }: { cause: unknown }) => ({
+		message: `[standardSchemaToJsonSchema] Conversion failed, using permissive fallback: ${extractErrorMessage(cause)}`,
+		cause,
+	}),
+});
+export type StandardSchemaError = InferErrors<typeof StandardSchemaError>;
+
+/**
+ * Arktype-aware JSON Schema conversion for Standard Schemas.
  *
- * Upstream spec types (`StandardSchemaV1`, `StandardJSONSchemaV1`, etc.)
- * should be imported directly from `@standard-schema/spec`.
+ * The shared `CombinedStandardSchema` type is re-exported from
+ * `@epicenter/workspace` — import it from there when you need the constraint.
  *
  * @see https://standardschema.dev
  * @see https://github.com/standard-schema/standard-schema
  */
-
-// ###############################
-// ###   Epicenter Extensions  ###
-// ###############################
-
-/**
- * Schema type that implements both StandardSchema (validation) and StandardJSONSchema (conversion).
- *
- * Use this as a constraint when you need:
- * 1. Runtime validation via `~standard.validate()`
- * 2. JSON Schema generation via `~standard.jsonSchema.input()`
- *
- * ArkType, Zod (v4.2+), and Valibot (with adapter) all implement both specs.
- *
- * @example
- * ```typescript
- * // ArkType
- * import { type } from 'arktype';
- * type('string') satisfies CombinedStandardSchema; // ✅
- *
- * // Zod (v4.2+)
- * import * as z from 'zod';
- * z.string() satisfies CombinedStandardSchema; // ✅
- * ```
- */
-export type CombinedStandardSchema<TInput = unknown, TOutput = TInput> = {
-	'~standard': StandardSchemaV1.Props<TInput, TOutput> &
-		StandardJSONSchemaV1.Props<TInput, TOutput>;
-};
 
 /**
  * Arktype fallback handlers for JSON Schema conversion.
@@ -52,7 +56,8 @@ export type CombinedStandardSchema<TInput = unknown, TOutput = TInput> = {
  * so the conversion succeeds.
  *
  * Non-undefined fallbacks (morphs, predicates, proto types, etc.) are logged
- * with console.warn and preserve the partial schema so other fields aren't lost.
+ * via the workspace logger and preserve the partial schema so other fields
+ * aren't lost.
  *
  * @see https://arktype.io/docs/json-schema - arktype's toJsonSchema docs
  */
@@ -63,19 +68,15 @@ const ARKTYPE_FALLBACK = {
 		base: Record<string, unknown>;
 	}): Record<string, unknown> => {
 		if (ctx.unit === undefined) return {};
-		console.warn(
-			`[arktype→JSON Schema] Unit type "${String(ctx.unit)}" (${typeof ctx.unit}) cannot be converted. ` +
-				`Using base schema as fallback.`,
-		);
+		log.warn(StandardSchemaError.UnitFallback({ unit: ctx.unit }));
 		return ctx.base;
 	},
 	default: (ctx: {
 		code: string;
 		base: Record<string, unknown>;
 	}): Record<string, unknown> => {
-		console.warn(
-			`[arktype→JSON Schema] Fallback triggered for code "${ctx.code}". ` +
-				`Base schema: ${JSON.stringify(ctx.base)}`,
+		log.warn(
+			StandardSchemaError.DefaultFallback({ code: ctx.code, base: ctx.base }),
 		);
 		return ctx.base;
 	},
@@ -114,11 +115,8 @@ export function standardSchemaToJsonSchema(
 					fallback: ARKTYPE_FALLBACK,
 				},
 			}),
-		catch: (e) => {
-			console.warn(
-				'[standardSchemaToJsonSchema] Conversion failure, using permissive fallback:',
-				e,
-			);
+		catch: (cause) => {
+			log.warn(StandardSchemaError.ConversionFailed({ cause }));
 			return Ok({});
 		},
 	});

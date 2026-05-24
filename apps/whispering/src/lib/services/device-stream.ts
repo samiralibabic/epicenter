@@ -10,8 +10,8 @@ import type {
 	DeviceAcquisitionOutcome,
 	DeviceIdentifier,
 	UpdateStatusMessageFn,
-} from '$lib/services/types';
-import { asDeviceIdentifier } from '$lib/services/types';
+} from '$lib/services/recorder/types';
+import { asDeviceIdentifier } from '$lib/services/recorder/types';
 
 const DeviceStreamError = defineErrors({
 	PermissionDenied: ({ cause }: { cause: unknown }) => ({

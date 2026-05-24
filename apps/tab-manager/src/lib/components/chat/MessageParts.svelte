@@ -6,7 +6,7 @@
 	} from '@tanstack/ai-client';
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
-	import type { WorkspaceTools } from '$lib/client';
+	import type { SessionTools } from '$lib/session.svelte';
 	import ThinkingPart from './ThinkingPart.svelte';
 	import ToolCallPart from './ToolCallPart.svelte';
 	import ToolResultPart from './ToolResultPart.svelte';
@@ -33,7 +33,7 @@
 		</div>
 	{:else if part.type === 'tool-call'}
 		<ToolCallPart
-			part={part as TanStackToolCallPart<WorkspaceTools>}
+			part={part as TanStackToolCallPart<SessionTools>}
 			{onApproveToolCall}
 			{onDenyToolCall}
 		/>

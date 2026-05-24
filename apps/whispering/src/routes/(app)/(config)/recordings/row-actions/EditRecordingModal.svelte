@@ -74,13 +74,11 @@
 	/**
 	 * Audio playback URL via TanStack Query.
 	 * Audio blobs are too large for Yjs CRDTs, so they're still served
-	 * from DbService. Uses accessor pattern for reactive updates.
+	 * from BlobStore. Uses accessor pattern for reactive updates.
 	 */
 	const audioPlaybackUrlQuery = createQuery(
 		() => rpc.audio.getPlaybackUrl(() => recording.id).options,
 	);
-
-	const audioUrl = $derived(audioPlaybackUrlQuery.data);
 
 	function promptUserConfirmLeave() {
 		if (!isWorkingCopyDirty) {
@@ -103,7 +101,7 @@
 	}
 
 	onDestroy(() => {
-		services.db.recordings.revokeAudioUrl(recordingIdForCleanup);
+		services.blobs.audio.revokeUrl(recordingIdForCleanup);
 	});
 </script>
 
@@ -175,10 +173,14 @@
 					class="col-span-3"
 				/>
 			</div>
-			{#if audioUrl}
+			{#if audioPlaybackUrlQuery.data}
 				<div class="grid grid-cols-4 items-center gap-4">
 					<Label for="audio" class="text-right">Audio</Label>
-					<audio src={audioUrl} controls class="col-span-3 h-8 w-full"></audio>
+					<audio
+						src={audioPlaybackUrlQuery.data}
+						controls
+						class="col-span-3 h-8 w-full"
+					></audio>
 				</div>
 			{/if}
 		</div>

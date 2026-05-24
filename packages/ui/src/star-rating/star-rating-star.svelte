@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { cn } from '../utils.js';
-	import StarHalfIcon from '@lucide/svelte/icons/star-half';
 	import StarIcon from '@lucide/svelte/icons/star';
+	import StarHalfIcon from '@lucide/svelte/icons/star-half';
 	import { RatingGroup } from 'bits-ui';
-	import type { StarRatingStarProps } from './types';
+	import { cn } from '../utils.js';
+
+	type StarRatingStarProps = {
+		index: number;
+		state: 'active' | 'partial' | 'inactive';
+		class?: string;
+	};
 
 	let { index, state, class: className }: StarRatingStarProps = $props();
 </script>

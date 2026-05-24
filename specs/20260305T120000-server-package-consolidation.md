@@ -195,7 +195,7 @@ Both adapters produce a `betterAuth` instance, but the backing infrastructure di
 | Secret access | `env` from `cloudflare:workers` | `process.env` |
 | Cookie domain | `crossSubDomainCookies` for `epicenter.so` | Configurable |
 
-Both share `better-auth-base.ts` for schema-affecting config (plugins, PKCE, trusted clients).
+Both share `better-auth-base.ts` for schema-affecting config (plugins, PKCE, OAuth provider settings).
 
 #### Auth Modes (Standalone)
 

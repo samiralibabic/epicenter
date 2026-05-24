@@ -29,11 +29,8 @@
 		INFERENCE_PROVIDER_OPTIONS,
 		type InferenceProviderId,
 	} from '$lib/constants/inference';
-	import {
-		generateDefaultStep,
-		type TransformationStep,
-	} from '$lib/state/transformation-steps.svelte';
-	import type { Transformation } from '$lib/state/transformations.svelte';
+	import { generateDefaultStep } from '$lib/state/transformation-steps.svelte';
+	import type { Transformation, TransformationStep } from '$lib/workspace';
 
 	// Derived labels for select triggers
 	const stepTypeLabel = (type: string) =>

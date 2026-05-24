@@ -1,6 +1,6 @@
 ---
 name: yjs
-description: Yjs CRDT patterns, shared types (Y.Map, Y.Array, Y.Text), conflict resolution, and document storage. Use when the user mentions Yjs, Y.Doc, CRDTs, collaborative editing, or when handling shared types, implementing real-time sync, or optimizing document storage.
+description: Yjs CRDT patterns, shared types (Y.Map, Y.Array, Y.Text), transactions, y-protocols sync and awareness, y-indexeddb persistence, conflict resolution, and document storage. Use when mentioning Yjs, Y.Doc, CRDTs, collaborative editing, real-time sync, awareness, IndexeddbPersistence, or Yjs providers.
 metadata:
   author: epicenter
   version: '1.0'
@@ -10,6 +10,14 @@ metadata:
 ## Reference Repositories
 
 - [Yjs](https://github.com/yjs/yjs) — CRDT framework for shared editing and offline-first data
+- [Yjs Protocols](https://github.com/yjs/y-protocols) - Sync, awareness, and auth protocol helpers
+- [Y IndexedDB](https://github.com/yjs/y-indexeddb) - Browser persistence provider for Y.Doc updates
+
+## Upstream Grounding
+
+When conflict semantics, transaction origins, shared-type behavior, update encoding, storage growth, or provider interoperability affects correctness, ask DeepWiki a narrow question against `yjs/yjs` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for stable basics and repo-local patterns already documented below.
 
 > **Related Skills**: See `workspace-api` for the workspace abstraction built on Yjs.
 
@@ -22,6 +30,35 @@ Use this pattern when you need to:
 - Implement drag-and-drop reordering with fractional indexing.
 - Optimize Yjs storage for high-churn key-value workloads.
 - Review boundaries to prevent raw Yjs type leaks into consumer code.
+
+## Transactions, Origins, And Undo
+
+- Yjs updates are commutative and idempotent. Custom sync and persistence layers should use state vectors instead of inventing ordering guarantees.
+- Use `Y.encodeStateVector(doc)` to describe local clocks, then `Y.encodeStateAsUpdate(doc, remoteStateVector)` to send only missing updates.
+- Wrap multi-write user actions in `doc.transact(() => { ... }, origin)`. This reduces observer churn and gives persistence, providers, and undo logic a useful origin.
+- Treat transaction origins as the boundary for filtering provider echoes, app-authored operations, and undo tracking.
+- Scope `Y.UndoManager` to concrete shared types. Set `trackedOrigins`, tune `captureTimeout`, and call `stopCapturing()` between logically separate commands.
+- Use relative positions for collaborative cursor and selection anchors. Raw numeric indexes drift under remote edits.
+- `Y.snapshot()` is a historical marker that depends on retained delete history. `Y.encodeStateAsUpdate(doc)` is the self-contained checkpoint format.
+- Prefer separate top-level docs over Yjs subdocuments unless Epicenter owns the whole provider lifecycle for the subdoc path.
+
+## Provider Protocols
+
+- The sync protocol has `SyncStep1`, `SyncStep2`, and incremental `Update` messages. Providers should implement that flow rather than exchanging full documents by default.
+- Awareness is ephemeral presence, not canonical document state. Never persist awareness into Y.Doc or IndexedDB as data.
+- Awareness is single-writer per client and clocked. Apply remote awareness only when the clock is newer.
+- On disconnect, set local awareness state to `null` so peers do not wait for timeout.
+- For read-only clients, filter mutation messages at the protocol boundary. Authorization still belongs in the provider or server boundary.
+
+## IndexedDB Persistence
+
+- `IndexeddbPersistence(name, doc)` starts local loading immediately. Wait for upstream `whenSynced`, or Epicenter's wrapper `whenLoaded`, before assuming local state is hydrated.
+- Upstream `whenSynced` means local IndexedDB load complete. It does not mean remote network convergence.
+- Do not call `_storeUpdate`; it is an internal listener installed by the provider.
+- `destroy()` stops persistence and closes the DB connection. `clearData()` destroys persistence and deletes local stored data.
+- Stop writers before reset flows that call `clearData()`.
+- Use provider `set`, `get`, and `del` only for local provider metadata. Collaborative state belongs in shared Yjs types.
+- y-indexeddb periodically compacts stored update rows into a single encoded update, but that does not remove CRDT modeling costs inside the encoded document.
 
 ## Core Concepts
 

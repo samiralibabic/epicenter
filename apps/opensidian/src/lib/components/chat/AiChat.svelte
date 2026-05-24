@@ -4,11 +4,12 @@
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { aiChatState } from '$lib/chat/chat-state.svelte';
+	import { requireOpensidian } from '$lib/session';
 	import ChatInput from './ChatInput.svelte';
 	import MessageList from './MessageList.svelte';
 
-	const active = $derived(aiChatState.active);
+	const opensidian = requireOpensidian();
+	const active = $derived(opensidian.state.chat.active);
 
 	/** Tracks which error message was dismissed so it doesn't reappear. */
 	let dismissedError = $state<string | null>(null);
@@ -26,7 +27,7 @@
 			variant="ghost"
 			size="sm"
 			onclick={() => {
-				aiChatState.newConversation();
+				opensidian.state.chat.newConversation();
 				dismissedError = null;
 			}}
 		>

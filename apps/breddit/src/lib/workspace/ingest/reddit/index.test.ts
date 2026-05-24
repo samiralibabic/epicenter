@@ -12,9 +12,8 @@
 
 import { describe, expect, test } from 'bun:test';
 import { zipSync } from 'fflate';
-import { createWorkspace } from '@epicenter/workspace';
 import { importRedditExport } from './index.js';
-import { redditWorkspace } from './workspace.js';
+import { openReddit } from './workspace.js';
 
 /** Create a mock Reddit export ZIP from filename → CSV text entries */
 function createZip(entries: Record<string, string>): Blob {
@@ -22,11 +21,11 @@ function createZip(entries: Record<string, string>): Blob {
 	for (const [name, content] of Object.entries(entries)) {
 		files[name] = new TextEncoder().encode(content);
 	}
-	return new Blob([zipSync(files)]);
+	return new Blob([zipSync(files) as BlobPart]);
 }
 
 function setup() {
-	const workspace = createWorkspace(redditWorkspace);
+	const workspace = openReddit();
 	return { workspace };
 }
 

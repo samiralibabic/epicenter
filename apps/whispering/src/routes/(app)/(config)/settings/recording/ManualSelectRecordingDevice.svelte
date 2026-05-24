@@ -3,8 +3,8 @@
 	import * as Select from '@epicenter/ui/select';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { rpc } from '$lib/query';
-	import type { DeviceIdentifier } from '$lib/services/types';
-	import { asDeviceIdentifier } from '$lib/services/types';
+	import type { DeviceIdentifier } from '$lib/services/recorder/types';
+	import { asDeviceIdentifier } from '$lib/services/recorder/types';
 
 	let {
 		selected = $bindable(),

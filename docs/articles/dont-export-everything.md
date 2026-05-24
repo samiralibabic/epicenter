@@ -8,7 +8,7 @@ Here's a simple technique I use now: I ask AI to grade each export out of 10 bas
 
 Take this example from a workspace configuration API:
 
-- `defineWorkspace` function: **10/10** - Core API, everyone needs this
+- `defineDocument` function: **10/10** - Core API, everyone needs this
 - `WorkspaceConfig` type: **3/10** - Occasionally useful for typing variables, but mostly inferred
 - `WorkspaceActionContext` type: **1/10** - Automatically inferred from generics, never imported
 - `IndexesAPI` type: **2/10** - Maybe useful for building utilities, but niche

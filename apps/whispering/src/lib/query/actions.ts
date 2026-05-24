@@ -1,16 +1,23 @@
 import { nanoid } from 'nanoid/non-secure';
+import { defineErrors } from 'wellcrafted/error';
 import { Ok } from 'wellcrafted/result';
 import { rpc } from '$lib/query';
 import { defineMutation } from '$lib/query/client';
 import { WhisperingErr } from '$lib/result';
 import { services } from '$lib/services';
-import { DbError } from '$lib/services/db';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
 import { settings } from '$lib/state/settings.svelte';
 import { transformations } from '$lib/state/transformations.svelte';
 import { vadRecorder } from '$lib/state/vad-recorder.svelte';
 import * as transformClipboardWindow from '$routes/transform-clipboard/transformClipboardWindow.tauri';
+
+const ImportError = defineErrors({
+	NoImportableFiles: () => ({
+		message: 'No valid audio or video files found',
+	}),
+});
+
 import { delivery } from './delivery';
 import { notify } from './notify';
 import { recorder } from './recorder';
@@ -32,29 +39,55 @@ import { transformer } from './transformer';
 let manualRecordingStartTime: number | null = null;
 
 /**
- * Mutex flag to prevent concurrent recording operations.
+ * State machine for manual recording operations.
  *
- * This flag guards against a race condition where rapid toggle calls (e.g., push-to-talk)
- * can both see 'IDLE' state before the recorder has fully started. Without this guard:
- * 1. Call 1 checks recorder state → IDLE (during setup, is_recording not yet true)
- * 2. Call 2 checks recorder state → IDLE (Call 1's recording hasn't fully started)
- * 3. Both calls try to start recording, causing state desync
+ * Guards against race conditions where rapid toggle calls (e.g., push-to-talk)
+ * can both see 'IDLE' state before the recorder has fully started.
  *
- * The flag is set synchronously at the start of any recording operation and cleared
- * when the core operation completes (after the recorder service call returns).
+ * States:
+ * - idle: No recording operation in progress
+ * - starting: Recording is being initiated (startManualRecording in progress)
+ * - stopping: Recording is being stopped (stopManualRecording in progress)
+ * - canceling: Recording is being canceled (cancelManualRecording in progress)
  */
-let isRecordingOperationBusy = false;
+type ManualRecordingOp = 'idle' | 'starting' | 'stopping' | 'canceling';
+let manualRecordingOp: ManualRecordingOp = 'idle';
+
+/**
+ * Flag to queue a stop request that arrives during recording startup.
+ *
+ * When push-to-talk is tapped quickly, the release event (stop) can arrive before
+ * the start operation completes. Rather than dropping the stop, we queue it
+ * and consume it after startup finishes. Only set when op is 'starting'.
+ */
+let pendingManualStop = false;
 
 // Internal mutations for manual recording
 const startManualRecording = defineMutation({
 	mutationKey: ['commands', 'startManualRecording'] as const,
 	mutationFn: async () => {
 		// Prevent concurrent recording operations
-		if (isRecordingOperationBusy) {
+		if (manualRecordingOp !== 'idle') {
 			console.info('Recording operation already in progress, ignoring start');
 			return Ok(undefined);
 		}
-		isRecordingOperationBusy = true;
+
+		// Acquire lock before any await to prevent start/start race
+		manualRecordingOp = 'starting';
+
+		// Check if already recording to avoid repeated start attempts
+		const { data: recorderState, error: getRecorderStateError } =
+			await recorder.getRecorderState.fetch();
+		if (getRecorderStateError) {
+			manualRecordingOp = 'idle';
+			notify.error(getRecorderStateError);
+			return Ok(undefined);
+		}
+		if (recorderState === 'RECORDING') {
+			manualRecordingOp = 'idle';
+			console.info('Already recording, ignoring start');
+			return Ok(undefined);
+		}
 
 		settings.set('recording.mode', 'manual');
 
@@ -68,10 +101,9 @@ const startManualRecording = defineMutation({
 		const { data: deviceAcquisitionOutcome, error: startRecordingError } =
 			await recorder.startRecording({ toastId });
 
-		// Release mutex after the actual start operation completes
-		isRecordingOperationBusy = false;
-
 		if (startRecordingError) {
+			manualRecordingOp = 'idle';
+			pendingManualStop = false;
 			notify.error({ id: toastId, ...startRecordingError });
 			return Ok(undefined);
 		}
@@ -123,10 +155,21 @@ const startManualRecording = defineMutation({
 				}
 			}
 		}
+
 		// Track start time for duration calculation
 		manualRecordingStartTime = Date.now();
 		console.info('Recording started');
 		sound.playSoundIfEnabled('manual-start');
+
+		// Release lock first, then check for queued stop
+		manualRecordingOp = 'idle';
+
+		// If a stop was queued during startup, consume it now
+		if (pendingManualStop) {
+			pendingManualStop = false;
+			return await stopManualRecording(undefined);
+		}
+
 		return Ok(undefined);
 	},
 });
@@ -134,12 +177,20 @@ const startManualRecording = defineMutation({
 const stopManualRecording = defineMutation({
 	mutationKey: ['commands', 'stopManualRecording'] as const,
 	mutationFn: async () => {
-		// Prevent concurrent recording operations
-		if (isRecordingOperationBusy) {
-			console.info('Recording operation already in progress, ignoring stop');
+		// Queue stop only if recording is still starting up
+		if (manualRecordingOp === 'starting') {
+			pendingManualStop = true;
+			console.info('Recording startup in progress, queuing stop');
 			return Ok(undefined);
 		}
-		isRecordingOperationBusy = true;
+
+		// Ignore stop if any operation is in progress (not just startup)
+		if (manualRecordingOp !== 'idle') {
+			console.info('Recording operation in progress, ignoring stop');
+			return Ok(undefined);
+		}
+
+		manualRecordingOp = 'stopping';
 
 		const toastId = nanoid();
 		notify.loading({
@@ -152,9 +203,10 @@ const stopManualRecording = defineMutation({
 			toastId,
 		});
 
-		// Release mutex after the actual stop operation completes
+		// Release lock after the actual stop operation completes
 		// This allows new recordings to start while pipeline runs
-		isRecordingOperationBusy = false;
+		manualRecordingOp = 'idle';
+		pendingManualStop = false;
 
 		if (stopRecordingError) {
 			notify.error({ id: toastId, ...stopRecordingError });
@@ -355,13 +407,14 @@ export const actions = {
 		mutationKey: ['commands', 'cancelManualRecording'] as const,
 		mutationFn: async () => {
 			// Prevent concurrent recording operations
-			if (isRecordingOperationBusy) {
+			if (manualRecordingOp !== 'idle') {
 				console.info(
 					'Recording operation already in progress, ignoring cancel',
 				);
 				return Ok(undefined);
 			}
-			isRecordingOperationBusy = true;
+			manualRecordingOp = 'canceling';
+			pendingManualStop = false;
 
 			const toastId = nanoid();
 			notify.loading({
@@ -372,8 +425,8 @@ export const actions = {
 			const { data: cancelRecordingResult, error: cancelRecordingError } =
 				await recorder.cancelRecording({ toastId });
 
-			// Release mutex after the actual cancel operation completes
-			isRecordingOperationBusy = false;
+			// Release lock after the actual cancel operation completes
+			manualRecordingOp = 'idle';
 
 			if (cancelRecordingError) {
 				notify.error({ id: toastId, ...cancelRecordingError });
@@ -440,7 +493,7 @@ export const actions = {
 			);
 
 			if (validFiles.length === 0) {
-				return DbError.NoValidFiles();
+				return ImportError.NoImportableFiles();
 			}
 
 			if (invalidFiles.length > 0) {
@@ -627,12 +680,9 @@ async function processRecordingPipeline({
 		description: 'Your recording is being transcribed...',
 	});
 
-	// Save metadata to workspace (instant) and audio blob to DbService (async)
+	// Save metadata to workspace (instant) and audio blob to BlobStore (async)
 	recordings.set(recording);
-	const saveAudioPromise = services.db.recordings.create({
-		recording,
-		audio: blob,
-	});
+	const saveAudioPromise = services.blobs.audio.save(recording.id, blob);
 	const transcribePromise = transcribeBlob(blob);
 
 	// Await transcription first (latency-critical path)
@@ -680,11 +730,9 @@ async function processRecordingPipeline({
 		description: completionDescription,
 	});
 
-	const title = transcribedText.slice(0, 60).trim() || 'Untitled Recording';
 	recordings.update(recording.id, {
 		transcript: transcribedText,
 		transcriptionStatus: 'DONE',
-		title,
 	});
 
 	// Determine if we need to chain to transformation

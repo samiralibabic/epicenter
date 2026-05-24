@@ -13,7 +13,7 @@ const config = {
 			base: '/dashboard',
 		},
 		alias: {
-			'#': '../../packages/ui/src',
+			'$platform/auth': './src/lib/platform/auth/auth.ts',
 		},
 	},
 	preprocess: vitePreprocess(),

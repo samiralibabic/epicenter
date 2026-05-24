@@ -7,8 +7,10 @@ export {
 	type SqliteIndex,
 	type SqliteIndexOptions,
 } from './extensions/sqlite-index/index.js';
+// File content document keys
+export { fileContentDocGuid } from './file-content-docs.js';
 // File system (orchestrator)
-export { createYjsFileSystem, type YjsFileSystem } from './file-system.js';
+export { attachYjsFileSystem, type YjsFileSystem } from './file-system.js';
 // Formats
 export {
 	markdownSchema,
@@ -31,8 +33,8 @@ export { type ColumnDefinition, type FileRow, filesTable } from './table.js';
 // Tree (metadata layer)
 export {
 	assertUniqueName,
-	createFileSystemIndex,
-	createFileTree,
+	attachFileSystemIndex,
+	attachFileTree,
 	disambiguateNames,
 	type FileSystemIndex,
 	type FileTree,

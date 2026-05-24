@@ -1,9 +1,18 @@
 # Auth Workspace Encryption Boundary
 
 **Date**: 2026-03-26
-**Status**: Draft
+**Status**: Superseded
 **Author**: Codex
 **Branch**: `feat/sync-auto-reconnect`
+
+**Superseded on 2026-05-07**: Do not execute this draft as written. Its
+bootstrap concern was real, but the API it targets no longer exists on
+`origin/main`. The current design uses `@epicenter/auth` /
+`@epicenter/auth-svelte` for auth state, `createSession` for signed-in app
+session construction, and `attachEncryption(ydoc, { encryptionKeys })` for
+encrypted workspace resources. The old `createWorkspaceAuth().whenReady`,
+`restoreEncryption()`, and `deactivateEncryption()` surface described below is
+historical context.
 
 ## Overview
 
@@ -472,6 +481,9 @@ The contract is the important part: the UI awaits `appReady`, not raw internal r
 - [ ] Explicit auth rejection still tears down decrypted local state and clears cached keys.
 - [ ] The spec clearly separates workspace readiness, auth bootstrap readiness, and app bootstrap readiness.
 
+The checklist is intentionally left unchecked. This draft was superseded by a
+different implementation path rather than completed line by line.
+
 ## References
 
 - `packages/svelte-utils/src/auth-state.svelte.ts` - current workspace-aware auth state and startup restore path
@@ -484,3 +496,22 @@ The contract is the important part: the UI awaits `appReady`, not raw internal r
 - `apps/whispering/src/lib/migration/migrate-settings.ts` - app-local post-hydration task already awaiting workspace readiness
 - `apps/whispering/src/routes/(app)/(config)/debug/+page.svelte` - concrete stale-snapshot page demonstrating the timing bug
 - `specs/20260325T230903-auth-surface-simplification.md` - previous auth surface refactor
+
+## Review
+
+**Superseded**: 2026-05-07
+
+The active code removed the constructor surface this draft was trying to
+improve. Local auth readiness and signed-in workspace construction now compose
+through app sessions, not through a workspace-auth-specific return shape:
+
+```text
+auth.state
+  -> createSession({ auth, build })
+  -> app-local signed-in workspace bundle
+  -> attachEncryption(ydoc, { encryptionKeys })
+```
+
+The stale-snapshot warning for Whispering `/debug` can still be relevant as a
+page-level workspace hydration issue, but it should be tracked separately from
+the old `createWorkspaceAuth().whenReady` proposal.

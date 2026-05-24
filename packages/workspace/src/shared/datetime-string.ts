@@ -16,7 +16,6 @@
  * and a companion object with `parse`, `stringify`, `is`, and `now` methods—modeled
  * after `JSON.parse` / `JSON.stringify` for familiarity.
  */
-
 import { type } from 'arktype';
 import type { Brand } from 'wellcrafted/brand';
 

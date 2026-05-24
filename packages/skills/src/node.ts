@@ -1,16 +1,20 @@
 /**
- * @fileoverview Server-side skills workspace with Node.js disk I/O actions.
+ * @fileoverview Server-side entry for the shared skills workspace.
  *
- * Requires `node:crypto`, `node:fs/promises`, and `node:path`—do NOT import
- * this in browser bundles. Use the base `@epicenter/skills` import instead.
+ * Exports `openSkillsNodeWorkspace`: a direct Node/Bun workspace opener with
+ * NO IndexedDB / BroadcastChannel attachments and WITH `import_from_disk` /
+ * `export_to_disk` actions.
+ *
+ * Uses the same `SKILLS_WORKSPACE_ID` guid as the browser entry, so data
+ * authored on either side targets the same logical Y.Doc.
  *
  * @example
  * ```typescript
- * import { createSkillsWorkspace } from '@epicenter/skills/node'
+ * import { openSkillsNodeWorkspace } from '@epicenter/skills/node';
  *
- * const ws = createSkillsWorkspace()
- * await ws.actions.importFromDisk({ dir: '.agents/skills' })
- * await ws.actions.exportToDisk({ dir: '.agents/skills' })
+ * using workspace = openSkillsNodeWorkspace({ workspaceId: 'epicenter.skills' });
+ * await workspace.actions.import_from_disk({ dir: '.agents/skills' });
+ * await workspace.actions.export_to_disk({ dir: '.agents/skills' });
  * ```
  *
  * @module
@@ -20,21 +24,31 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
-	createWorkspace,
+	attachPlainText,
+	defineActions,
 	defineMutation,
 	generateId,
+	onLocalUpdate,
 } from '@epicenter/workspace';
-import { Type } from 'typebox';
+import Type from 'typebox';
 import {
 	defineErrors,
 	extractErrorMessage,
 	type InferErrors,
 } from 'wellcrafted/error';
 import { Ok, tryAsync } from 'wellcrafted/result';
-import { skillsDefinition } from './definition.js';
+import * as Y from 'yjs';
 import { parseSkillMd } from './parse.js';
+import { referenceContentDocGuid } from './reference-content-docs.js';
 import { serializeSkillMd } from './serialize.js';
+import { skillInstructionsDocGuid } from './skill-instructions-docs.js';
+import { createSkillsActions } from './skills-actions.js';
 import type { Skill } from './tables.js';
+import { openSkills } from './workspace.js';
+
+export { SKILLS_WORKSPACE_ID } from './constants.js';
+export type { Reference, Skill } from './tables.js';
+export { referencesTable, skillsTable } from './tables.js';
 
 const DirInput = Type.Object({ dir: Type.String() });
 
@@ -48,26 +62,77 @@ export const SkillsIoError = defineErrors({
 export type SkillsIoError = InferErrors<typeof SkillsIoError>;
 
 /**
- * Create a skills workspace client with disk I/O actions pre-attached.
+ * Open a skills workspace for Node/Bun runtimes. No IndexedDB, no broadcast
+ * channel. Callers layer their own persistence if needed. The returned
+ * bundle includes `import_from_disk` and `export_to_disk` actions alongside the
+ * standard read actions.
  *
- * Returns a non-terminal builder—chain `.withExtension()` to add persistence,
- * sync, or other capabilities. Actions are available immediately on the
- * returned client via `ws.actions.importFromDisk()` and
- * `ws.actions.exportToDisk()`.
+ * Uses `SKILLS_WORKSPACE_ID`, the same guid as the browser entry, so
+ * data parity across environments is preserved at the CRDT level.
  *
- * @example
- * ```typescript
- * import { createSkillsWorkspace } from '@epicenter/skills/node'
- *
- * const ws = createSkillsWorkspace()
- *   .withExtension('persistence', indexeddbPersistence)
- *
- * await ws.actions.importFromDisk({ dir: '.agents/skills' })
- * await ws.actions.exportToDisk({ dir: '.agents/skills' })
- * ```
+ * Child instruction and reference documents are opened per operation. Node
+ * scripts do not need the browser cache's shared live identity or local
+ * IndexedDB reset behavior.
  */
-export function createSkillsWorkspace() {
-	return createWorkspace(skillsDefinition).withActions((client) => ({
+export function openSkillsNodeWorkspace({
+	workspaceId,
+}: {
+	workspaceId: string;
+}) {
+	const doc = openSkills({ workspaceId });
+	const { tables } = doc;
+
+	function openInstructionsDoc(skillId: string) {
+		const ydoc = new Y.Doc({
+			guid: skillInstructionsDocGuid({ workspaceId, skillId }),
+			gc: true,
+		});
+		onLocalUpdate(ydoc, () =>
+			tables.skills.update(skillId, { updatedAt: Date.now() }),
+		);
+		return {
+			ydoc,
+			instructions: attachPlainText(ydoc),
+			whenReady: Promise.resolve(),
+			[Symbol.dispose]() {
+				ydoc.destroy();
+			},
+		};
+	}
+
+	function openReferenceDoc(referenceId: string) {
+		const ydoc = new Y.Doc({
+			guid: referenceContentDocGuid({ workspaceId, referenceId }),
+			gc: true,
+		});
+		onLocalUpdate(ydoc, () =>
+			tables.references.update(referenceId, { updatedAt: Date.now() }),
+		);
+		return {
+			ydoc,
+			content: attachPlainText(ydoc),
+			whenReady: Promise.resolve(),
+			[Symbol.dispose]() {
+				ydoc.destroy();
+			},
+		};
+	}
+
+	const readActions = createSkillsActions({
+		tables,
+		async readInstructions(skillId) {
+			using handle = openInstructionsDoc(skillId);
+			await handle.whenReady;
+			return handle.instructions.read();
+		},
+		async readReference(referenceId) {
+			using handle = openReferenceDoc(referenceId);
+			await handle.whenReady;
+			return handle.content.read();
+		},
+	});
+
+	const nodeActions = defineActions({
 		/**
 		 * Scan a directory of SKILL.md files and upsert them into the workspace.
 		 *
@@ -77,10 +142,10 @@ export function createSkillsWorkspace() {
 		 * second gets a fresh one and its SKILL.md is rewritten.
 		 *
 		 * References in `references/*.md` subdirectories are imported with
-		 * deterministic IDs derived from `skillId + filename`—no ephemeral IDs,
+		 * deterministic IDs derived from `skillId + filename`: no ephemeral IDs,
 		 * no matching needed.
 		 */
-		importFromDisk: defineMutation({
+		import_from_disk: defineMutation({
 			description: 'Import skills from an agentskills.io-compliant directory',
 			input: DirInput,
 			handler: async ({ dir }) => {
@@ -115,7 +180,9 @@ export function createSkillsWorkspace() {
 
 					const hasUniqueId =
 						parsedSkill.id !== undefined && !seenIds.has(parsedSkill.id);
-					const skillId = hasUniqueId ? parsedSkill.id : generateId();
+					const skillId: string = hasUniqueId
+						? (parsedSkill.id as string)
+						: generateId();
 					seenIds.add(skillId);
 
 					const skill = {
@@ -123,7 +190,7 @@ export function createSkillsWorkspace() {
 						id: skillId,
 						updatedAt: Date.now(),
 					} satisfies Skill;
-					client.tables.skills.set(skill);
+					tables.skills.set(skill);
 
 					// Write back SKILL.md with the id baked into metadata so
 					// future imports on any machine get the same id
@@ -132,9 +199,11 @@ export function createSkillsWorkspace() {
 						await writeFile(join(skillPath, 'SKILL.md'), updatedMd, 'utf-8');
 					}
 
-					const instructionsHandle =
-						await client.documents.skills.instructions.open(skillId);
-					instructionsHandle.write(instructions);
+					{
+						await using h = openInstructionsDoc(skillId);
+						await h.whenReady;
+						h.instructions.write(instructions);
+					}
 
 					// Import references in parallel
 					const refsPath = join(skillPath, 'references');
@@ -153,7 +222,7 @@ export function createSkillsWorkspace() {
 								);
 								const refId = deriveReferenceId(skillId, fileName);
 
-								client.tables.references.set({
+								tables.references.set({
 									id: refId,
 									skillId,
 									path: fileName,
@@ -161,9 +230,9 @@ export function createSkillsWorkspace() {
 									_v: 1,
 								});
 
-								const contentHandle =
-									await client.documents.references.content.open(refId);
-								contentHandle.write(refContent);
+								await using h = openReferenceDoc(refId);
+								await h.whenReady;
+								h.content.write(refContent);
 							}),
 						);
 					}
@@ -173,15 +242,15 @@ export function createSkillsWorkspace() {
 		/**
 		 * Serialize workspace table data to agentskills.io-compliant folders.
 		 *
-		 * One-way publish step—run this when you want agent runtimes (Codex,
+		 * One-way publish step. Run this when you want agent runtimes (Codex,
 		 * Claude Code, OpenCode) to pick up the latest skill definitions.
 		 * Stale directories for deleted skills are cleaned up automatically.
 		 */
-		exportToDisk: defineMutation({
+		export_to_disk: defineMutation({
 			description: 'Export all skills to an agentskills.io-compliant directory',
 			input: DirInput,
 			handler: async ({ dir }) => {
-				const skills = client.tables.skills.getAllValid();
+				const skills = tables.skills.getAllValid();
 				const skillNames = new Set(skills.map((s) => s.name));
 
 				// Export all skills in parallel
@@ -190,14 +259,13 @@ export function createSkillsWorkspace() {
 						const skillDir = join(dir, skill.name);
 						await mkdir(skillDir, { recursive: true });
 
-						const instructionsHandle =
-							await client.documents.skills.instructions.open(skill.id);
-						const instructions = instructionsHandle.read();
-						const skillMd = serializeSkillMd(skill, instructions);
+						await using h = openInstructionsDoc(skill.id);
+						await h.whenReady;
+						const skillMd = serializeSkillMd(skill, h.instructions.read());
 						await writeFile(join(skillDir, 'SKILL.md'), skillMd, 'utf-8');
 
 						// Write references in parallel
-						const refs = client.tables.references.filter(
+						const refs = tables.references.filter(
 							(r) => r.skillId === skill.id,
 						);
 						if (refs.length > 0) {
@@ -206,10 +274,10 @@ export function createSkillsWorkspace() {
 
 							await Promise.all(
 								refs.map(async (ref) => {
-									const contentHandle =
-										await client.documents.references.content.open(ref.id);
-									const content = contentHandle.read();
-									await writeFile(join(refsDir, ref.path), content, 'utf-8');
+									await using h = openReferenceDoc(ref.id);
+									await h.whenReady;
+									const text = h.content.read();
+									await writeFile(join(refsDir, ref.path), text, 'utf-8');
 								}),
 							);
 						}
@@ -240,7 +308,23 @@ export function createSkillsWorkspace() {
 				);
 			},
 		}),
-	}));
+	});
+
+	const actions = { ...readActions, ...nodeActions };
+
+	return {
+		get id() {
+			return doc.ydoc.guid;
+		},
+		ydoc: doc.ydoc,
+		tables,
+		kv: doc.kv,
+		actions,
+		batch: doc.batch,
+		[Symbol.dispose]() {
+			doc[Symbol.dispose]();
+		},
+	};
 }
 
 const REFERENCE_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -250,7 +334,7 @@ const REFERENCE_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
  *
  * Uses SHA-256, then maps each byte to the same `[a-z0-9]` alphabet
  * used by `generateId()`. Renaming a reference file naturally creates
- * a new ID—the old file is conceptually a different reference.
+ * a new ID. The old file is conceptually a different reference.
  */
 function deriveReferenceId(skillId: string, path: string): string {
 	const hash = createHash('sha256').update(`${skillId}:${path}`).digest();

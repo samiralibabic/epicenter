@@ -1,5 +1,7 @@
 > **Status: Superseded** by `20260313T063000-workspace-architecture-decisions.md`. The headless runner concept is subsumed into the Bun app server, which loads all workspaces in one process.
 
+> **Path note (2026-05-22)**: This spec's `{configDir}/.epicenter/auth/token.json` and `.epicenter/persistence/...` examples predate the current path policy. Machine auth now lives at `env-paths('epicenter').data/auth/<host>.json` and daemon runtime files use the OS runtime dir. See `specs/20260522T203209-top-level-epicenter-path-cleanup.md`.
+
 # Headless Workspace Runner
 
 **Date**: 2026-03-12
@@ -276,7 +278,7 @@ plugins: [
 ```
 
 - [x] **6.1.1** Add `deviceAuthorization` plugin to `createAuth` in `apps/api/src/app.ts`
-- [x] **6.1.2** Register `epicenter-runner` as a trusted client (similar to `epicenter-desktop` and `epicenter-mobile`)
+- [x] **6.1.2** Validate the device-flow client ID in `deviceAuthorization`
 
 #### 6.2 — Server: Build `/device` verification page
 
@@ -354,7 +356,7 @@ async function login(serverUrl: string) {
 
 What's IN scope for Phase 6:
 - `deviceAuthorization` plugin on server
-- `epicenter-runner` trusted client registration
+- Device-flow client ID validation
 - Verification page (minimal)
 - Runner `login`/`logout` commands
 - Token storage + auto-loading
@@ -440,7 +442,7 @@ What's OUT of scope:
 - Better Auth Device Authorization plugin — `better-auth/plugins/deviceAuthorization`
 - Better Auth Bearer plugin — `better-auth/plugins/bearer` (already active in `apps/api/src/app.ts`)
 - RFC 8628: OAuth 2.0 Device Authorization Grant
-- `apps/api/src/app.ts` lines 73–100 — existing plugin config and trusted clients
+- `apps/api/src/app.ts` lines 73-100: existing plugin config and device-client validation
 
 ## Review
 

@@ -1,0 +1,29 @@
+{
+	"name": "@epicenter/auth",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Framework-agnostic auth core for Epicenter.",
+	"exports": {
+		".": "./src/index.ts",
+		"./node": "./src/node.ts",
+		"./oauth-launchers": "./src/oauth-launchers/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@epicenter/constants": "workspace:*",
+		"@epicenter/encryption": "workspace:*",
+		"arktype": "catalog:",
+		"better-auth": "catalog:",
+		"oauth4webapi": "catalog:",
+		"wellcrafted": "catalog:"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"typescript": "catalog:"
+	},
+	"license": "MIT"
+}

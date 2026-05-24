@@ -75,25 +75,9 @@ export const WhisperingErr = (args: WhisperingErrorInput) =>
 	Err(WhisperingError(args));
 
 /**
- * Creates a WhisperingError with 'warning' severity.
- */
-const WhisperingWarning = (args: WhisperingErrorInput): WhisperingError => ({
-	name: 'WhisperingError',
-	severity: 'warning',
-	...normalizeInput(args),
-});
-
-/**
- * Creates a Err wrapping a WhisperingError with 'warning' severity.
- */
-export const WhisperingWarningErr = (args: WhisperingErrorInput) =>
-	Err(WhisperingWarning(args));
-
-/**
  * Result type for Whispering operations that can fail.
  * Follows the Result pattern where operations return either Ok<T> or Err<WhisperingError>.
  *
  * @template T - The type of the success value
  */
 export type WhisperingResult<T> = Ok<T> | Err<WhisperingError>;
-

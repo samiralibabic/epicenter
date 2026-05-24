@@ -6,8 +6,8 @@ import { defineMutation, defineQuery, queryClient } from '$lib/query/client';
 import { WhisperingErr } from '$lib/result';
 import { services } from '$lib/services';
 import { desktopServices } from '$lib/services/desktop';
-import type { DeviceIdentifier } from '$lib/services/types';
-import { asDeviceIdentifier } from '$lib/services/types';
+import type { DeviceIdentifier } from '$lib/services/recorder/types';
+import { asDeviceIdentifier } from '$lib/services/recorder/types';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { notify } from './notify';
 

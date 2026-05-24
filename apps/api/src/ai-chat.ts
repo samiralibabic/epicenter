@@ -120,6 +120,8 @@ export const aiChatHandlers = factory.createHandlers(
 				adapter = createGeminiChat(data.model, apiKey);
 				break;
 			}
+			default:
+				return data satisfies never;
 		}
 
 		try {

@@ -12,9 +12,9 @@
 	import { transformationSteps } from '$lib/state/transformation-steps.svelte';
 	import {
 		saveTransformationWithSteps,
-		type Transformation,
 		transformations,
 	} from '$lib/state/transformations.svelte';
+	import type { Transformation } from '$lib/workspace';
 	import MarkTransformationActiveButton from './MarkTransformationActiveButton.svelte';
 
 	let {

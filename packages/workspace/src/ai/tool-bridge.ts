@@ -3,57 +3,47 @@
  *
  * TanStack AI needs tools in two places:
  *
- * 1. **In the browser** — `createChat({ tools })` expects an array of
+ * 1. **In the browser**: `createChat({ tools })` expects an array of
  *    `AnyClientTool` objects with `execute` functions so the `ChatClient`
  *    can run tool calls locally without a server round-trip.
  *
- * 2. **On the server** — the HTTP request body needs a JSON-serializable
+ * 2. **On the server**: the HTTP request body needs a JSON-serializable
  *    description of each tool (name, description, input schema) so the
  *    server can forward them to the AI provider. Functions like `execute`
  *    can't travel over the wire.
  *
- * This module converts workspace `Actions` (your `defineQuery` /
- * `defineMutation` tree) into both representations at once, so you don't
- * have to build them by hand.
+ * This module converts a flat workspace action registry into both
+ * representations at once, so you don't have to build them by hand. The AI
+ * tool name is the action key verbatim.
  *
  * @module
  */
 
 import type { AnyClientTool, JSONSchema } from '@tanstack/ai';
-import type { Action, Actions } from '../shared/actions';
-import { iterateActions } from '../shared/actions';
+import type { Action, ActionRegistry } from '../shared/actions';
+import { invokeAction } from '../shared/actions';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 /**
- * Recursively extract all tool names from an `Actions` tree as a string literal union.
- *
- * Leaf `Action` nodes produce their key directly. Nested `Actions` objects
- * produce `"parent_child"` paths joined with `_`.
- *
- * **Constraint**: Action keys must not contain underscores, or flattened names
- * will collide (e.g. action key `"foo_bar"` vs nested path `foo → bar` both
- * produce `"foo_bar"`).
+ * Tool names produced from an action registry. Action keys are already valid
+ * provider tool names, so the name is preserved verbatim.
  *
  * @example
  * ```ts
  * type Names = ActionNames<typeof workspace.actions>;
- * // "tabs_search" | "tabs_list" | "tabs_close" | "windows_list" | ...
+ * // "tabs_search" | "tabs_list" | ...
  * ```
  */
-type ActionNames<T extends Actions> = {
-	[K in keyof T & string]: T[K] extends Action
-		? K
-		: T[K] extends Actions
-			? `${K}_${ActionNames<T[K]>}`
-			: never;
-}[keyof T & string];
+export type ActionNames<TActions> = {
+	[K in keyof TActions & string]: TActions[K] extends Action ? K : never;
+}[keyof TActions & string];
 
 /**
  * JSON-serializable description of a tool, sent to the server in the HTTP
- * request body. This is what the AI provider sees—it tells the LLM what
+ * request body. This is what the AI provider sees. It tells the LLM what
  * tools exist, what arguments they accept, and whether they need user
  * approval before running.
  *
@@ -80,17 +70,17 @@ export type ToolDefinition = {
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a workspace action tree into the two representations TanStack AI
+ * Convert a workspace action registry into the two representations TanStack AI
  * needs for AI-powered chat with tool calling.
  *
  * ### What you get
  *
- * - **`.tools`** — Pass these to `createChat({ tools })`. They're TanStack AI
+ * - **`.tools`**: Pass these to `createChat({ tools })`. They're TanStack AI
  *   `AnyClientTool` objects with `execute` wired to your action handlers.
  *   When the LLM calls a tool, `ChatClient` runs the matching `execute`
- *   function in the browser automatically—no server round-trip needed.
+ *   function in the browser automatically, no server round-trip needed.
  *
- * - **`.definitions`** — Send these to the server in your HTTP request body.
+ * - **`.definitions`**: Send these to the server in your HTTP request body.
  *   They're the same tools minus `execute` (which can't be serialized to
  *   JSON), plus normalized input schemas. The server forwards them to the AI
  *   provider so the LLM knows what tools are available. Each definition also
@@ -99,18 +89,18 @@ export type ToolDefinition = {
  *
  * ### How it works
  *
- * Your workspace actions (`defineQuery` / `defineMutation`) are a nested tree.
- * This function flattens them into a flat tool list with `_`-separated names:
+ * The action registry is a flat record keyed by snake_case action key. This
+ * function preserves each key as the AI tool name:
  *
  * ```
- * { tabs: { close: defineMutation(...) } }  →  tool named "tabs_close"
- * { files: { read: defineQuery(...) } }      →  tool named "files_read"
+ * { tabs_close: defineMutation(...) }  ->  tool named "tabs_close"
+ * { files_read: defineQuery(...) }     ->  tool named "files_read"
  * ```
  *
  * Mutations automatically get `needsApproval: true` so the chat UI can show
  * a confirmation dialog before executing them. Queries run immediately.
  *
- * @param actions - The workspace action tree from `workspace.actions`.
+ * @param actions - The flat action registry to expose as tools.
  *
  * @example
  * ```ts
@@ -136,33 +126,37 @@ export type ToolDefinition = {
  *   .find(d => d.name === 'tabs_close')?.title; // → 'Close Tabs'
  * ```
  */
-export function actionsToAiTools<TActions extends Actions>(
+export function actionsToAiTools<TActions extends ActionRegistry>(
 	actions: TActions,
 ): {
 	tools: (AnyClientTool & { name: ActionNames<TActions> })[];
 	definitions: ToolDefinition[];
 } {
-	const entries = [...iterateActions(actions)];
+	const entries = Object.entries(actions);
 
-	const tools = entries.map(([action, path]) => ({
+	const tools = entries.map(([name, action]) => ({
 		__toolSide: 'client' as const,
-		name: path.join(ACTION_NAME_SEPARATOR) as ActionNames<TActions>,
-		description:
-			action.description ??
-			`${action.type}: ${path.join(ACTION_NAME_SEPARATOR)}`,
+		name: name as ActionNames<TActions>,
+		description: action.description ?? `${action.type}: ${name}`,
 		...(action.input && { inputSchema: action.input }),
 		...(action.type === 'mutation' && { needsApproval: true }),
-		execute: async (args: unknown) => (action.input ? action(args) : action()),
+		// TanStack AI's `execute` contract is: return data on success, throw
+		// on failure. invokeAction handles all four handler shapes (raw,
+		// Result, sync, async) and surfaces thrown errors as `Err(cause)`;
+		// we re-throw the raw cause for AI consumption.
+		execute: async (args: unknown) => {
+			const result = await invokeAction(action, args);
+			if (result.error !== null) throw result.error;
+			return result.data;
+		},
 	}));
 
-	// Derive wire definitions directly from actions—avoids the type-widening
+	// Derive wire definitions directly from actions. Avoids the type-widening
 	// round-trip through AnyClientTool that required `as JSONSchema` casts.
-	const definitions: ToolDefinition[] = entries.map(([action, path]) => ({
-		name: path.join(ACTION_NAME_SEPARATOR),
+	const definitions: ToolDefinition[] = entries.map(([name, action]) => ({
+		name,
 		...(action.title && { title: action.title }),
-		description:
-			action.description ??
-			`${action.type}: ${path.join(ACTION_NAME_SEPARATOR)}`,
+		description: action.description ?? `${action.type}: ${name}`,
 		// Safe cast: workspace actions only accept TypeBox schemas (TSchema),
 		// which ARE plain JSON Schema objects at runtime.
 		...(action.input && {
@@ -177,15 +171,6 @@ export function actionsToAiTools<TActions extends Actions>(
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
-
-/**
- * Separator used to join action path segments into tool names.
- *
- * Action keys must not contain this character, or flattened names will collide.
- * For example, key `"foo_bar"` and nested path `foo → bar` would both produce
- * `"foo_bar"`.
- */
-const ACTION_NAME_SEPARATOR = '_';
 
 /** JSON Schema with `properties` and `required` guaranteed present. */
 type NormalizedJsonSchema = JSONSchema &

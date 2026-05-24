@@ -13,6 +13,11 @@ import type { Recording } from '$lib/state/recordings.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
 import { settings } from '$lib/state/settings.svelte';
 import { notify } from './notify';
+import { deepgramErrorToWhisperingErr } from './transcription-errors/deepgram';
+import { elevenlabsErrorToWhisperingErr } from './transcription-errors/elevenlabs';
+import { groqErrorToWhisperingErr } from './transcription-errors/groq';
+import { mistralErrorToWhisperingErr } from './transcription-errors/mistral';
+import { openaiErrorToWhisperingErr } from './transcription-errors/openai';
 
 const transcriptionKeys = {
 	isTranscribing: ['transcription', 'isTranscribing'] as const,
@@ -43,7 +48,7 @@ export const transcription = {
 		): Promise<Result<string, WhisperingError>> => {
 			// Fetch audio blob by ID
 			const { data: audioBlob, error: getAudioBlobError } =
-				await services.db.recordings.getAudioBlob(recording.id);
+				await services.blobs.audio.getBlob(recording.id);
 
 			if (getAudioBlobError) {
 				return WhisperingErr({
@@ -60,11 +65,9 @@ export const transcription = {
 				return Err(transcribeError);
 			}
 
-			const title = transcribedText.slice(0, 60).trim() || 'Untitled Recording';
 			recordings.update(recording.id, {
 				transcript: transcribedText,
 				transcriptionStatus: 'DONE',
-				title,
 			});
 			return Ok(transcribedText);
 		},
@@ -77,7 +80,7 @@ export const transcription = {
 				recordings.map(async (recording) => {
 					// Fetch audio blob by ID
 					const { data: audioBlob, error: getAudioBlobError } =
-						await services.db.recordings.getAudioBlob(recording.id);
+						await services.blobs.audio.getBlob(recording.id);
 
 					if (getAudioBlobError) {
 						return WhisperingErr({
@@ -151,14 +154,6 @@ export async function transcribeBlob(
 		}
 	}
 
-	// Diagnostic: log blob state to help debug 400 "Invalid file format" errors.
-	// If size is 0 or type is empty, the blob is the problem—not the extension.
-	console.debug('[Transcription] Blob diagnostics:', {
-		size: audioToTranscribe.size,
-		type: audioToTranscribe.type,
-		sizeKb: Math.round(audioToTranscribe.size / 1024),
-		service: selectedService,
-	});
 	const transcriptionResult: Result<string, WhisperingError> =
 		await (async () => {
 			const outputLanguage = getOutputLanguage();
@@ -166,20 +161,21 @@ export async function transcribeBlob(
 			const temperature = String(settings.get('transcription.temperature'));
 
 			switch (selectedService) {
-				case 'OpenAI':
-					return await services.transcriptions.openai.transcribe(
-						audioToTranscribe,
-						{
+				case 'OpenAI': {
+					const { data, error } =
+						await services.transcriptions.openai.transcribe(audioToTranscribe, {
 							outputLanguage,
 							prompt,
 							temperature,
 							apiKey: deviceConfig.get('apiKeys.openai'),
 							modelName: settings.get('transcription.openai.model'),
 							baseURL: deviceConfig.get('apiEndpoints.openai') || undefined,
-						},
-					);
-				case 'Groq':
-					return await services.transcriptions.groq.transcribe(
+						});
+					if (error) return openaiErrorToWhisperingErr(error);
+					return Ok(data);
+				}
+				case 'Groq': {
+					const { data, error } = await services.transcriptions.groq.transcribe(
 						audioToTranscribe,
 						{
 							outputLanguage,
@@ -190,6 +186,9 @@ export async function transcribeBlob(
 							baseURL: deviceConfig.get('apiEndpoints.groq') || undefined,
 						},
 					);
+					if (error) return groqErrorToWhisperingErr(error);
+					return Ok(data);
+				}
 				case 'speaches':
 					return await services.transcriptions.speaches.transcribe(
 						audioToTranscribe,
@@ -201,39 +200,51 @@ export async function transcribeBlob(
 							baseUrl: deviceConfig.get('transcription.speaches.baseUrl'),
 						},
 					);
-				case 'ElevenLabs':
-					return await services.transcriptions.elevenlabs.transcribe(
-						audioToTranscribe,
-						{
-							outputLanguage,
-							prompt,
-							temperature,
-							apiKey: deviceConfig.get('apiKeys.elevenlabs'),
-							modelName: settings.get('transcription.elevenlabs.model'),
-						},
-					);
-				case 'Deepgram':
-					return await services.transcriptions.deepgram.transcribe(
-						audioToTranscribe,
-						{
-							outputLanguage,
-							prompt,
-							temperature,
-							apiKey: deviceConfig.get('apiKeys.deepgram'),
-							modelName: settings.get('transcription.deepgram.model'),
-						},
-					);
-				case 'Mistral':
-					return await services.transcriptions.mistral.transcribe(
-						audioToTranscribe,
-						{
-							outputLanguage,
-							prompt,
-							temperature,
-							apiKey: deviceConfig.get('apiKeys.mistral'),
-							modelName: settings.get('transcription.mistral.model'),
-						},
-					);
+				case 'ElevenLabs': {
+					const { data, error } =
+						await services.transcriptions.elevenlabs.transcribe(
+							audioToTranscribe,
+							{
+								outputLanguage,
+								prompt,
+								temperature,
+								apiKey: deviceConfig.get('apiKeys.elevenlabs'),
+								modelName: settings.get('transcription.elevenlabs.model'),
+							},
+						);
+					if (error) return elevenlabsErrorToWhisperingErr(error);
+					return Ok(data);
+				}
+				case 'Deepgram': {
+					const { data, error } =
+						await services.transcriptions.deepgram.transcribe(
+							audioToTranscribe,
+							{
+								outputLanguage,
+								prompt,
+								temperature,
+								apiKey: deviceConfig.get('apiKeys.deepgram'),
+								modelName: settings.get('transcription.deepgram.model'),
+							},
+						);
+					if (error) return deepgramErrorToWhisperingErr(error);
+					return Ok(data);
+				}
+				case 'Mistral': {
+					const { data, error } =
+						await services.transcriptions.mistral.transcribe(
+							audioToTranscribe,
+							{
+								outputLanguage,
+								prompt,
+								temperature,
+								apiKey: deviceConfig.get('apiKeys.mistral'),
+								modelName: settings.get('transcription.mistral.model'),
+							},
+						);
+					if (error) return mistralErrorToWhisperingErr(error);
+					return Ok(data);
+				}
 				case 'whispercpp': {
 					// Pure Rust audio conversion now handles most formats without FFmpeg
 					// Only compressed formats (MP3, M4A) require FFmpeg, which will be

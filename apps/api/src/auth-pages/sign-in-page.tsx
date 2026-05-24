@@ -1,3 +1,5 @@
+/** @jsxImportSource hono/jsx */
+
 import { raw } from 'hono/html';
 import { SIGN_IN_SCRIPT } from './scripts/sign-in';
 

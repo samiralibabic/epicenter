@@ -99,5 +99,3 @@ export const CommandServiceLive = {
 		return Ok(data);
 	},
 };
-
-export type CommandService = typeof CommandServiceLive;

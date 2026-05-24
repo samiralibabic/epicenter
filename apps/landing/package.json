@@ -11,7 +11,7 @@
 		"preview": "astro preview",
 		"astro": "astro",
 		"deploy": "bun run build && wrangler deploy",
-		"typecheck": "astro check && svelte-check"
+		"typecheck": "astro check && svelte-check --tsconfig ./tsconfig.json"
 	},
 	"dependencies": {
 		"@astrojs/check": "0.9.7",
@@ -28,6 +28,7 @@
 	"devDependencies": {
 		"@lucide/astro": "^0.536.0",
 		"@tailwindcss/typography": "catalog:",
+		"svelte-check": "catalog:",
 		"typescript": "catalog:"
 	},
 	"license": "MIT"

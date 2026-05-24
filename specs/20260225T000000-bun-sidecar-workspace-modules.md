@@ -1,4 +1,6 @@
 > **Status: Superseded** by `20260313T063000-workspace-architecture-decisions.md`. The Elysia sidecar was rewritten to Hono, then removed. The Bun app server in the main spec replaces this.
+>
+> **Path note (2026-05-22):** This spec's centralized `~/.epicenter/workspaces/` and `EPICENTER_DATA_DIR` model is also superseded. Do not copy those paths into new runtime code. Use platform directories for durable user data, the OS runtime directory for sockets and metadata, and `<projectDir>/.epicenter/` only for project-local generated data.
 
 # Bun Sidecar + Dynamic Workspace Modules
 

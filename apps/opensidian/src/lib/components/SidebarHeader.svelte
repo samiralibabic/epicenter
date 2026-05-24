@@ -4,8 +4,9 @@
 	import FilePlusIcon from '@lucide/svelte/icons/file-plus';
 	import FolderPlusIcon from '@lucide/svelte/icons/folder-plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
-	import { fsState } from '$lib/state/fs-state.svelte';
-	import { sidebarSearchState } from '$lib/state/sidebar-search-state.svelte';
+	import { requireOpensidian } from '$lib/session';
+
+	const opensidian = requireOpensidian();
 </script>
 
 <Tooltip.Provider>
@@ -22,13 +23,13 @@
 					{#snippet child({ props })}
 						<Button
 							{...props}
-							variant={sidebarSearchState.leftPaneView === 'search' ? 'secondary' : 'ghost'}
+							variant={opensidian.state.sidebarSearch.leftPaneView === 'search' ? 'secondary': 'ghost'}
 							size="icon-xs"
 							onclick={() => {
-							if (sidebarSearchState.leftPaneView === 'search') {
-								sidebarSearchState.closeSearch();
+							if (opensidian.state.sidebarSearch.leftPaneView === 'search') {
+								opensidian.state.sidebarSearch.closeSearch();
 							} else {
-								sidebarSearchState.openSearch();
+								opensidian.state.sidebarSearch.openSearch();
 							}
 							}}
 						>
@@ -45,7 +46,7 @@
 							{...props}
 							variant="ghost"
 							size="icon-xs"
-							onclick={() => fsState.startCreate('folder')}
+							onclick={() => opensidian.state.files.startCreate('folder')}
 						>
 							<FolderPlusIcon class="size-3.5" />
 						</Button>
@@ -60,7 +61,7 @@
 							{...props}
 							variant="ghost"
 							size="icon-xs"
-							onclick={() => fsState.startCreate('file')}
+							onclick={() => opensidian.state.files.startCreate('file')}
 						>
 							<FilePlusIcon class="size-3.5" />
 						</Button>

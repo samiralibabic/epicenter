@@ -1,6 +1,6 @@
 # Skills Editor
 
-A local editor for writing the prompt files and configuration that power Epicenter agents. It uses Yjs CRDTs under the hood—so undo/redo works across sessions and the format is ready for collaboration—but it doesn't sync anywhere. Your skills stay on your machine.
+A local editor for writing the prompt files and configuration that power Epicenter agents. It uses Yjs CRDTs under the hood, so undo and redo work across sessions and the format is ready for collaboration, but it does not sync anywhere. Your skills stay on your machine.
 
 Part of the [Epicenter](https://github.com/EpicenterHQ/epicenter) monorepo. MIT licensed.
 
@@ -14,7 +14,13 @@ A skill is a set of instructions (markdown) plus reference files that tell an Ep
 
 ### Workspace connection
 
-The app imports `createSkillsWorkspace` from `@epicenter/skills`, which provides two tables: `skills` (metadata + attached instructions document) and `references` (per-skill reference files, each with its own content document). The workspace ID is `epicenter.skills`. Persistence is IndexedDB—no remote sync is wired in, so the editor works entirely offline.
+The app composes its browser workspace in `src/lib/skills/browser.ts`.
+`src/lib/skills/client.ts` exports the running `skills` singleton for Svelte
+components. `@epicenter/skills` provides the pure `openSkills()` factory,
+document builders, guid helpers, and action factory; the app owns IndexedDB,
+BroadcastChannel, and inline `createDisposableCache` sources for
+instructions and references. The workspace ID is `epicenter.skills`. No remote
+sync is wired in, so the editor works entirely offline.
 
 ### Collaborative editing
 
@@ -24,9 +30,9 @@ Each skill's instructions and each reference's content are `Y.Doc`-backed docume
 
 A single route renders a resizable split view: sidebar on the left, editor panel on the right.
 
-- **Sidebar**—skill list with search, keyboard navigation (arrow keys), inline rename (F2), and delete with confirmation.
-- **Editor panel**—metadata form (name, description, license, compatibility), instructions editor (CodeMirror + Yjs), and a references panel with expandable entries, each with its own CodeMirror editor.
-- **Command palette**—search across skills from anywhere.
+- **Sidebar**: skill list with search, keyboard navigation (arrow keys), inline rename (F2), and delete with confirmation.
+- **Editor panel**: metadata form (name, description, license, compatibility), instructions editor (CodeMirror + Yjs), and a references panel with expandable entries, each with its own CodeMirror editor.
+- **Command palette**: search across skills from anywhere.
 
 ---
 
@@ -57,14 +63,14 @@ bun dev
 
 ## Tech stack
 
-- [SvelteKit](https://kit.svelte.dev)—UI framework (SSR disabled)
-- [CodeMirror 6](https://codemirror.net) + [y-codemirror.next](https://github.com/yjs/y-codemirror.next)—collaborative markdown editing
-- [Yjs](https://yjs.dev)—CRDT engine
-- [Tailwind CSS](https://tailwindcss.com)—styling
-- `@epicenter/skills`—workspace definition for skills and references
-- `@epicenter/workspace`—CRDT-backed tables, persistence
-- `@epicenter/svelte`—reactive table bindings
-- `@epicenter/ui`—shadcn-svelte component library
+- [SvelteKit](https://kit.svelte.dev): UI framework (SSR disabled)
+- [CodeMirror 6](https://codemirror.net) + [y-codemirror.next](https://github.com/yjs/y-codemirror.next): collaborative markdown editing
+- [Yjs](https://yjs.dev): CRDT engine
+- [Tailwind CSS](https://tailwindcss.com): styling
+- `@epicenter/skills`: workspace definition for skills and references
+- `@epicenter/workspace`: CRDT-backed tables, persistence
+- `@epicenter/svelte`: reactive table bindings
+- `@epicenter/ui`: shadcn-svelte component library
 
 ---
 

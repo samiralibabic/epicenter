@@ -1,11 +1,11 @@
 /**
  * Reactive recording state backed by Yjs workspace tables.
  *
- * Replaces TanStack Query + DbService for recording CRUD. SvelteMap provides
+ * Replaces TanStack Query + BlobStore for recording CRUD. SvelteMap provides
  * per-key reactivity—updating one recording doesn't re-render the entire list.
  * The Yjs observer fires on local writes, remote CRDT sync, and migration.
  *
- * Audio blob access still goes through DbService (blobs are too large for CRDTs).
+ * Audio blob access still goes through BlobStore (blobs are too large for CRDTs).
  *
  * @example
  * ```typescript
@@ -21,13 +21,14 @@
  * ```
  */
 import { fromTable } from '@epicenter/svelte';
-import { workspace } from '$lib/client';
+import { whispering } from '$lib/whispering/client';
+import type { Recording } from '$lib/workspace';
 
 /** Re-exported from the workspace definition for consumer convenience. */
 export type { Recording } from '$lib/workspace';
 
 function createRecordings() {
-	const map = fromTable(workspace.tables.recordings);
+	const map = fromTable(whispering.tables.recordings);
 
 	// Memoize sorted array with $derived so consumers get a stable reference.
 	// Without this, every access creates a new array → TanStack Table's $derived
@@ -40,6 +41,10 @@ function createRecordings() {
 	);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/**
 		 * All recordings as a reactive SvelteMap.
 		 *
@@ -79,7 +84,7 @@ function createRecordings() {
 		 * No manual cache invalidation needed—the observer handles UI updates.
 		 */
 		set(recording: Omit<Recording, '_v'>) {
-			workspace.tables.recordings.set({ ...recording, _v: 2 } as Recording);
+			whispering.tables.recordings.set({ ...recording, _v: 2 } as Recording);
 		},
 
 		/**
@@ -89,7 +94,7 @@ function createRecordings() {
 		 * Returns the update result for error handling.
 		 */
 		update(id: string, partial: Partial<Omit<Recording, 'id' | '_v'>>) {
-			return workspace.tables.recordings.update(id, partial);
+			return whispering.tables.recordings.update(id, partial);
 		},
 
 		/**
@@ -99,7 +104,18 @@ function createRecordings() {
 		 * Callers should clean up audio URLs before calling this.
 		 */
 		delete(id: string) {
-			workspace.tables.recordings.delete(id);
+			whispering.tables.recordings.delete(id);
+		},
+
+		/**
+		 * Delete multiple recordings by ID in a single optimized scan.
+		 *
+		 * Uses the workspace table's bulkDelete (O(n) single scan) instead of
+		 * looping delete calls (O(n²)). Callers should clean up audio URLs
+		 * and audio blobs separately via `services.blobs.audio.delete(ids)`.
+		 */
+		async bulkDelete(ids: string[]) {
+			await whispering.tables.recordings.bulkDelete(ids);
 		},
 
 		/** Total number of recordings. */
@@ -110,3 +126,7 @@ function createRecordings() {
 }
 
 export const recordings = createRecordings();
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => recordings[Symbol.dispose]());
+}

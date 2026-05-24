@@ -2,40 +2,40 @@
 Epicenter encrypts CRDT values before they enter the synced Yjs document.
 That keeps the sync path moving ciphertext instead of application JSON.
 This page only makes claims visible in the current code:
-- `packages/workspace/src/shared/crypto/index.ts`
+- `packages/encryption/src/index.ts`
 - `packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww-encrypted.ts`
-- `packages/workspace/src/workspace/encryption-key.ts`
-- `packages/workspace/src/workspace/create-workspace.ts`
+- `packages/workspace/src/document/attach-encryption.ts`
+- `packages/workspace/src/document/attach-encrypted.ts`
 - `apps/api/src/auth/encryption.ts`
 - `apps/api/src/auth/create-auth.ts`
 - `packages/svelte-utils/src/auth/create-auth.svelte.ts`
-- `packages/workspace/src/extensions/persistence/indexeddb.ts`
-- `apps/api/src/base-sync-room.ts`
+- `packages/workspace/src/document/attach-indexed-db.ts`
+- `apps/api/src/room.ts`
 If something is not visible there, it is not presented as fact here.
 
 ## What this system is
 This is server-managed encryption at the workspace value layer.
 It is not user-held end-to-end encryption.
-The auth server derives per-user keys from `ENCRYPTION_SECRETS` and returns them in the session response.
+The auth server derives per-subject keys from `ENCRYPTION_SECRETS` and returns them in the session response.
 The client derives per-workspace keys locally and uses those keys to encrypt individual CRDT values.
 That split is the trust boundary.
 The sync path only relays encrypted values.
-The auth path can derive user keys because it has access to the deployment secret.
+The auth path can derive subject keys because it has access to the deployment root keyring.
 
 ## Key hierarchy
 The hierarchy is two-stage.
-Server code derives a per-user key.
-Client code derives a per-workspace key from that user key.
+Server code derives a per-subject key.
+Client code derives a per-workspace key from that subject key.
 ```text
-ENCRYPTION_SECRETS entry
+ENCRYPTION_SECRETS entry        (root keyring)
         |
         | SHA-256(secret)
         v
 root key material
         |
-        | HKDF-SHA256 info = "user:{userId}"
+        | HKDF-SHA256 info = "subject:{subject}"
         v
-user key
+subject key                     (per-subject keyring)
         |
         | HKDF-SHA256 info = "workspace:{workspaceId}"
         v
@@ -45,51 +45,97 @@ workspace key
         v
 encrypted CRDT value
 ```
-On the server, `apps/api/src/auth/encryption.ts` hashes each configured secret with SHA-256, imports that digest into Web Crypto HKDF, and derives 256 bits with `info = user:{userId}`.
-It returns one `{ version, userKeyBase64 }` entry per configured secret version.
-On the client, `createWorkspace().applyEncryptionKeys()` decodes each `userKeyBase64`, runs `deriveWorkspaceKey(userKey, workspaceId)`, and gets a 32-byte workspace key with `info = workspace:{workspaceId}`.
+On the server, `apps/api/src/auth/encryption.ts` reads `ENCRYPTION_SECRETS` from the worker env and calls `@epicenter/encryption` to parse the root keyring and derive per-subject keys.
+It returns one `{ version, subjectKeyBase64 }` entry per configured root keyring version.
+On the client, the encryption coordinator (`attachEncryption(ydoc, { keyring })`) reads `keyring()` synchronously at every `attachTable` / `attachKv` / `attachIndexedDb` site, decodes each `subjectKeyBase64`, runs `deriveWorkspaceKey(subjectKey, workspaceId)`, and gets a 32-byte workspace key with `info = workspace:{workspaceId}`.
 The highest version becomes the current key for new writes.
 
 ## How keys reach the client
-Keys come through the auth session.
-There is no separate key-fetch endpoint in the reviewed code.
-`apps/api/src/auth/create-auth.ts` attaches `encryptionKeys` to `/auth/get-session`.
-`packages/svelte-utils/src/auth/create-auth.svelte.ts` then pushes those keys through `onLogin`.
-That happens in two places:
-- on boot from a cached session
-- on every authenticated session update from Better Auth
-The boot path exists so the workspace can unlock before the first auth roundtrip finishes.
-In app clients such as `apps/tab-manager/src/lib/client.ts`, `onLogin(session)` does this:
+Keys come through `/api/session`.
+`apps/api/src/app.ts` mounts `GET /api/session` behind cookie-or-bearer authentication. A valid Better Auth cookie session or a valid API-audience bearer token for the user can fetch `{ user: { id, email }, localIdentity: { subject, keyring } }`.
+`@epicenter/auth` calls `/api/session` at sign-in and at cold-boot when online, persists `{ subject, keyring }` as the `localIdentity` section of the cell, and exposes it through `auth.state.localIdentity.keyring` whenever the auth state is not `signed-out`.
+Cold-boot offline keeps the cached `localIdentity` so the workspace can decrypt local Yjs data without a network roundtrip; the bearer is not attached to outbound requests until `/api/session` re-confirms the cell in this runtime.
+The workspace does not hold an independently mutable copy of the keys. `attachEncryption` takes a `keyring` callback and calls it when an encrypted table, KV store, or IndexedDB provider attaches. Each attached store keeps the keyring derived at that attachment boundary. Browser app session modules usually receive a `LocalOwner` from `createSession`; that owner carries the lazy keyring reader:
 ```ts
-workspace.applyEncryptionKeys(session.encryptionKeys);
-workspace.extensions.sync.reconnect();
+export const session = createSession({
+	auth,
+	build: ({ owner }) =>
+		openMyApp({
+			owner,
+			installationId: createInstallationId({ storage: localStorage }),
+			openWebSocket: auth.openWebSocket,
+		}),
+});
 ```
-The order matters.
-Keys are applied before sync reconnects.
+Same-subject identity updates do not remount the workspace. Auth callbacks read `auth.state` at the boundary that asks for them: sync can see refreshed bearer tokens on connection attempts, while encrypted stores keep the keyring they derived when they were attached. There is no mutation hook on the workspace.
+
+## Browser local persistence
+Authenticated browser workspaces open local IndexedDB only after auth has settled into a signed-in state. The session module guarantees that boundary: it builds the workspace lazily once `auth.state.status === 'signed-in'` and disposes it on sign-out.
+Two inputs flow into the workspace:
+- `owner: LocalOwner` scopes local IndexedDB and BroadcastChannel names to the owner. `createSession` builds it from `localIdentity.subject` once at session mount because IDB and BroadcastChannel keys are immutable for the lifetime of the workspace.
+- The owner also carries a `keyring: () => SubjectKeyring` callback. The encryption coordinator invokes it when an encrypted store is attached. Already-attached stores keep their derived keyring; same-subject key rotation needs a re-attach to affect those stores.
+
+The browser factory shape is:
+```ts
+export function openMyApp({
+	owner,
+	installationId,
+	openWebSocket,
+}: {
+	owner: LocalOwner;
+	installationId: string;
+	openWebSocket?: OpenWebSocket;
+}) {
+	const doc = openMyAppDoc({ owner });
+
+	const idb = owner.attachIndexedDb(doc.ydoc);
+	owner.attachBroadcastChannel(doc.ydoc);
+	// ...
+}
+```
+
+The storage name is derived inside `@epicenter/workspace` as:
+```text
+epicenter.owner.{ownerId}.yjs.{ydocGuid}
+```
+
+App code should not build that string. Device cleanup uses `owner.wipeLocalYjsData(ydocGuids)`, which deletes known document databases and also sweeps enumerable IndexedDB names with the same owner prefix when the browser exposes `indexedDB.databases()`.
 
 ## Key lifecycle in the current code
 Keys are definitely loaded on login.
 That part is explicit.
-Logout is less clean than the high-level comments suggest.
-The reviewed code clears the auth session and wipes persisted local data, but it does not show an explicit in-memory key wipe inside `createEncryptedYkvLww`.
-The logout path in the app clients is:
+Sign-out disposes the live workspace after the auth session changes.
+It does not wipe local IndexedDB data.
+The reviewed code still does not show an explicit in-memory key wipe inside `createEncryptedYkvLww`; workspace disposal is the current key-drop boundary for `createSession` apps.
+The closest Bitwarden analogy is lock, not logout: Bitwarden documents unlock as using encrypted data already stored on disk and lock as deleting decrypted vault data and the account encryption key from memory. Bitwarden separately documents that logout wipes PIN settings. See [Understand Log In vs. Unlock](https://bitwarden.com/help/understand-log-in-vs-unlock/) and [Unlock With PIN](https://bitwarden.com/help/unlock-with-pin/).
+The logout path is owned by the per-app session module. `createSession` reconciles `auth.state` against the live workspace: sign-out disposes the workspace, and same-subject updates are a no-op at the session boundary. A different subject from `/api/session` is rejected by auth before the workspace is reused:
 ```ts
-onLogout() {
-  workspace.clearLocalData();
-  workspace.extensions.sync.reconnect();
-}
+import { createSession, type InferSignedIn } from '@epicenter/svelte';
+
+export const session = createSession({
+	auth,
+	build: ({ owner }) => {
+		const workspace = openMyApp({
+			owner,
+			installationId: createInstallationId({ storage: localStorage }),
+			openWebSocket: auth.openWebSocket,
+		});
+		return {
+			workspace,
+			[Symbol.dispose]() {
+				workspace[Symbol.dispose]();
+			},
+		};
+	},
+});
+
+export type MyAppSignedIn = InferSignedIn<typeof session>;
 ```
-And the auth state transition in `create-auth.svelte.ts` is:
-```ts
-session.current = null;
-onLogout?.();
-```
-`workspace.clearLocalData()` runs extension `clearLocalData` hooks.
-For IndexedDB persistence, that hook is `idb.clearData()`.
 So these points are implemented and verifiable:
 - keys are loaded on login
-- the persisted IndexedDB copy is wiped on logout
-- sync reconnects without an authenticated session token
+- sign-out disposes the live workspace
+- a different `/api/session` subject wipes the persisted auth cell and publishes `signed-out`
+- owner-scoped IndexedDB data remains available for the same authenticated owner after reload
 This point is not visible as an explicit step in the reviewed code:
 - clearing the in-memory encryption state after logout
 That gap matters because the encrypted wrapper exposes `activateEncryption()` but no `deactivateEncryption()`.
@@ -168,7 +214,7 @@ That prevents a simple ciphertext transplant from one entry key to another.
 Reads decrypt on the fly.
 The wrapper does not maintain a separate plaintext cache.
 That trade is explicit in the implementation comments: decrypting a small XChaCha20-Poly1305 blob is cheap, while a dual cache would add complexity around observers, resync, and missed transactions.
-`entries()` and `readableEntries()` decrypt as they iterate.
+`entries()` decrypts values as it iterates.
 Undecryptable entries are skipped.
 
 ## One-way activation
@@ -179,24 +225,22 @@ Before activation, the wrapper is a passthrough store and `set()` writes plainte
 After activation, `set()` always encrypts.
 The active state holds the full keyring, the current key, and the current key version.
 Calling `activateEncryption()` again updates that state to a new keyring, but it does not switch the store back to plaintext mode.
-`createWorkspace()` reinforces that shape.
-All table stores and the KV store are created as encrypted wrappers from the start, and `applyEncryptionKeys()` later activates encryption across all of them.
+The document builder reinforces that shape: `attachEncryption(ydoc, { encryptionKeys })` returns a coordinator whose `encryption.attachTables(defs)` / `encryption.attachKv(defs)` methods register every table and KV store as encrypted wrappers from the start. The coordinator calls `encryptionKeys()` synchronously at each registration site, derives the keyring for that store, and activates the store before handing it back. There is no separate `applyKeys` mutation step: key read, registration, and activation happen in one call.
 
 ## What activation re-encrypts
-Activation does not rewrite everything.
-It only re-encrypts plaintext entries.
-The code in `activateEncryption()` walks the inner map and splits entries into two groups:
-- plaintext entries to encrypt now
-- encrypted blobs to leave alone
-For already encrypted blobs, the wrapper checks whether they were unreadable before and readable now.
-If a new keyring makes old blobs readable, it emits synthetic add events so observers can see them.
-It does not rewrite those blobs.
+Activation rewrites every decryptable entry that is not already stored under the current key version.
+The current key is the highest version in the supplied keyring.
+The code in `activateEncryption()` walks the inner map and handles four cases:
+- plaintext entries are encrypted with the current key version
+- encrypted blobs at a non-current version are decrypted through the keyring and re-encrypted with the current key version
+- encrypted blobs already at the current version are skipped
+- encrypted blobs whose key version is missing from the keyring are left unreadable and unchanged
+If a new keyring makes old blobs readable, activation also emits synthetic add events so observers can see them.
 
 ## Key rotation
-Key rotation is versioned and lazy.
+Key rotation is versioned and activation-driven.
 The blob carries the key version that encrypted it.
 New writes always use the highest key version in the active keyring.
-Old blobs keep their old version byte.
 Decryption follows this order:
 1. try the current key first
 2. if that fails, read `blob[1]`
@@ -204,13 +248,12 @@ Decryption follows this order:
 4. try that specific key
 That avoids brute-forcing every key.
 The blob tells the client which version it needs.
-Rotation does not bulk re-encrypt existing ciphertext.
-Only plaintext entries get re-encrypted when encryption is activated.
-Existing ciphertext, even if it uses an old key version, stays as-is until the next write to that key.
+When `activateEncryption()` receives a newer highest-version key, decryptable old-version blobs are re-encrypted under that current version during the activation pass.
+Blobs for versions absent from the keyring stay unreadable and unchanged until a future activation includes the needed key.
 
 ## What the sync server sees
 The sync server sees Yjs updates and relays them.
-In the reviewed server code, `BaseSyncRoom.sync()` calls `Y.applyUpdateV2(this.doc, update, 'http')` and returns diffs with `Y.encodeStateAsUpdateV2(this.doc, clientSV)`.
+In the reviewed server code, `Room.sync()` calls `Y.applyUpdateV2(this.doc, update, 'http')` and returns diffs with `Y.encodeStateAsUpdateV2(this.doc, clientSV)`.
 The WebSocket path broadcasts raw protocol messages to peers.
 There is no decryption step in that sync room code.
 Because encryption happens before values are written into the Yjs document, the synced value payloads are ciphertext blobs.
@@ -222,7 +265,7 @@ What it does not get is plaintext application values.
 ## Error handling and unreadable data
 Decryption failures do not take down the whole observer stream.
 The wrapper catches failures, logs a warning, skips the unreadable entry, and keeps going.
-It also exposes `unreadableEntryCount` and `readableEntryCount`.
+It also exposes `unreadableEntryCount` alongside `size` (the count of decryptable entries).
 That makes corruption or missing key versions visible without forcing a hard crash on every read.
 
 ## What this means for a security review
@@ -232,5 +275,5 @@ The trust model is also clear.
 This is not a zero-knowledge design.
 The auth server can derive per-user transport keys from `ENCRYPTION_SECRETS`, while the sync relay forwards ciphertext values rather than plaintext values.
 The sharp edge is logout behavior.
-Persisted local data is wiped on logout through the IndexedDB extension, but an explicit in-memory key deactivation path is not present in the reviewed code.
+App auth-transition hooks reload the browser client on logout or user switch, but an explicit in-memory key deactivation path is not present in the reviewed code.
 If you are deciding whether this architecture fits your threat model, focus on that line: the sync relay handles ciphertext values, but the deployment that owns `ENCRYPTION_SECRETS` remains inside the trust boundary.

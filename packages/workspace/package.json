@@ -1,7 +1,7 @@
 {
 	"name": "@epicenter/workspace",
-	"version": "0.1.0",
-	"description": "Local-first workspace library. CRDT-backed tables, key-value stores, and sync — built on Yjs.",
+	"version": "0.2.0",
+	"description": "Local-first workspace library. CRDT-backed tables, key-value stores, and sync, built on Yjs.",
 	"keywords": [
 		"local-first",
 		"CRDT",
@@ -23,29 +23,37 @@
 		"directory": "packages/workspace"
 	},
 	"homepage": "https://epicenter.so",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
 	"exports": {
 		".": "./src/index.ts",
-		"./extensions/persistence/indexeddb": "./src/extensions/persistence/indexeddb.ts",
-		"./extensions/sync/websocket": "./src/extensions/sync/websocket.ts",
-		"./extensions/sync/broadcast-channel": "./src/extensions/sync/broadcast-channel.ts",
-		"./shared/crypto": "./src/shared/crypto/index.ts",
-		"./extensions/materializer/markdown": "./src/extensions/materializer/markdown/index.ts",
+		"./markdown": "./src/markdown/index.ts",
+		"./document/materializer/markdown": "./src/document/materializer/markdown/index.ts",
+		"./daemon": "./src/daemon/index.ts",
 		"./ai": "./src/ai/index.ts",
-		"./extensions/persistence/sqlite": "./src/extensions/persistence/sqlite.ts",
-		"./extensions/materializer/sqlite": "./src/extensions/materializer/sqlite/index.ts"
+		"./node": "./src/node.ts",
+		"./document/materializer/sqlite": "./src/document/materializer/sqlite/index.ts",
+		"./test-utils": "./src/shared/test-utils.ts",
+		"./links": "./src/links.ts",
+		"./document/keys": "./src/document/keys.ts",
+		"./document/presence": "./src/document/presence-protocol.ts",
+		"./document/dispatch-protocol": "./src/document/dispatch-protocol.ts",
+		"./document/y-keyvalue/y-keyvalue-lww": "./src/document/y-keyvalue/y-keyvalue-lww.ts",
+		"./document/attach-timeline": "./src/document/attach-timeline/index.ts"
 	},
 	"license": "MIT",
 	"scripts": {
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test",
+		"bench": "bun test ./src/__benchmarks__/*.bench.ts --timeout 60000"
 	},
 	"dependencies": {
 		"@ark/json-schema": "^0.0.4",
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/constants": "workspace:*",
+		"@epicenter/encryption": "workspace:*",
+		"@hono/standard-validator": "catalog:",
 		"@tanstack/ai": "catalog:",
 		"@epicenter/sync": "workspace:*",
-		"@noble/ciphers": "^2.1.1",
-		"@noble/hashes": "^2.0.1",
+		"@epicenter/util": "workspace:*",
 		"@sindresorhus/slugify": "catalog:",
 		"@standard-schema/spec": "catalog:",
 		"@tursodatabase/database": "^0.3.2",
@@ -57,6 +65,7 @@
 		"drizzle-orm": "catalog:",
 		"elysia": "^1.2.25",
 		"fflate": "catalog:",
+		"hono": "catalog:",
 		"lib0": "catalog:",
 		"mime": "catalog:",
 		"nanoid": "catalog:",
@@ -64,19 +73,19 @@
 		"tinybase": "^5.4.2",
 		"typebox": "catalog:",
 		"wellcrafted": "catalog:",
-		"y-indexeddb": "catalog:",
-		"y-protocols": "catalog:",
-		"remark-parse": "^11.0.0",
-		"unified": "^11.0.5"
+		"y-indexeddb": "catalog:"
 	},
 	"peerDependencies": {
 		"yjs": "catalog:"
 	},
 	"devDependencies": {
+		"@noble/ciphers": "^2.1.1",
+		"@noble/hashes": "^2.0.1",
 		"@types/diff": "^8.0.0",
 		"@types/node": "catalog:",
 		"better-sqlite3": "^12.4.1",
 		"drizzle-kit": "catalog:",
+		"fake-indexeddb": "^6.2.5",
 		"filenamify": "^7.0.1",
 		"typescript": "catalog:",
 		"yjs": "catalog:"

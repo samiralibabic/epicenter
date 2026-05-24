@@ -12,36 +12,32 @@ When a schema, builder, or configuration is only used once in a test, inline it 
 ### Bad Pattern (Extracted Variables)
 
 ```typescript
-test('creates workspace with tables', () => {
+test('attaches tables to a Y.Doc', () => {
 	const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
 
 	const theme = defineKv(type("'light' | 'dark'"), 'light');
 
-	const workspace = defineWorkspace({
-		id: 'test-app',
-		tables: { posts },
-		kv: { theme },
-	});
+	const ydoc = new Y.Doc({ guid: 'test-app' });
+	const tables = attachTables(ydoc, { posts });
+	const kv = attachKv(ydoc, { theme });
 
-	expect(workspace.id).toBe('test-app');
+	expect(ydoc.guid).toBe('test-app');
 });
 ```
 
 ### Good Pattern (Inlined)
 
 ```typescript
-test('creates workspace with tables', () => {
-	const workspace = defineWorkspace({
-		id: 'test-app',
-		tables: {
-			posts: defineTable(type({ id: 'string', title: 'string', _v: '1' })),
-		},
-		kv: {
-			theme: defineKv(type("'light' | 'dark'"), 'light'),
-		},
+test('attaches tables to a Y.Doc', () => {
+	const ydoc = new Y.Doc({ guid: 'test-app' });
+	const tables = attachTables(ydoc, {
+		posts: defineTable(type({ id: 'string', title: 'string', _v: '1' })),
+	});
+	const kv = attachKv(ydoc, {
+		theme: defineKv(type("'light' | 'dark'"), 'light'),
 	});
 
-	expect(workspace.id).toBe('test-app');
+	expect(ydoc.guid).toBe('test-app');
 });
 ```
 
@@ -63,8 +59,8 @@ Extract to a variable when:
 
 ### Applies To
 
-- `defineTable()`, `defineKv()`, `defineWorkspace()` builders
-- `createTables()`, `createKV()` factory calls
+- `defineTable()`, `defineKv()`, `createDisposableCache()` builders
+- `attachTables()`, `attachKv()` factory calls
 - Schema definitions (arktype, zod, etc.)
 - Configuration objects passed to factories
 - Mock functions used only once

@@ -5,21 +5,22 @@
 	"type": "module",
 	"private": true,
 	"exports": {
-		"./workspace": "./src/lib/workspace/index.ts"
+		".": "./src/lib/workspace/index.ts"
 	},
 	"scripts": {
 		"dev": "bun run dev:local",
 		"dev:local": "wxt",
-		"dev:remote": "wxt --mode production",
 		"dev:firefox": "wxt -b firefox",
 		"build": "wxt build",
 		"build:firefox": "wxt build -b firefox",
 		"zip": "wxt zip",
 		"zip:firefox": "wxt zip -b firefox",
-		"typecheck": "svelte-check --tsconfig ./tsconfig.json",
+		"typecheck": "wxt prepare && svelte-check --tsconfig ./tsconfig.json",
 		"postinstall": "wxt prepare"
 	},
 	"dependencies": {
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/auth-svelte": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
 		"@epicenter/ui": "workspace:*",

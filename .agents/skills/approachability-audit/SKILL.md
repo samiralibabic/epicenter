@@ -1,11 +1,16 @@
 ---
 name: approachability-audit
-description: Review code from the perspective of a new TypeScript developer. Use when the user asks whether code feels wrong, too indirect, too clever, hard to follow, or wants a pass focused on unnecessary abstractions, misleading names, layered type tricks, and first-read clarity.
+description: Review code as a new TypeScript developer. Use when code feels indirect, clever, hard to follow, or needs a pass on abstractions, names, first-read clarity.
 ---
 
 # Approachability Audit
 
 Read the code like a smart but newly onboarded TypeScript developer.
+
+Related skills: use `post-implementation-review` for the full second-read
+ritual after implementation, `refactoring` for caller counting and inlining
+mechanics, and `cohesive-clean-breaks` when a readability issue points to the
+wrong public boundary.
 
 The goal is not "make it shorter" or "make it more abstract." The goal is:
 

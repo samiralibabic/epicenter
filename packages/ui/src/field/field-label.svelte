@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { ComponentProps } from 'svelte';
-	import { Label } from '#/label/index.js';
-	import { cn } from '#/utils.js';
+	import { Label } from '../label/index.js';
+	import { cn } from '../utils.js';
 
 	let {
 		ref = $bindable(null),

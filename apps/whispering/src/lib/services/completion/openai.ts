@@ -5,5 +5,3 @@ export const OpenaiCompletionServiceLive =
 		providerLabel: 'OpenAI',
 		getBaseUrl: () => undefined, // Use OpenAI SDK default
 	});
-
-export type OpenaiCompletionService = typeof OpenaiCompletionServiceLive;

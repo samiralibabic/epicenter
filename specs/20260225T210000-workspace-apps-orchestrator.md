@@ -1,4 +1,6 @@
 > **Status: Superseded** by `20260313T063000-workspace-architecture-decisions.md`. The centralized workspace model, Hono-based app server, and self-contained config pattern replace this spec's architecture.
+>
+> **Path note (2026-05-22):** The `EPICENTER_HOME` and `~/.epicenter/workspaces/` model in this document is superseded. Do not copy its home-directory workspace registry, auth, or data paths into new work. Current runtime state no longer uses top-level `~/.epicenter/` as the mixed home for installed workspaces, auth, persistence, or process files.
 
 # Workspace Apps: Install, Mount, Run
 

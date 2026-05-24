@@ -75,11 +75,8 @@ export type EventsParams = {
 
 /**
  * Response from GET /api/billing/models.
- * This endpoint returns our own data (MODEL_CREDITS + plan metadata),
- * not an Autumn API response.
+ * Returns our own data (MODEL_CREDITS), not an Autumn API response.
  */
 export type ModelsResponse = {
 	credits: Record<string, number>;
-	plans: Record<string, unknown>;
-	annualPlans: Record<string, unknown>;
 };

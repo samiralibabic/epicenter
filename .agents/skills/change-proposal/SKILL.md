@@ -1,11 +1,11 @@
 ---
 name: change-proposal
-description: Present proposed code changes visually before implementing. Use when the user says "show me options", "compare approaches", "what should we do", or when multiple approaches exist, changes span multiple files, or architecture decisions need before/after comparison.
+description: 'Present proposed code changes visually before implementing. Use when: "show me options", "compare approaches", "what should we do", or when changes need before/after comparison.'
 ---
 
 # Change Proposal
 
-When proposing non-trivial changes, make your reasoning visible before acting. The user should see what will change, why, and what alternatives were considered—before a single file is edited.
+When proposing non-trivial changes, make your reasoning visible before acting. The user should see what will change, why, and what alternatives were considered:before a single file is edited.
 
 Follow [writing-voice](../writing-voice/SKILL.md) for prose sections.
 
@@ -18,6 +18,8 @@ Follow [writing-voice](../writing-voice/SKILL.md) for prose sections.
 - The user asks "what do you think?" or "how should we do this?"
 
 For trivial changes (typo fix, single-line edit, obvious bug), skip this and just do it.
+
+If the change reshapes a product surface (new command, new route, new primary API), state the post-change one-sentence meaning using [one-sentence-test](../one-sentence-test/SKILL.md) alongside the diagrams and diffs. It anchors the proposal to what the product *is*, not just what changed.
 
 ## The Three Tools
 
@@ -34,8 +36,7 @@ Show what specific code will change. Use fenced diff blocks with file paths.
      return {
          get current() { return client; },
 -        async reset() {
--            await client.clearLocalData();
--            await client.dispose();
+-            await client.wipe();
 -            client = buildWorkspaceClient();
 +        async reset(options?: { key?: Uint8Array }) {
 +            await client.dispose();
@@ -46,7 +47,7 @@ Show what specific code will change. Use fenced diff blocks with file paths.
 
 Rules:
 - Show the smallest meaningful diff, not the whole file
-- Include enough context lines (3–5) to understand placement
+- Include enough context lines (3-5) to understand placement
 - Group related changes together, separate unrelated ones
 - Label each diff with the file path and function/scope
 
@@ -58,8 +59,8 @@ Show how components relate before and after the change. Use the characters from 
 ```
 auth ──signOut()──→ workspace.reset() ──→ internally rebuilds
                          │ (self-manages lifecycle)
-                         ├── clearLocalData()
                          ├── dispose()
+                         ├── wipe()
                          └── client = build()
 ```
 
@@ -111,8 +112,8 @@ For non-trivial changes, present in this order:
 | Change scope | What to show |
 | --- | --- |
 | 1 file | Just the diff, no diagram |
-| 2–5 files | Diff of the hardest file + one diagram showing relationships |
-| 5+ files | Full proposal: comparison table, diagrams, diffs for hardest 2–3 files |
+| 2-5 files | Diff of the hardest file + one diagram showing relationships |
+| 5+ files | Full proposal: comparison table, diagrams, diffs for hardest 2-3 files |
 | Architecture decision | Comparison table mandatory, even if only 2 options |
 | Competing approaches | All three tools: diagram per approach, diff per approach, comparison table |
 
@@ -149,6 +150,6 @@ The bad version describes changes in prose. The good version shows them.
 ## What to Avoid
 
 - **Prose-only proposals**: If you can draw it, draw it. If you can diff it, diff it.
-- **Showing every file**: Show the hardest 2–3. Mention the rest as "same pattern."
+- **Showing every file**: Show the hardest 2-3. Mention the rest as "same pattern."
 - **Burying the recommendation**: Lead with your pick, then show alternatives.
 - **Fake precision**: Don't show a diff for code you haven't read yet. Read first, then diff.

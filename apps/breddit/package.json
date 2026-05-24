@@ -14,10 +14,11 @@
 		"@epicenter/workspace": "workspace:*",
 		"@sindresorhus/slugify": "catalog:",
 		"arktype": "catalog:",
-		"fflate": "catalog:"
+		"fflate": "catalog:",
+		"yjs": "catalog:"
 	},
 	"devDependencies": {
-		"bun-types": "catalog:",
+		"@types/bun": "catalog:",
 		"typescript": "catalog:"
 	},
 	"license": "MIT"

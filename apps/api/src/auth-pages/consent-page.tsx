@@ -1,3 +1,5 @@
+/** @jsxImportSource hono/jsx */
+
 import { CONSENT_SCRIPT } from './scripts/consent';
 
 /**

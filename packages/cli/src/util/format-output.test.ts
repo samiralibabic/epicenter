@@ -1,94 +1,97 @@
 /**
  * Format Output Tests
  *
- * These tests verify CLI JSON output formatting for interactive terminals and
- * pipeline-friendly non-interactive usage. They ensure helpers produce deterministic
- * pretty, compact, and JSONL output shapes.
- *
- * Key behaviors:
- * - Switches between pretty and compact JSON based on TTY/format options
- * - Serializes arrays into newline-delimited JSON for JSONL output
+ * Exercises the public `output` function: JSON for single values, JSONL for
+ * arrays, pretty-on-TTY / compact-on-pipe. Captures stdout via console.log.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
-import { formatJson, formatJsonl, output } from './format-output.js';
+import { describe, expect, test } from 'bun:test';
+import { output } from './format-output.js';
 
-describe('formatJson', () => {
-	const originalIsTTY = process.stdout.isTTY;
+function captureStdout(fn: () => void): string {
+	const original = console.log;
+	const lines: string[] = [];
+	console.log = (...args: unknown[]) => lines.push(args.map(String).join(' '));
+	try {
+		fn();
+	} finally {
+		console.log = original;
+	}
+	return lines.join('\n');
+}
 
-	afterEach(() => {
-		Object.defineProperty(process.stdout, 'isTTY', {
-			value: originalIsTTY,
-			writable: true,
-			configurable: true,
-		});
+function withTTY<T>(isTTY: boolean, fn: () => T): T {
+	const original = process.stdout.isTTY;
+	Object.defineProperty(process.stdout, 'isTTY', {
+		value: isTTY,
+		writable: true,
+		configurable: true,
 	});
-
-	test('pretty-prints when TTY', () => {
+	try {
+		return fn();
+	} finally {
 		Object.defineProperty(process.stdout, 'isTTY', {
-			value: true,
+			value: original,
 			writable: true,
 			configurable: true,
 		});
-		const data = { name: 'test', value: 42 };
-		const result = formatJson(data);
+	}
+}
+
+describe('output (json)', () => {
+	test('pretty-prints when TTY', () => {
+		const result = withTTY(true, () =>
+			captureStdout(() => output({ name: 'test', value: 42 })),
+		);
 		expect(result).toBe('{\n  "name": "test",\n  "value": 42\n}');
 	});
 
 	test('compacts when not TTY', () => {
-		Object.defineProperty(process.stdout, 'isTTY', {
-			value: false,
-			writable: true,
-			configurable: true,
-		});
-		const data = { name: 'test', value: 42 };
-		const result = formatJson(data);
+		const result = withTTY(false, () =>
+			captureStdout(() => output({ name: 'test', value: 42 })),
+		);
 		expect(result).toBe('{"name":"test","value":42}');
 	});
 
 	test('compacts when format is jsonl regardless of TTY', () => {
-		Object.defineProperty(process.stdout, 'isTTY', {
-			value: true,
-			writable: true,
-			configurable: true,
-		});
-		const data = { name: 'test' };
-		const result = formatJson(data, { format: 'jsonl' });
+		const result = withTTY(true, () =>
+			captureStdout(() => output([{ name: 'test' }], { format: 'jsonl' })),
+		);
 		expect(result).toBe('{"name":"test"}');
 	});
 });
 
-describe('formatJsonl', () => {
+describe('output (jsonl)', () => {
 	test('outputs one object per line', () => {
 		const values = [
 			{ id: 1, name: 'first' },
 			{ id: 2, name: 'second' },
 			{ id: 3, name: 'third' },
 		];
-		const result = formatJsonl(values);
+		const result = captureStdout(() => output(values, { format: 'jsonl' }));
 		expect(result).toBe(
 			'{"id":1,"name":"first"}\n{"id":2,"name":"second"}\n{"id":3,"name":"third"}',
 		);
 	});
 
 	test('handles empty array', () => {
-		const result = formatJsonl([]);
+		const result = captureStdout(() => output([], { format: 'jsonl' }));
 		expect(result).toBe('');
 	});
 
 	test('handles single item', () => {
-		const result = formatJsonl([{ value: 'single' }]);
+		const result = captureStdout(() =>
+			output([{ value: 'single' }], { format: 'jsonl' }),
+		);
 		expect(result).toBe('{"value":"single"}');
 	});
 
 	test('serializes mixed JSON-compatible values as one JSON value per line', () => {
 		const values = [{ a: 1 }, 'string', 42, null, [1, 2, 3]];
-		const result = formatJsonl(values);
+		const result = captureStdout(() => output(values, { format: 'jsonl' }));
 		expect(result).toBe('{"a":1}\n"string"\n42\nnull\n[1,2,3]');
 	});
-});
 
-describe('output', () => {
-	test('throws error when format is jsonl but value is not array', () => {
+	test('throws when format is jsonl but value is not array', () => {
 		expect(() => output({ notAnArray: true }, { format: 'jsonl' })).toThrow(
 			'JSONL format requires an array value',
 		);

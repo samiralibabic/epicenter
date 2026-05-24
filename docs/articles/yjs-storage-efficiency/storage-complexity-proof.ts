@@ -14,11 +14,9 @@
  */
 import * as Y from 'yjs';
 import { createEncryptedYkvLww } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww-encrypted';
-import {
-	generateEncryptionKey,
-	type EncryptedBlob,
-} from '../../../packages/workspace/src/shared/crypto';
-import type { YKeyValueLwwEntry } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww';
+
+const generateEncryptionKey = (): Uint8Array =>
+	crypto.getRandomValues(new Uint8Array(32));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +48,7 @@ const makeRow = (i: number, edit = 0): Row => ({
 });
 
 const key = generateEncryptionKey();
+const keyring = new Map([[1, key]]);
 
 type TestResult = {
 	name: string;
@@ -84,8 +83,8 @@ function test(
 
 	// Build fresh doc with identical active data
 	const fresh = new Y.Doc({ guid: `fresh-${name}` });
-	const freshArr = fresh.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const freshKv = createEncryptedYkvLww<Row>(freshArr, { key });
+	const freshKv = createEncryptedYkvLww<Row>(fresh, 'data');
+	freshKv.activateEncryption(keyring);
 	for (const [k, v] of finalData) freshKv.set(k, v);
 
 	const workloadSize = size(doc);
@@ -138,8 +137,8 @@ console.log('── Baseline ──');
 
 test('Insert only (100 rows, no deletes)', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't1' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	const data = new Map<string, Row>();
 	for (let i = 0; i < 100; i++) {
 		const row = makeRow(i);
@@ -156,8 +155,8 @@ console.log('── Updates (same keys rewritten) ──');
 
 test('100 rows × 10 updates each', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't2a' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	const data = new Map<string, Row>();
 	for (let round = 0; round <= 10; round++) {
 		for (let i = 0; i < 100; i++) {
@@ -171,8 +170,8 @@ test('100 rows × 10 updates each', 'single-device', () => {
 
 test('10 rows × 1000 updates each', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't2b' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	const data = new Map<string, Row>();
 	for (let round = 0; round <= 1000; round++) {
 		for (let i = 0; i < 10; i++) {
@@ -186,8 +185,8 @@ test('10 rows × 1000 updates each', 'single-device', () => {
 
 test('1 row × 10000 updates', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't2c' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	const data = new Map<string, Row>();
 	for (let round = 0; round <= 10000; round++) {
 		const row = makeRow(0, round);
@@ -204,8 +203,8 @@ console.log('── Add/delete cycles (churn) ──');
 
 test('Add 100, delete all, repeat 10x', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't3a' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	let ops = 0;
 	for (let cycle = 0; cycle < 10; cycle++) {
 		for (let i = 0; i < 100; i++) {
@@ -230,8 +229,8 @@ test('Add 100, delete all, repeat 10x', 'single-device', () => {
 
 test('Add 1000, delete 1000, 5 cycles (empty final)', 'edge-case', () => {
 	const doc = new Y.Doc({ guid: 't3b' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	let ops = 0;
 	for (let cycle = 0; cycle < 5; cycle++) {
 		for (let i = 0; i < 1000; i++) {
@@ -248,8 +247,8 @@ test('Add 1000, delete 1000, 5 cycles (empty final)', 'edge-case', () => {
 
 test('Interleaved add 20, remove 10, 100 cycles', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't3c' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 	let nextId = 0;
 	const active: string[] = [];
 	let ops = 0;
@@ -278,10 +277,10 @@ console.log('── Multi-device sync (different clientIDs) ──');
 test('2 devices, alternating writes, 500 ops each', 'multi-device', () => {
 	const doc1 = new Y.Doc({ guid: 'shared-t4a' });
 	const doc2 = new Y.Doc({ guid: 'shared-t4a' });
-	const arr1 = doc1.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const arr2 = doc2.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv1 = createEncryptedYkvLww<Row>(arr1, { key });
-	const kv2 = createEncryptedYkvLww<Row>(arr2, { key });
+	const kv1 = createEncryptedYkvLww<Row>(doc1, 'data');
+	const kv2 = createEncryptedYkvLww<Row>(doc2, 'data');
+	kv1.activateEncryption(keyring);
+	kv2.activateEncryption(keyring);
 
 	let ops = 0;
 	const data = new Map<string, Row>();
@@ -314,9 +313,10 @@ test('5 devices, each writes 200 unique rows, sync all', 'multi-device', () => {
 	const kvs: ReturnType<typeof createEncryptedYkvLww<Row>>[] = [];
 	for (let d = 0; d < 5; d++) {
 		const doc = new Y.Doc({ guid: 'shared-t4b' });
-		const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
 		docs.push(doc);
-		kvs.push(createEncryptedYkvLww<Row>(arr, { key }));
+		const kv = createEncryptedYkvLww<Row>(doc, 'data');
+		kv.activateEncryption(keyring);
+		kvs.push(kv);
 	}
 
 	let ops = 0;
@@ -346,12 +346,12 @@ test('3 devices, concurrent edits to same keys + sync', 'multi-device', () => {
 	const doc1 = new Y.Doc({ guid: 'shared-t4c' });
 	const doc2 = new Y.Doc({ guid: 'shared-t4c' });
 	const doc3 = new Y.Doc({ guid: 'shared-t4c' });
-	const arr1 = doc1.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const arr2 = doc2.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const arr3 = doc3.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv1 = createEncryptedYkvLww<Row>(arr1, { key });
-	const kv2 = createEncryptedYkvLww<Row>(arr2, { key });
-	const kv3 = createEncryptedYkvLww<Row>(arr3, { key });
+	const kv1 = createEncryptedYkvLww<Row>(doc1, 'data');
+	const kv2 = createEncryptedYkvLww<Row>(doc2, 'data');
+	const kv3 = createEncryptedYkvLww<Row>(doc3, 'data');
+	kv1.activateEncryption(keyring);
+	kv2.activateEncryption(keyring);
+	kv3.activateEncryption(keyring);
 
 	let ops = 0;
 
@@ -383,9 +383,9 @@ console.log('── Encryption key rotation ──');
 
 test('5 key rotations with 50 active rows', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't5a' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	let currentKey = generateEncryptionKey();
-	const kv = createEncryptedYkvLww<Row>(arr, { key: currentKey });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	const rotatingKeyring = new Map<number, Uint8Array>([[1, generateEncryptionKey()]]);
+	kv.activateEncryption(rotatingKeyring);
 
 	let ops = 0;
 	const data = new Map<string, Row>();
@@ -400,8 +400,9 @@ test('5 key rotations with 50 active rows', 'single-device', () => {
 
 	// 5 key rotations, each re-encrypts all entries
 	for (let rotation = 0; rotation < 5; rotation++) {
-		currentKey = generateEncryptionKey();
-		kv.activateEncryption(currentKey);
+		const nextVersion = rotation + 2;
+		rotatingKeyring.set(nextVersion, generateEncryptionKey());
+		kv.activateEncryption(rotatingKeyring);
 		ops += 50; // re-encryption writes
 
 		// Some edits after each rotation
@@ -423,8 +424,7 @@ console.log('── Plaintext → encrypted migration ──');
 
 test('100 plaintext rows migrated to encrypted', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't6' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr); // no key initially
+	const kv = createEncryptedYkvLww<Row>(doc, 'data'); // no key initially (passthrough)
 
 	let ops = 0;
 	const data = new Map<string, Row>();
@@ -438,7 +438,7 @@ test('100 plaintext rows migrated to encrypted', 'single-device', () => {
 	}
 
 	// Activate encryption (re-encrypts all 100)
-	kv.activateEncryption(key);
+	kv.activateEncryption(keyring);
 	ops += 100;
 
 	// Edit 50 of them
@@ -459,8 +459,8 @@ console.log('── Scale ──');
 
 test('10,000 rows with churn (add 10k, delete 5k, keep 5k)', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't7a' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 
 	let ops = 0;
 	const data = new Map<string, Row>();
@@ -485,8 +485,8 @@ test('10,000 rows with churn (add 10k, delete 5k, keep 5k)', 'single-device', ()
 
 test('1,000 rows × 50 updates + 500 deletes + 500 re-adds', 'single-device', () => {
 	const doc = new Y.Doc({ guid: 't7b' });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const kv = createEncryptedYkvLww<Row>(arr, { key });
+	const kv = createEncryptedYkvLww<Row>(doc, 'data');
+	kv.activateEncryption(keyring);
 
 	let ops = 0;
 	const data = new Map<string, Row>();
@@ -543,8 +543,8 @@ test('20 devices each write 5 rows to same doc', 'multi-device', () => {
 		// Sync existing state to device first
 		syncDocs(mainDoc, deviceDoc);
 
-		const arr = deviceDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-		const kv = createEncryptedYkvLww<Row>(arr, { key });
+		const kv = createEncryptedYkvLww<Row>(deviceDoc, 'data');
+		kv.activateEncryption(keyring);
 
 		for (let i = 0; i < 5; i++) {
 			const k = `dev${d}_row_${i}`;
@@ -565,8 +565,8 @@ test('50 devices each edit same 10 rows', 'multi-device', () => {
 
 	// Seed 10 rows from first device
 	const seedDoc = new Y.Doc({ guid: 'shared-t8b' });
-	const seedArr = seedDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-	const seedKv = createEncryptedYkvLww<Row>(seedArr, { key });
+	const seedKv = createEncryptedYkvLww<Row>(seedDoc, 'data');
+	seedKv.activateEncryption(keyring);
 	for (let i = 0; i < 10; i++) seedKv.set(`row_${i}`, makeRow(i));
 	syncDocs(seedDoc, mainDoc);
 
@@ -578,8 +578,8 @@ test('50 devices each edit same 10 rows', 'multi-device', () => {
 		const deviceDoc = new Y.Doc({ guid: 'shared-t8b' });
 		syncDocs(mainDoc, deviceDoc);
 
-		const arr = deviceDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-		const kv = createEncryptedYkvLww<Row>(arr, { key });
+		const kv = createEncryptedYkvLww<Row>(deviceDoc, 'data');
+		kv.activateEncryption(keyring);
 
 		for (let i = 0; i < 10; i++) {
 			const row = makeRow(i, d);

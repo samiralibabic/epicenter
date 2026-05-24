@@ -1,0 +1,6 @@
+# Epicenter: all durable runtime state and materializer caches.
+# Regenerable from committed markdown in entries/.
+.epicenter/
+
+# Bun / Node
+node_modules/

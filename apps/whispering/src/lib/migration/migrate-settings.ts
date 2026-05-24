@@ -8,13 +8,14 @@
  * @see specs/20260313T163000-settings-data-migration.md
  */
 
-import { Ok, tryAsync, trySync } from 'wellcrafted/result';
-import { workspace } from '$lib/client';
+import { Err, Ok, tryAsync, trySync } from 'wellcrafted/result';
 import { deviceConfig } from '$lib/state/device-config.svelte';
+import { whispering } from '$lib/whispering/client';
+import { whisperingKv } from '$lib/workspace';
 
 // ── Migration state ──────────────────────────────────────────────────────────
 
-const MIGRATION_STATE_KEY = 'whispering:settings-migration';
+const MIGRATION_STATE_KEY = 'whispering.settings.migration';
 type MigrationState = 'completed' | 'not-needed';
 
 function getMigrationState(): MigrationState | null {
@@ -30,10 +31,10 @@ function setMigrationState(state: MigrationState): void {
 // Type-widened accessors for dynamic key writes. The mapping tables guarantee
 // runtime correctness; these bypass the generic constraints that require
 // literal key types we can't produce from a data-driven loop.
-const setKv = workspace.kv.set as (key: string, value: unknown) => void;
-const getKv = workspace.kv.get as (key: string) => unknown;
+const setKv = whispering.kv.set as (key: string, value: unknown) => void;
+const getKv = whispering.kv.get as (key: string) => unknown;
 const getKvDefault = (key: string) =>
-	(workspace.definitions.kv as Record<string, { defaultValue: unknown }>)[key]
+	(whisperingKv as Record<string, { defaultValue: unknown }>)[key]
 		?.defaultValue;
 
 /**
@@ -41,7 +42,7 @@ const getKvDefault = (key: string) =>
  * blob to per-key workspace KV and device config stores.
  *
  * **Must be called after workspace and device-config are initialized.**
- * Awaits `workspace.whenReady` internally to ensure IndexedDB persistence
+ * Awaits `whispering.whenReady` internally to ensure IndexedDB persistence
  * has loaded before checking first-write-wins conditions.
  *
  * Silent, automatic, idempotent. One bad key doesn't abort the migration.
@@ -72,17 +73,14 @@ export async function migrateOldSettings(): Promise<void> {
 		return;
 	}
 
-	// Wait for IndexedDB persistence to load so workspace.kv.get() returns
+	// Wait for IndexedDB persistence to load so whispering.kv.get() returns
 	// real persisted values (not defaults). This ensures the first-write-wins
 	// check correctly detects user-set values.
 	const { error: readyError } = await tryAsync({
-		try: () => workspace.whenReady,
+		try: () => whispering.whenReady,
 		catch: (err) => {
-			console.warn(
-				'[settings-migration] workspace.whenReady failed, aborting:',
-				err,
-			);
-			return Ok(undefined);
+			console.warn('[settings-migration] whenReady failed, aborting:', err);
+			return Err(err);
 		},
 	});
 	if (readyError) return;
@@ -91,7 +89,7 @@ export async function migrateOldSettings(): Promise<void> {
 	// Batch into a single Yjs transaction so settings.observeAll
 	// fires once with all changes, not 43 individual updates.
 
-	workspace.batch(() => {
+	whispering.batch(() => {
 		for (const { oldKey, newKey, convert } of WORKSPACE_KEY_MAP) {
 			trySync({
 				try: () => {
@@ -165,8 +163,8 @@ function tryParseJson(raw: string | null): Record<string, unknown> | null {
 function toNumber(raw: unknown): number | undefined {
 	if (typeof raw === 'number') return raw;
 	if (typeof raw === 'string') {
-		const n = parseFloat(raw);
-		return Number.isNaN(n) ? undefined : n;
+		const value = parseFloat(raw);
+		return Number.isNaN(value) ? undefined : value;
 	}
 	return undefined;
 }
@@ -174,8 +172,8 @@ function toNumber(raw: unknown): number | undefined {
 function toInteger(raw: unknown): number | undefined {
 	if (typeof raw === 'number') return Number.isInteger(raw) ? raw : undefined;
 	if (typeof raw === 'string') {
-		const n = parseInt(raw, 10);
-		return Number.isNaN(n) ? undefined : n;
+		const value = parseInt(raw, 10);
+		return Number.isNaN(value) ? undefined : value;
 	}
 	return undefined;
 }

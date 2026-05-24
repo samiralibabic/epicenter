@@ -1,11 +1,12 @@
-import type { Documents, TableHelper } from '@epicenter/workspace';
+import type { Table } from '@epicenter/workspace';
 import type { IFileSystem } from 'just-bash';
+import type * as Y from 'yjs';
 import { FS_ERRORS } from './errors.js';
 import type { FileId } from './ids.js';
 import { posixResolve } from './path.js';
 import type { FileRow } from './table.js';
 import { disambiguateNames } from './tree/naming.js';
-import { createFileTree, type FileTree } from './tree/tree.js';
+import { attachFileTree, type FileTree } from './tree/tree.js';
 
 /** Validate `fs` extends {@link IFileSystem} while preserving the full inferred type (avoids excess-property errors from `satisfies`). */
 function FileSystem<T extends IFileSystem>(fs: T): T {
@@ -16,31 +17,43 @@ function FileSystem<T extends IFileSystem>(fs: T): T {
  * Create a POSIX-like virtual filesystem backed by Yjs CRDTs.
  *
  * Thin orchestrator that delegates metadata operations to {@link FileTree}
- * and content I/O to document handles (backed by a
- * {@link Documents}). Every method applies `cwd` via
- * {@link posixResolve}, then calls the appropriate sub-service.
+ * and content I/O to a caller-owned file content store. Every method applies
+ * `cwd` via {@link posixResolve}, then calls the appropriate sub-service.
  *
  * The returned object satisfies the `IFileSystem` interface from `just-bash`,
  * which allows this virtual filesystem to be used as a drop-in backend for
- * shell emulation — while also exposing extra members (`index`,
- * `lookupId`, `dispose`) that aren't part of `IFileSystem`.
+ * shell emulation while also exposing extra members (`index`, `lookupId`)
+ * that aren't part of `IFileSystem`.
  *
- * **No symlinks** — `symlink`, `link`, and `readlink` always throw ENOSYS.
- * **Soft deletes** — `rm` sets `trashedAt` rather than destroying rows.
- * **No real permissions** — `chmod` is a validated no-op.
+ * Teardown is hooked to `ydoc.once('destroy', ...)` via the underlying tree
+ * and index. Callers do not call a dispose method; destroying the
+ * workspace's Y.Doc cascades.
+ *
+ * **No symlinks**: `symlink`, `link`, and `readlink` always throw ENOSYS.
+ * **Soft deletes**: `rm` sets `trashedAt` rather than destroying rows.
+ * **No real permissions**: `chmod` is a validated no-op.
  *
  * @example
  * ```typescript
- * const ws = createWorkspace({ id: 'app', tables: { files: filesTable } });
- * const fs = createYjsFileSystem(ws.tables.files, ws.documents.files.content);
+ * import * as Y from 'yjs';
+ * import { attachTable } from '@epicenter/workspace';
+ *
+ * const ydoc = new Y.Doc({ guid: 'app' });
+ * const files = attachTable(ydoc, 'files', filesTable);
+ * const fs = attachYjsFileSystem(ydoc, files, fileContent);
  * ```
  */
-export function createYjsFileSystem(
-	filesTable: TableHelper<FileRow>,
-	contentDocuments: Documents<FileRow>,
+export function attachYjsFileSystem(
+	ydoc: Y.Doc,
+	filesTable: Table<FileRow>,
+	fileContent: {
+		read(fileId: FileId): Promise<string>;
+		write(fileId: FileId, text: string): Promise<void>;
+		append(fileId: FileId, text: string): Promise<string>;
+	},
 	cwd: string = '/',
 ) {
-	const tree = createFileTree(filesTable);
+	const tree = attachFileTree(ydoc, filesTable);
 
 	return FileSystem({
 		/** Reactive file-system indexes for path lookups and parent-child queries. */
@@ -58,7 +71,8 @@ export function createYjsFileSystem(
 		 * ```typescript
 		 * const fileId = fs.lookupId('/docs/readme.md');
 		 * if (fileId) {
-		 *   const doc = await documents.open(fileId);
+		 *   const doc = documents.get(fileId);
+		 *   await doc.whenLoaded;
 		 * }
 		 * ```
 		 */
@@ -67,18 +81,8 @@ export function createYjsFileSystem(
 			return tree.lookupId(abs);
 		},
 
-		/**
-		 * Tear down reactive indexes.
-		 *
-		 * Content doc cleanup is handled by the workspace's documents manager
-		 * dispose cascade — no need to call `disposeAll()` here.
-		 */
-		dispose() {
-			tree.dispose();
-		},
-
 		// ═══════════════════════════════════════════════════════════════════════
-		// READS — metadata only (fast, no content doc loaded)
+		// READS: metadata only (fast, no content doc loaded)
 		// ═══════════════════════════════════════════════════════════════════════
 
 		async readdir(path) {
@@ -143,7 +147,7 @@ export function createYjsFileSystem(
 		},
 
 		// ═══════════════════════════════════════════════════════════════════════
-		// READS — content (may load a per-file content doc)
+		// READS: content (may load a per-file content doc)
 		// ═══════════════════════════════════════════════════════════════════════
 
 		async readFile(path, _options?) {
@@ -152,8 +156,7 @@ export function createYjsFileSystem(
 			if (id === null) throw FS_ERRORS.ENOENT(abs);
 			const row = tree.getRow(id, abs);
 			if (row.type === 'folder') throw FS_ERRORS.EISDIR(abs);
-			const handle = await contentDocuments.open(id);
-			return handle.read();
+			return fileContent.read(id);
 		},
 
 		async readFileBuffer(path) {
@@ -177,14 +180,15 @@ export function createYjsFileSystem(
 				if (row.type === 'folder') throw FS_ERRORS.EISDIR(abs);
 			}
 
+			let justCreated = false;
 			if (!id) {
 				const { parentId, name } = tree.parsePath(abs);
 				id = tree.create({ name, parentId, type: 'file', size });
+				justCreated = true;
 			}
 
-			const handle = await contentDocuments.open(id);
-			handle.write(textData);
-			tree.touch(id, size);
+			await fileContent.write(id, textData);
+			if (!justCreated) tree.touch(id, size);
 		},
 
 		async appendFile(path, data, _options?) {
@@ -197,17 +201,16 @@ export function createYjsFileSystem(
 			const row = tree.getRow(id, abs);
 			if (row.type === 'folder') throw FS_ERRORS.EISDIR(abs);
 
-			const handle = await contentDocuments.open(id);
-			handle.appendText(text);
-			const newSize = new TextEncoder().encode(handle.read()).byteLength;
+			const nextText = await fileContent.append(id, text);
+			const newSize = new TextEncoder().encode(nextText).byteLength;
 			tree.touch(id, newSize);
 		},
 
 		// ═══════════════════════════════════════════════════════════════════════
-		// STRUCTURE — mkdir, rm, cp, mv
+		// STRUCTURE: mkdir, rm, cp, mv
 		// ═══════════════════════════════════════════════════════════════════════
 
-		async mkdir(path, options?) {
+		async mkdir(path, { recursive = false } = {}) {
 			const abs = posixResolve(cwd, path);
 			if (tree.exists(abs)) {
 				const existingId = tree.lookupId(abs);
@@ -218,7 +221,7 @@ export function createYjsFileSystem(
 				return;
 			}
 
-			if (options?.recursive) {
+			if (recursive) {
 				const parts = abs.split('/').filter(Boolean);
 				let currentPath = '';
 				for (const part of parts) {
@@ -246,16 +249,16 @@ export function createYjsFileSystem(
 			}
 		},
 
-		async rm(path, options?) {
+		async rm(path, { force = false, recursive = false } = {}) {
 			const abs = posixResolve(cwd, path);
 			const id = tree.lookupId(abs);
 			if (!id) {
-				if (options?.force) return;
+				if (force) return;
 				throw FS_ERRORS.ENOENT(abs);
 			}
 			const row = tree.getRow(id, abs);
 
-			if (row.type === 'folder' && !options?.recursive) {
+			if (row.type === 'folder' && !recursive) {
 				if (tree.activeChildren(id).length > 0) throw FS_ERRORS.ENOTEMPTY(abs);
 			}
 
@@ -263,14 +266,14 @@ export function createYjsFileSystem(
 			// automatically cleans up the associated content doc.
 			tree.softDelete(id);
 
-			if (row.type === 'folder' && options?.recursive) {
+			if (row.type === 'folder' && recursive) {
 				for (const did of tree.descendantIds(id)) {
 					tree.softDelete(did);
 				}
 			}
 		},
 
-		async cp(src, dest, options?) {
+		async cp(src, dest, { recursive = false } = {}) {
 			const resolvedSrc = posixResolve(cwd, src);
 			const resolvedDest = posixResolve(cwd, dest);
 			const srcId = tree.resolveId(resolvedSrc);
@@ -278,19 +281,16 @@ export function createYjsFileSystem(
 			const srcRow = tree.getRow(srcId, resolvedSrc);
 
 			if (srcRow.type === 'folder') {
-				if (!options?.recursive) throw FS_ERRORS.EISDIR(resolvedSrc);
+				if (!recursive) throw FS_ERRORS.EISDIR(resolvedSrc);
 				await this.mkdir(resolvedDest, { recursive: true });
 				const children = await this.readdir(resolvedSrc);
 				for (const child of children) {
-					await this.cp(
-						`${resolvedSrc}/${child}`,
-						`${resolvedDest}/${child}`,
-						options,
-					);
+					await this.cp(`${resolvedSrc}/${child}`, `${resolvedDest}/${child}`, {
+						recursive,
+					});
 				}
 			} else {
-				const handle = await contentDocuments.open(srcId);
-				const srcText = handle.read();
+				const srcText = await fileContent.read(srcId);
 				await this.writeFile(resolvedDest, srcText);
 			}
 		},
@@ -325,7 +325,7 @@ export function createYjsFileSystem(
 		},
 
 		// ═══════════════════════════════════════════════════════════════════════
-		// PERMISSIONS / TIMESTAMPS — no-op in a collaborative system
+		// PERMISSIONS / TIMESTAMPS: no-op in a collaborative system
 		// ═══════════════════════════════════════════════════════════════════════
 
 		async chmod(path, _mode) {
@@ -341,7 +341,7 @@ export function createYjsFileSystem(
 		},
 
 		// ═══════════════════════════════════════════════════════════════════════
-		// SYMLINKS / LINKS — not supported (always throws ENOSYS)
+		// SYMLINKS / LINKS: not supported (always throws ENOSYS)
 		// ═══════════════════════════════════════════════════════════════════════
 
 		async symlink(_target, _linkPath) {
@@ -358,5 +358,5 @@ export function createYjsFileSystem(
 	});
 }
 
-/** Inferred type of the virtual filesystem returned by {@link createYjsFileSystem}. */
-export type YjsFileSystem = ReturnType<typeof createYjsFileSystem>;
+/** Inferred type of the virtual filesystem returned by {@link attachYjsFileSystem}. */
+export type YjsFileSystem = ReturnType<typeof attachYjsFileSystem>;

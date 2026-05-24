@@ -1,30 +1,33 @@
 <script lang="ts">
 	import { autocompletion } from '@codemirror/autocomplete';
 	import type { FileId } from '@epicenter/filesystem';
-	import { Spinner } from '@epicenter/ui/spinner';
-	import type { DocumentHandle } from '@epicenter/workspace';
-	import { workspace } from '$lib/client';
-	import { fsState } from '$lib/state/fs-state.svelte';
-	import { opensidian } from '$lib/workspace/definition';
+	import { fromDisposableCache } from '@epicenter/svelte';
+	import { Loading } from '@epicenter/ui/loading';
+	import { requireOpensidian } from '$lib/session';
 	import CodeMirrorEditor from './CodeMirrorEditor.svelte';
 	import { linkDecorations } from './extensions/link-decorations';
 	import { wikilinkAutocomplete } from './extensions/wikilink-autocomplete';
+
+	const opensidian = requireOpensidian();
 
 	let {
 		fileId,
 	}: {
 		fileId: FileId;
 	} = $props();
-	const filename = $derived(fsState.getFile(fileId)?.name ?? 'untitled.md');
+	const filename = $derived(
+		opensidian.state.files.getFile(fileId)?.name ?? 'untitled.md',
+	);
 	const isMarkdown = $derived(
 		filename.endsWith('.md') || !filename.includes('.'),
 	);
 
-	let handle = $state<DocumentHandle | null>(null);
+	const doc = fromDisposableCache(opensidian.fileContentDocs, () => fileId);
 
 	const sharedLinkDecorations = linkDecorations({
-		onNavigate: (ref) => fsState.selectFile(ref.id as FileId),
-		resolveTitle: (ref) => fsState.getFile(ref.id as FileId)?.name ?? null,
+		onNavigate: (ref) => opensidian.state.files.selectFile(ref.id as FileId),
+		resolveTitle: (ref) =>
+			opensidian.state.files.getFile(ref.id as FileId)?.name ?? null,
 	});
 
 	const extensions = $derived(
@@ -32,10 +35,10 @@
 			? [
 					sharedLinkDecorations,
 					wikilinkAutocomplete({
-					workspaceId: opensidian.id,
+						workspaceId: opensidian.ydoc.guid,
 						tableName: 'files',
 						getFiles: () =>
-							workspace.tables.files
+							opensidian.tables.files
 								.getAllValid()
 								.filter((r) => r.type === 'file')
 								.map((r) => ({ id: r.id, name: r.name })),
@@ -43,22 +46,20 @@
 				]
 			: [sharedLinkDecorations, autocompletion()],
 	);
-
-	$effect(() => {
-		const id = fileId;
-		handle = null;
-		workspace.documents.files.content.open(id).then((h) => {
-			// Guard against race condition — if file changed while loading, ignore
-			if (fsState.activeFileId !== id) return;
-			handle = h;
-		});
-	});
 </script>
 
-{#if handle}
-	<CodeMirrorEditor ytext={handle.asText()} {extensions} {filename} />
-{:else}
-	<div class="flex h-full items-center justify-center">
-		<Spinner class="size-5 text-muted-foreground" />
-	</div>
-{/if}
+<!--
+	Gate on idb hydration: `asText()` on Timeline mutates when the doc is empty
+	(it pushes an entry). Calling it before idb hydrates races the replay
+	and can corrupt the timeline (phantom text entry alongside the real
+	stored entries).
+-->
+{#await doc.current.idb.whenLoaded}
+	<Loading class="h-full" />
+{:then _}
+	<CodeMirrorEditor
+		ytext={doc.current.content.asText()}
+		{extensions}
+		{filename}
+	/>
+{/await}

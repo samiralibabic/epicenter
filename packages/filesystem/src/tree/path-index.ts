@@ -1,4 +1,5 @@
-import type { TableHelper } from '@epicenter/workspace';
+import type { Table } from '@epicenter/workspace';
+import type * as Y from 'yjs';
 import type { FileId } from '../ids.js';
 import type { FileRow } from '../table.js';
 import { disambiguateNames } from './naming.js';
@@ -12,6 +13,10 @@ type RowSnapshot = {
 	trashedAt: number | null;
 };
 
+function snapFrom(row: FileRow): RowSnapshot {
+	return { name: row.name, parentId: row.parentId, trashedAt: row.trashedAt };
+}
+
 /**
  * Create runtime indexes for O(1) path lookups from a files table.
  *
@@ -19,87 +24,69 @@ type RowSnapshot = {
  * patches only the affected index entries instead of rebuilding everything.
  * Touch-only changes (size/updatedAt) are detected via a snapshot of
  * path-relevant fields and skipped entirely—O(1) per editing mutation.
+ *
+ * Teardown is hooked to `ydoc.once('destroy', ...)`. Callers do not call a
+ * dispose method; destroying the workspace's Y.Doc cascades.
  */
-export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
+export function attachFileSystemIndex(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 	/** "/docs/api.md" → FileId */
 	const pathToId = new Map<string, FileId>();
 	/** FileId → "/docs/api.md" (reverse lookup) */
 	const idToPath = new Map<FileId, string>();
-	/** parentId (null = root) → [childId, ...] */
-	const childrenOf = new Map<FileId | null, FileId[]>();
+	/** parentId (null = root) → set of childIds */
+	const childrenOf = new Map<FileId | null, Set<FileId>>();
 
 	/** Previous path-relevant state for change detection. */
 	const snapshot = new Map<FileId, RowSnapshot>();
 	/** FileId → display name (may differ from row.name when disambiguated). */
 	const displayName = new Map<FileId, string>();
 
-	/** Suppresses the observer during rebuild to avoid processing partial state. */
-	let rebuilding = false;
+	buildInitialState();
 
-	rebuild();
-
-	const unobserve = filesTable.observe((changedIds) => {
-		if (rebuilding) return;
-		processChanges(changedIds);
-	});
+	const unobserve = filesTable.observe(processChanges);
+	ydoc.once('destroy', unobserve);
 
 	// ═══════════════════════════════════════════════════════════════════════
-	// FULL REBUILD — initial load and recovery
+	// INITIAL BUILD — runs once before the observer is registered
 	// ═══════════════════════════════════════════════════════════════════════
 
 	/**
-	 * Recompute all indexes from scratch: childrenOf, path mappings,
-	 * and self-healing fixes for circular refs and orphans.
-	 *
-	 * Called once at construction. Can be called manually for recovery.
+	 * Build all indexes from scratch with self-healing for circular refs
+	 * and orphans. Runs once during construction, before the observer
+	 * subscribes — so table mutations from the fix helpers don't re-enter
+	 * processChanges.
 	 */
-	function rebuild() {
-		rebuilding = true;
-		pathToId.clear();
-		idToPath.clear();
-		childrenOf.clear();
-		snapshot.clear();
-		displayName.clear();
-
-		let activeRows = filesTable
+	function buildInitialState() {
+		// getAllValid() returns fresh objects (parseRow spreads input), so we
+		// can safely mutate parentId on these locals to track fix-up changes
+		// without re-scanning the whole table.
+		const activeRows = filesTable
 			.getAllValid()
 			.filter((r) => r.trashedAt === null);
 
-		// Fix data integrity issues first (these mutate the table).
-		// Run before building indexes so indexes reflect corrected state.
-		fixCircularReferences(filesTable, activeRows);
+		for (const id of fixCircularReferences(activeRows)) {
+			const row = activeRows.find((r) => r.id === id);
+			if (row) row.parentId = null;
+		}
 
-		// Re-read after circular ref fixes — parentIds may have changed
-		activeRows = filesTable.getAllValid().filter((r) => r.trashedAt === null);
-
-		// Build childrenOf from corrected data
 		for (const row of activeRows) {
 			addChild(row.parentId, row.id);
 		}
 
-		// Fix orphans (uses and mutates childrenOf)
-		fixOrphans(filesTable, activeRows, childrenOf);
-
-		// Re-read one more time after orphan fixes
-		activeRows = filesTable.getAllValid().filter((r) => r.trashedAt === null);
-
-		// Build display names (disambiguation) per folder
-		for (const [parentId, childIds] of childrenOf) {
-			disambiguateFolder(parentId, childIds);
+		for (const id of fixOrphans(activeRows)) {
+			const row = activeRows.find((r) => r.id === id);
+			if (row) row.parentId = null;
 		}
 
-		// Build path indexes
+		for (const [, childIds] of childrenOf) {
+			disambiguateFolder(childIds);
+		}
+
 		buildPathsFromRoot();
 
-		// Populate snapshot for incremental change detection
 		for (const row of activeRows) {
-			snapshot.set(row.id, {
-				name: row.name,
-				parentId: row.parentId,
-				trashedAt: row.trashedAt,
-			});
+			snapshot.set(row.id, snapFrom(row));
 		}
-		rebuilding = false;
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════
@@ -119,76 +106,47 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 
 		for (const rawId of changedIds) {
 			const id = rawId as FileId;
-			const result = filesTable.get(id);
+			const { data: row, error } = filesTable.get(id);
 			const prev = snapshot.get(id);
 
-			const isActive =
-				result.status === 'valid' && result.row.trashedAt === null;
+			const isActive = row !== null && !error && row.trashedAt === null;
 			const wasActive = prev !== undefined && prev.trashedAt === null;
 
 			if (!wasActive && !isActive) {
-				// Was inactive, still inactive — nothing to do.
-				// Could be a trashed row getting updated, or an invalid row.
-				if (prev && result.status !== 'not_found') {
-					// Update snapshot for trashed-to-trashed changes
-					snapshot.set(id, {
-						name: result.status === 'valid' ? result.row.name : prev.name,
-						parentId:
-							result.status === 'valid' ? result.row.parentId : prev.parentId,
-						trashedAt:
-							result.status === 'valid' ? result.row.trashedAt : prev.trashedAt,
-					});
+				// Was inactive, still inactive. Keep the snapshot current for
+				// inactive rows so transitions later classify correctly.
+				if (prev && row !== null && !error) {
+					snapshot.set(id, snapFrom(row));
 				}
 				continue;
 			}
 
-			if (!wasActive && isActive) {
+			if (!wasActive && isActive && row !== null) {
 				// CREATED or RESTORED
-				const row = (result as { status: 'valid'; row: FileRow }).row;
 				addChild(row.parentId, id);
-				snapshot.set(id, {
-					name: row.name,
-					parentId: row.parentId,
-					trashedAt: row.trashedAt,
-				});
+				snapshot.set(id, snapFrom(row));
 				foldersToDisambiguate.add(row.parentId);
 				idsNeedingPaths.add(id);
 				continue;
 			}
 
+			// Both remaining branches require prev — this is unreachable since
+			// wasActive implies prev !== undefined, but the guard gives TS
+			// narrowing without non-null assertions.
+			if (!prev) continue;
+
 			if (wasActive && !isActive) {
-				// TRASHED or DELETED
+				// TRASHED or DELETED. Leave childrenOf.get(id) intact: callers
+				// doing recursive cleanup (fs.rm -rf) read descendants from the
+				// index after soft-deleting the parent, and restoring a trashed
+				// folder should bring its descendants back with it.
 				clearPathsRecursive(id);
 				removeChild(prev.parentId, id);
 
-				// Children of this node become orphans at the index level.
-				// Move them to root in the index (don't mutate table — rebuild handles that).
-				const orphanedChildren = childrenOf.get(id);
-				if (orphanedChildren && orphanedChildren.length > 0) {
-					for (const childId of [...orphanedChildren]) {
-						removeChild(id, childId);
-						addChild(null, childId);
-						const childSnap = snapshot.get(childId);
-						if (childSnap) {
-							snapshot.set(childId, { ...childSnap, parentId: null });
-						}
-						clearPathsRecursive(childId);
-						foldersToDisambiguate.add(null);
-						idsNeedingPaths.add(childId);
-						collectDescendantIds(childId, idsNeedingPaths);
-					}
-				}
-
-				if (result.status === 'not_found') {
+				if (row === null) {
 					snapshot.delete(id);
-				} else {
-					snapshot.set(id, {
-						name: result.status === 'valid' ? result.row.name : prev.name,
-						parentId:
-							result.status === 'valid' ? result.row.parentId : prev.parentId,
-						trashedAt:
-							result.status === 'valid' ? result.row.trashedAt : prev.trashedAt,
-					});
+				} else if (!error) {
+					snapshot.set(id, snapFrom(row));
 				}
 
 				displayName.delete(id);
@@ -196,8 +154,9 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 				continue;
 			}
 
-			// wasActive && isActive — row is still active, check what changed
-			const row = (result as { status: 'valid'; row: FileRow }).row;
+			// wasActive && isActive — row is still active, check what changed.
+			// isActive implies row !== null && !error.
+			if (row === null || error) continue;
 
 			const parentChanged = prev.parentId !== row.parentId;
 			const nameChanged = prev.name !== row.name;
@@ -219,19 +178,16 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 			}
 
 			clearPathsRecursive(id);
-			snapshot.set(id, {
-				name: row.name,
-				parentId: row.parentId,
-				trashedAt: row.trashedAt,
-			});
+			snapshot.set(id, snapFrom(row));
 			idsNeedingPaths.add(id);
 			collectDescendantIds(id, idsNeedingPaths);
 		}
 
 		// Disambiguate affected folders
 		for (const parentId of foldersToDisambiguate) {
-			const childIds = childrenOf.get(parentId) ?? [];
-			const namesChanged = disambiguateFolder(parentId, childIds);
+			const childIds = childrenOf.get(parentId);
+			if (!childIds) continue;
+			const namesChanged = disambiguateFolder(childIds);
 
 			// If any display name changed, those IDs need path recomputation
 			for (const id of namesChanged) {
@@ -252,20 +208,16 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 	// ═══════════════════════════════════════════════════════════════════════
 
 	function addChild(parentId: FileId | null, childId: FileId): void {
-		const children = childrenOf.get(parentId) ?? [];
-		if (!children.includes(childId)) {
-			children.push(childId);
+		let children = childrenOf.get(parentId);
+		if (!children) {
+			children = new Set();
 			childrenOf.set(parentId, children);
 		}
+		children.add(childId);
 	}
 
 	function removeChild(parentId: FileId | null, childId: FileId): void {
-		const children = childrenOf.get(parentId);
-		if (!children) return;
-		const idx = children.indexOf(childId);
-		if (idx !== -1) {
-			children.splice(idx, 1);
-		}
+		childrenOf.get(parentId)?.delete(childId);
 	}
 
 	/** Remove path entries for an ID and all its descendants. */
@@ -298,17 +250,15 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 	 *
 	 * @returns IDs whose display name changed (need path recomputation).
 	 */
-	function disambiguateFolder(
-		_parentId: FileId | null,
-		childIds: FileId[],
-	): FileId[] {
+	function disambiguateFolder(childIds: Iterable<FileId>): FileId[] {
 		const changed: FileId[] = [];
 		const childRows: FileRow[] = [];
 
 		for (const cid of childIds) {
-			const result = filesTable.get(cid);
-			if (result.status === 'valid' && result.row.trashedAt === null) {
-				childRows.push(result.row);
+			const { data: row, error } = filesTable.get(cid);
+			if (error) continue;
+			if (row !== null && row.trashedAt === null) {
+				childRows.push(row);
 			}
 		}
 
@@ -323,9 +273,6 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 			}
 		}
 
-		// Clean up display names for IDs no longer in this folder
-		// (already handled by the caller removing from childrenOf)
-
 		return changed;
 	}
 
@@ -334,8 +281,8 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 	 *
 	 * Processes root-level nodes first (their parent path is known: ""),
 	 * then their children become computable, and so on. Converges in
-	 * O(maxDepth) iterations. Remaining IDs after convergence are orphans
-	 * at the index level — placed at root.
+	 * O(MAX_DEPTH) iterations. IDs that fail to resolve within that bound
+	 * (unreachable parent chains, depth > MAX_DEPTH) are left without a path.
 	 */
 	function computePathsConvergent(ids: Set<FileId>): void {
 		const pending = new Set(ids);
@@ -375,28 +322,24 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 				}
 			}
 		}
-
-		// Remaining IDs are orphans at the index level — place at root
-		for (const id of pending) {
-			const snap = snapshot.get(id);
-			if (!snap || snap.trashedAt !== null) continue;
-			const name = displayName.get(id) ?? snap.name;
-			const path = `/${name}`;
-			pathToId.set(path, id);
-			idToPath.set(id, path);
-		}
 	}
 
 	/**
 	 * Build all paths from root downward using childrenOf and displayNames.
-	 * Used by rebuild() after disambiguation.
+	 * Used by buildInitialState after disambiguation. BFS level-by-level,
+	 * which makes the MAX_DEPTH cap a true depth cap (iteration N processes
+	 * exactly the nodes at depth N) — unlike computePathsConvergent, whose
+	 * iteration cap doesn't bound tree depth when pending is seeded in
+	 * parent-before-child order.
 	 */
 	function buildPathsFromRoot(): void {
 		const queue: Array<{ id: FileId; parentPath: string }> = [];
 
-		// Start with root-level children
-		for (const id of childrenOf.get(null) ?? []) {
-			queue.push({ id, parentPath: '' });
+		const roots = childrenOf.get(null);
+		if (roots) {
+			for (const id of roots) {
+				queue.push({ id, parentPath: '' });
+			}
 		}
 
 		let depth = 0;
@@ -412,7 +355,6 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 				pathToId.set(path, id);
 				idToPath.set(id, path);
 
-				// Enqueue children of folders
 				const children = childrenOf.get(id);
 				if (children) {
 					for (const childId of children) {
@@ -424,7 +366,100 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════
-	// PUBLIC API (unchanged interface)
+	// TABLE-MUTATING FIX HELPERS (used only by buildInitialState)
+	// ═══════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Walk parentId chains from each active row, detect cycles, and break
+	 * them by moving the latest-updated node in the cycle to root.
+	 *
+	 * @returns Set of IDs whose parentId was mutated to null.
+	 */
+	function fixCircularReferences(activeRows: FileRow[]): Set<FileId> {
+		const visited = new Set<FileId>();
+		const inStack = new Set<FileId>();
+		const mutated = new Set<FileId>();
+
+		for (const row of activeRows) {
+			if (visited.has(row.id)) continue;
+			breakCycleFromId(row.id, visited, inStack, mutated);
+		}
+
+		return mutated;
+	}
+
+	function breakCycleFromId(
+		startId: FileId,
+		visited: Set<FileId>,
+		inStack: Set<FileId>,
+		mutated: Set<FileId>,
+	) {
+		const path: FileId[] = [];
+		let currentId: FileId | null = startId;
+
+		while (currentId !== null) {
+			if (visited.has(currentId)) break;
+
+			if (inStack.has(currentId)) {
+				// Cycle detected — move the latest-updated node in the cycle to root.
+				const cycleIds = path.slice(path.indexOf(currentId));
+				let latestId: FileId | null = null;
+				let latestTime = -1;
+				for (const cid of cycleIds) {
+					const { data: row, error } = filesTable.get(cid);
+					if (error) continue;
+					if (row !== null && row.updatedAt > latestTime) {
+						latestTime = row.updatedAt;
+						latestId = cid;
+					}
+				}
+				if (latestId !== null) {
+					filesTable.update(latestId, { parentId: null });
+					mutated.add(latestId);
+				}
+				// Fall through to the cleanup loop so inStack/visited stay consistent.
+				break;
+			}
+
+			inStack.add(currentId);
+			path.push(currentId);
+
+			const { data: row, error } = filesTable.get(currentId);
+			if (error || row === null) break;
+			currentId = row.parentId;
+		}
+
+		for (const id of path) {
+			visited.add(id);
+			inStack.delete(id);
+		}
+	}
+
+	/**
+	 * Detect orphaned rows (parentId references a deleted or non-existent
+	 * row). Move orphans to root and sync childrenOf.
+	 *
+	 * @returns Set of IDs whose parentId was mutated to null.
+	 */
+	function fixOrphans(activeRows: FileRow[]): Set<FileId> {
+		const activeIds = new Set(activeRows.map((r) => r.id));
+		const mutated = new Set<FileId>();
+
+		for (const row of activeRows) {
+			if (row.parentId === null) continue;
+			if (activeIds.has(row.parentId)) continue;
+
+			filesTable.update(row.id, { parentId: null });
+			mutated.add(row.id);
+			removeChild(row.parentId, row.id);
+			addChild(null, row.id);
+		}
+
+		return mutated;
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════
+	// PUBLIC API
 	// ═══════════════════════════════════════════════════════════════════════
 
 	return {
@@ -440,123 +475,13 @@ export function createFileSystemIndex(filesTable: TableHelper<FileRow>) {
 		allPaths(): string[] {
 			return Array.from(pathToId.keys());
 		},
-		/** Number of indexed paths. */
-		get pathCount(): number {
-			return pathToId.size;
-		},
 		/** Get child IDs of a parent (null = root). Returns [] if none. */
 		getChildIds(parentId: FileId | null): FileId[] {
-			return childrenOf.get(parentId) ?? [];
+			const children = childrenOf.get(parentId);
+			return children ? Array.from(children) : [];
 		},
-		/** O(1) reverse lookup: FileId → path string, or undefined if not indexed. */
-		getPathById(id: FileId): string | undefined {
-			return idToPath.get(id);
-		},
-		/** Stop observing the files table. */
-		dispose: unobserve,
 	};
 }
 
 /** Runtime indexes for O(1) path lookups (ephemeral, not stored in Yjs) */
-export type FileSystemIndex = ReturnType<typeof createFileSystemIndex>;
-
-// ═══════════════════════════════════════════════════════════════════════════
-// REBUILD-ONLY HELPERS (circular refs + orphans — mutate the table)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Detect circular references in parentId chains.
- * If a cycle is found, break it by setting the later-timestamped node's parentId to null.
- */
-function fixCircularReferences(
-	filesTable: TableHelper<FileRow>,
-	activeRows: FileRow[],
-) {
-	const visited = new Set<FileId>();
-	const inStack = new Set<FileId>();
-
-	for (const row of activeRows) {
-		if (visited.has(row.id)) continue;
-		detectCycle(row.id, filesTable, visited, inStack);
-	}
-}
-
-function detectCycle(
-	startId: FileId,
-	filesTable: TableHelper<FileRow>,
-	visited: Set<FileId>,
-	inStack: Set<FileId>,
-) {
-	const path: FileId[] = [];
-	let currentId: FileId | null = startId;
-
-	while (currentId !== null) {
-		if (visited.has(currentId)) break; // Known safe — clean up and return
-
-		if (inStack.has(currentId)) {
-			// Cycle detected — break it by moving the current node to root
-			// Find the node in the cycle with the latest updatedAt
-			const cycleStart = path.indexOf(currentId);
-			const cycleIds = path.slice(cycleStart);
-			if (cycleIds.length === 0) return;
-
-			let latestId = cycleIds[0];
-			if (!latestId) return;
-			let latestTime = 0;
-			for (const cid of cycleIds) {
-				const result = filesTable.get(cid);
-				if (result.status === 'valid' && result.row.updatedAt > latestTime) {
-					latestTime = result.row.updatedAt;
-					latestId = cid;
-				}
-			}
-
-			// Break cycle by moving latest-updated node to root
-			filesTable.update(latestId, { parentId: null });
-			return;
-		}
-
-		inStack.add(currentId);
-		path.push(currentId);
-
-		const result = filesTable.get(currentId);
-		if (result.status !== 'valid') break;
-		currentId = result.row.parentId;
-	}
-
-	// Mark all nodes in this path as visited
-	for (const id of path) {
-		visited.add(id);
-		inStack.delete(id);
-	}
-}
-
-/**
- * Detect orphaned files (parentId references a deleted or non-existent row).
- * Move orphans to root by setting parentId to null.
- */
-function fixOrphans(
-	filesTable: TableHelper<FileRow>,
-	activeRows: FileRow[],
-	childrenOf: Map<FileId | null, FileId[]>,
-) {
-	const activeIds = new Set(activeRows.map((r) => r.id));
-
-	for (const row of activeRows) {
-		if (row.parentId === null) continue;
-		if (activeIds.has(row.parentId)) continue;
-
-		// Parent doesn't exist among active rows — orphan
-		filesTable.update(row.id, { parentId: null });
-
-		// Update childrenOf index
-		const oldChildren = childrenOf.get(row.parentId) ?? [];
-		childrenOf.set(
-			row.parentId,
-			oldChildren.filter((id) => id !== row.id),
-		);
-		const rootChildren = childrenOf.get(null) ?? [];
-		rootChildren.push(row.id);
-		childrenOf.set(null, rootChildren);
-	}
-}
+export type FileSystemIndex = ReturnType<typeof attachFileSystemIndex>;

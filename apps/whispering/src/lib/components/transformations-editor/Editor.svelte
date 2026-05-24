@@ -1,8 +1,7 @@
 <script lang="ts">
 	import * as Resizable from '@epicenter/ui/resizable';
 	import { transformationRuns } from '$lib/state/transformation-runs.svelte';
-	import type { TransformationStep } from '$lib/state/transformation-steps.svelte';
-	import type { Transformation } from '$lib/state/transformations.svelte';
+	import type { Transformation, TransformationStep } from '$lib/workspace';
 	import Configuration from './Configuration.svelte';
 	import Runs from './Runs.svelte';
 	import Test from './Test.svelte';

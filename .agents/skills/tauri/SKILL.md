@@ -1,12 +1,12 @@
 ---
 name: tauri
-description: Tauri path handling, cross-platform file operations, and API usage. Use when the user mentions Tauri, desktop app, or when working with file paths in Tauri frontend code, accessing native filesystem APIs, invoking Tauri commands, or handling platform differences.
+description: Tauri commands, permissions, capabilities, security config, path handling, cross-platform file ops, and native filesystem APIs. Use when mentioning Tauri, desktop apps, Rust commands, invoke, capabilities, permissions, ResourceId, file paths, or platform differences.
 metadata:
   author: epicenter
   version: '1.0'
 ---
 
-# Tauri Path Handling
+# Tauri Patterns
 ## Reference Repositories
 
 - [Tauri](https://github.com/tauri-apps/tauri) — Desktop app framework with Rust backend and web frontend
@@ -15,11 +15,20 @@ metadata:
 
 Use this pattern when you need to:
 
+- Add or change Tauri commands, permissions, capabilities, or security config.
 - Build file paths in Tauri frontend code running in the webview.
 - Choose correctly between `@tauri-apps/api/path` and Node/Bun `path` APIs.
 - Replace manual slash concatenation with `join()`, `dirname()`, and related helpers.
 - Handle cross-platform filesystem behavior for desktop apps.
 - Combine Tauri path APIs with `@tauri-apps/plugin-fs` operations.
+
+## Commands, Permissions, And Security
+
+- Expose focused Rust APIs with `#[tauri::command]`, register them with `generate_handler!`, and return `Result<T, E>` for fallible work.
+- Validate command inputs on the Rust side. TypeScript callers are not the trust boundary.
+- Keep capabilities least-privilege in `app.security.capabilities`, scoped to the windows or webviews that need them. Avoid broad permission wildcards.
+- Treat CSP, `devCsp`, asset protocol configuration, `convertFileSrc`, `freezePrototype`, and remote IPC as security-sensitive config.
+- Long-lived Rust objects should be Tauri resources with frontend `ResourceId`s. Do not serialize complex long-lived objects through command responses.
 
 ## Context Detection
 

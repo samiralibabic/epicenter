@@ -18,7 +18,7 @@ import {
  * Creates a desktop notification service implementation using Tauri's notification plugin.
  * Handles permission requests, notification display, and cleanup of active notifications.
  */
-export function createNotificationServiceDesktop(): NotificationService {
+export function createNotificationServiceDesktop() {
 	/**
 	 * Removes a notification by its numeric ID from the active notifications list.
 	 * Retrieves all active notifications, finds the matching one, and removes it if found.
@@ -55,8 +55,11 @@ export function createNotificationServiceDesktop(): NotificationService {
 		 *
 		 * @param options - Notification configuration including title, description, and optional ID
 		 */
-		async notify(options: UnifiedNotificationOptions) {
-			const idStringified = options.id ?? nanoid();
+		async notify({
+			id: notificationId,
+			...notificationOptions
+		}: UnifiedNotificationOptions) {
+			const idStringified = notificationId ?? nanoid();
 			const id = hashNanoidToNumber(idStringified);
 
 			await removeNotificationById(id);
@@ -69,7 +72,10 @@ export function createNotificationServiceDesktop(): NotificationService {
 						permissionGranted = permission === 'granted';
 					}
 					if (permissionGranted) {
-						const tauriOptions = toTauriNotification(options);
+						const tauriOptions = toTauriNotification({
+							id: notificationId,
+							...notificationOptions,
+						});
 						sendNotification({
 							...tauriOptions,
 							id, // Override with our numeric id
@@ -93,5 +99,5 @@ export function createNotificationServiceDesktop(): NotificationService {
 			);
 			return removeNotificationResult;
 		},
-	};
+	} satisfies NotificationService;
 }

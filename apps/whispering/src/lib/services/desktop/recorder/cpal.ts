@@ -7,15 +7,13 @@ import type {
 } from '$lib/constants/audio';
 import { FsServiceLive } from '$lib/services/desktop/fs';
 import {
+	asDeviceIdentifier,
 	type CpalRecordingParams,
+	type Device,
+	type DeviceAcquisitionOutcome,
 	RecorderError,
 	type RecorderService,
 } from '$lib/services/recorder/types';
-import {
-	asDeviceIdentifier,
-	type Device,
-	type DeviceAcquisitionOutcome,
-} from '$lib/services/types';
 
 /**
  * Audio recording data returned from the Rust method
@@ -268,7 +266,7 @@ export const CpalRecorderServiceLive: RecorderService = {
 
 		// If there's a file path, delete the file using Tauri FS plugin
 		if (audioRecording?.filePath) {
-			const { filePath } = audioRecording;
+			const filePath = audioRecording.filePath;
 			const { error: removeError } = await tryAsync({
 				try: () => remove(filePath),
 				catch: (error) => RecorderError.FileDeleteFailed({ cause: error }),

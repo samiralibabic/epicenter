@@ -1,5 +1,7 @@
 # Static Workspace API Guide
 
+> **Historical — API has moved.** This guide describes `defineWorkspace(...)` + `createWorkspace(definition)`, both of which have since been removed. Workspaces are now composed via `defineDocument((id) => ({ ydoc, tables, ... }))` — one closure that constructs the Y.Doc and calls `attach*` primitives inline. The versioning, schema, and migration patterns described below still apply; only the outer `defineWorkspace` / `createWorkspace` wrapping is gone. See `packages/cli/README.md` and `packages/workspace/README.md` for current composition patterns, and commit `b62cc5ae3` for the removal record.
+
 Type-safe schema definitions and workspace clients for local-first apps with versioned data.
 
 When I built Epicenter, the biggest pain point was managing data schema changes in local-first systems. Most CRDT libraries let you store anything, but they don't help you evolve your data model over time. The Static Workspace API solves this: define your schemas once (with versioning), and data migrates automatically when loaded.

@@ -4,7 +4,7 @@ import { Err, tryAsync } from 'wellcrafted/result';
 import type { HttpService } from '.';
 import { HttpError } from './types';
 
-export function createHttpServiceDesktop(): HttpService {
+export function createHttpServiceDesktop() {
 	return {
 		async post({ body, url, schema, headers }) {
 			const { data: response, error: responseError } = await tryAsync({
@@ -46,5 +46,5 @@ export function createHttpServiceDesktop(): HttpService {
 			});
 			return parseResult;
 		},
-	};
+	} satisfies HttpService;
 }

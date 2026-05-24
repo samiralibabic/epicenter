@@ -83,7 +83,7 @@
 	);
 	const DATE_FORMAT = 'PP p'; // e.g., Aug 13, 2025, 10:00 AM
 
-	const columns: ColumnDef<Recording>[] = [
+	const columns = [
 		{
 			id: 'select',
 			header: ({ table }) =>
@@ -169,7 +169,7 @@
 							description: 'Are you sure you want to delete this recording?',
 							confirm: { text: 'Delete', variant: 'destructive' },
 							onConfirm: () => {
-								services.db.recordings.revokeAudioUrl(row.original.id);
+								services.blobs.audio.revokeUrl(row.original.id);
 								recordings.delete(row.original.id);
 								rpc.notify.success({
 									title: 'Deleted recording!',
@@ -227,7 +227,7 @@
 				});
 			},
 		},
-	];
+	] satisfies ColumnDef<Recording>[];
 
 	let sorting = createPersistedState({
 		key: 'whispering-recordings-data-table-sorting',
@@ -394,22 +394,22 @@
 									onSuccess: ({ oks, errs }) => {
 										const isAllSuccessful = errs.length === 0;
 										if (isAllSuccessful) {
-											const n = oks.length;
+											const count = oks.length;
 											rpc.notify.success({
 												id: toastId,
-												title: `Transcribed ${n} recording${n === 1 ? '' : 's'}!`,
-												description: `Your ${n} recording${n === 1 ? ' has' : 's have'} been transcribed successfully.`,
+												title: `Transcribed ${count} recording${count === 1 ? '' : 's'}!`,
+												description: `Your ${count} recording${count === 1 ? ' has' : 's have'} been transcribed successfully.`,
 											});
 											return;
 										}
 										const isAllFailed = oks.length === 0;
 										if (isAllFailed) {
-											const n = errs.length;
+											const count = errs.length;
 											rpc.notify.error({
 												id: toastId,
-												title: `Failed to transcribe ${n} recording${n === 1 ? '' : 's'}`,
+												title: `Failed to transcribe ${count} recording${count === 1 ? '' : 's'}`,
 												description:
-													n === 1
+													count === 1
 														? 'Your recording could not be transcribed.'
 														: 'None of your recordings could be transcribed.',
 												action: { type: 'more-details', error: errs },

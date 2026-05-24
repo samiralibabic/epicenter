@@ -1,5 +1,6 @@
 <script lang="ts">
 	import '../app.css';
+	import { ConfirmationDialog } from '@epicenter/ui/confirmation-dialog';
 	import { Toaster } from '@epicenter/ui/sonner';
 	import { ModeWatcher } from 'mode-watcher';
 
@@ -7,5 +8,6 @@
 </script>
 
 <Toaster />
+<ConfirmationDialog />
 <ModeWatcher />
-{@render children()}
+{@render children?.()}

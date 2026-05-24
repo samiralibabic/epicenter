@@ -5,9 +5,10 @@
 	import { cn } from '@epicenter/ui/utils';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
-	import { fsState } from '$lib/state/fs-state.svelte';
+	import { requireOpensidian } from '$lib/session';
 	import type { FileGroup } from '$lib/state/sidebar-search-state.svelte';
 
+	const opensidian = requireOpensidian();
 	let {
 		group,
 		defaultOpen = true,
@@ -26,7 +27,7 @@
 	}
 
 	function handleMatchClick(fileId: string) {
-		fsState.selectFile(fileId as FileId);
+		opensidian.state.files.selectFile(fileId as FileId);
 	}
 
 	const displayPath = $derived(

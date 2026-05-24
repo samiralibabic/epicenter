@@ -12,16 +12,13 @@
  * Usage:
  * ```typescript
  * import { importRedditExport, redditWorkspace } from './ingest/reddit';
- * import { createWorkspace } from '@epicenter/workspace';
  *
- * const client = createWorkspace(redditWorkspace);
- * const stats = await importRedditExport(zipFile, client);
+ * const stats = await importRedditExport(zipFile, redditWorkspace);
  * console.log(`Imported ${stats.totalRows} rows`);
  * ```
  */
 
 import { type } from 'arktype';
-import { createWorkspace } from '@epicenter/workspace';
 import { snakify } from '../snakify.js';
 import { csvSchemas, type TableName } from './csv-schemas.js';
 import { type ParsedRedditData, parseRedditZip } from './parse.js';
@@ -54,9 +51,9 @@ export type ImportProgress = {
 	table?: string;
 };
 
-// Derive workspace client type (not exported — callers use createWorkspace(redditWorkspace) directly)
-const _createRedditWorkspace = () => createWorkspace(redditWorkspace);
-type RedditWorkspaceClient = ReturnType<typeof _createRedditWorkspace>;
+// Workspace bundle type — the `redditWorkspace` singleton or any other
+// `openReddit()` instance.
+type RedditWorkspaceClient = RedditWorkspace;
 
 /** Import rows for a single table with per-row error recovery */
 function importTableRows(
@@ -133,14 +130,14 @@ function transformKv(raw: ParsedRedditData): KvData {
  * Import a Reddit GDPR export ZIP file into the workspace.
  *
  * @param input - ZIP file as Blob, File, or ArrayBuffer
- * @param workspace - Reddit workspace client from createWorkspace(redditWorkspace)
+ * @param workspace - Reddit workspace bundle (singleton `redditWorkspace` or `openReddit()`)
  * @param options - Optional progress callback
  * @returns Import statistics
  */
 export async function importRedditExport(
 	input: Blob | ArrayBuffer,
 	workspace: RedditWorkspaceClient,
-	options?: { onProgress?: (progress: ImportProgress) => void },
+	{ onProgress }: { onProgress?: (progress: ImportProgress) => void } = {},
 ): Promise<ImportStats> {
 	const stats: ImportStats = {
 		tables: {},
@@ -153,7 +150,7 @@ export async function importRedditExport(
 	// ═══════════════════════════════════════════════════════════════════════════
 	// PHASE 1: PARSE ZIP → RAW CSV DATA
 	// ═══════════════════════════════════════════════════════════════════════════
-	options?.onProgress?.({ phase: 'parse', current: 0, total: 1 });
+	onProgress?.({ phase: 'parse', current: 0, total: 1 });
 	const rawData = await parseRedditZip(input);
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -164,7 +161,7 @@ export async function importRedditExport(
 	// Batch all table and KV inserts into a single Y.Doc transaction
 	workspace.batch(() => {
 		for (const table of tableNames) {
-			options?.onProgress?.({
+			onProgress?.({
 				phase: 'transform',
 				current: tableIndex++,
 				total: tableNames.length,
@@ -188,7 +185,7 @@ export async function importRedditExport(
 		// ═══════════════════════════════════════════════════════════════════════
 		// PHASE 3: KV STORE
 		// ═══════════════════════════════════════════════════════════════════════
-		options?.onProgress?.({ phase: 'insert', current: 0, total: 1 });
+		onProgress?.({ phase: 'insert', current: 0, total: 1 });
 		const kvData = transformKv(rawData);
 		for (const [key, value] of Object.entries(kvData) as [
 			keyof KvData,

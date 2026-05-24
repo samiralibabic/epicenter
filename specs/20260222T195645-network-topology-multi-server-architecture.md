@@ -5,6 +5,8 @@
 **Author**: Braden + AI-assisted
 **Related**: `20260219T195800-server-architecture-rethink.md`, `20260220T080000-plugin-first-server-architecture.md`, `20260220T133004-unified-local-server-architecture.md`, `20260222T073156-unified-cli-server-sidecar.md`, `20260219T200000-deployment-targets-research.md`, `20260222T195800-server-side-api-key-management.md`, `20260121T170000-sync-architecture.md`, `20260109T140700-opencode-integration-architecture.md`
 
+> **Path note (2026-05-22):** The local key-store references under `~/.epicenter/server/` are stale. Do not use this draft to recreate top-level home-directory server key storage.
+
 ## Overview
 
 A three-tier network topology for Epicenter where every desktop runs a local Elysia.js server as a Tauri sidecar, one designated hub server coordinates all devices, and mobile clients connect through the hub. The hub server handles ALL AI streaming (cloud providers and Ollama alike) and acts as an AI proxy for local OpenCode instances. Each desktop runs an XDG-isolated OpenCode process for AI-powered coding agent capabilities, with provider requests routed through the hub's proxy (keys never leave hub). Local sidecars focus exclusively on sync relay and workspace operations. The hub is interchangeable: users can self-host it with a compiled binary or use Epicenter's cloud infrastructure. Both modes use Better Auth for authentication.

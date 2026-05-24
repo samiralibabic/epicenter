@@ -6,10 +6,8 @@
 	import { onMount } from 'svelte';
 	import { PLATFORM_TYPE } from '$lib/constants/platform';
 	import { rpc } from '$lib/query';
-	import {
-		type Transformation,
-		transformations,
-	} from '$lib/state/transformations.svelte';
+	import { transformations } from '$lib/state/transformations.svelte';
+	import type { Transformation } from '$lib/workspace';
 
 	const sortedTransformations = $derived(transformations.sorted);
 

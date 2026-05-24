@@ -5,7 +5,7 @@ import { AnalyticsError } from './types';
 
 init('A-US-5744332458');
 
-export function createAnalyticsServiceWeb(): AnalyticsService {
+export function createAnalyticsServiceWeb() {
 	return {
 		logEvent: async (event) =>
 			tryAsync({
@@ -15,5 +15,5 @@ export function createAnalyticsServiceWeb(): AnalyticsService {
 				},
 				catch: (error) => AnalyticsError.LogEventFailed({ cause: error }),
 			}),
-	};
+	} satisfies AnalyticsService;
 }

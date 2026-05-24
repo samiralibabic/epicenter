@@ -1,19 +1,83 @@
 /**
  * Epicenter: YJS-First Collaborative Workspace System
  *
- * This root export provides the full workspace API and shared utilities.
- *
- * - `@epicenter/workspace` - Full API (workspace creation, tables, KV, extensions)
- * - `@epicenter/workspace/static` - Alias (kept for backward compatibility)
- * - `@epicenter/workspace/extensions` - Extension plugins (persistence, sync)
+ * `@epicenter/workspace` attaches typed primitives: tables, KV, plain/rich
+ * text, timeline, and an action registry to a `Y.Doc`, then wires the
+ * result to IndexedDB persistence, end-to-end encryption, and WebSocket
+ * sync via `openCollaboration`. `openCollaboration` also consumes the
+ * server-owned presence channel and exposes the live-device surface
+ * (`devices.list()`) plus socket-backed `dispatch()` for cross-device calls.
  *
  * @example
  * ```typescript
- * import { createWorkspace, defineTable } from '@epicenter/workspace';
+ * import {
+ *   attachIndexedDb,
+ *   attachRichText,
+ *   attachTables,
+ *   createDisposableCache,
+ *   createInstallationId,
+ *   defineTable,
+ *   docGuid,
+ *   openCollaboration,
+ *   roomWsUrl,
+ * } from '@epicenter/workspace';
+ * import type { AuthClient } from '@epicenter/auth';
  * import { type } from 'arktype';
+ * import * as Y from 'yjs';
  *
  * const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
- * const client = createWorkspace({ id: 'my-app', tables: { posts } });
+ * declare const auth: AuthClient;
+ *
+ * const apiUrl = 'https://api.example.com';
+ * const installationId = createInstallationId({ storage: localStorage });
+ *
+ * // A cloud doc is owned by the authenticated subject and addressed by its
+ * // Y.Doc guid: `roomWsUrl(apiUrl, ydoc.guid)` resolves to the room
+ * // `subject:${userId}:rooms:${ydoc.guid}` server-side.
+ * const ydoc = new Y.Doc({ guid: 'notes' });
+ * const tables = attachTables(ydoc, { posts });
+ * const idb = attachIndexedDb(ydoc);
+ * const collaboration = openCollaboration(ydoc, {
+ *   url: roomWsUrl(apiUrl, ydoc.guid),
+ *   openWebSocket: auth.openWebSocket,
+ *   waitFor: idb.whenLoaded,
+ *   installationId,
+ *   actions: {},
+ * });
+ *
+ * // Content docs build the same URL from their own guid. The local Y.Doc
+ * // guid doubles as the cloud room id, so there is no second id system.
+ * const noteBodyDocs = createDisposableCache(
+ *   (noteId: string) => {
+ *     const bodyYdoc = new Y.Doc({
+ *       guid: docGuid({
+ *         workspaceId: ydoc.guid,
+ *         collection: 'posts',
+ *         rowId: noteId,
+ *         field: 'body',
+ *       }),
+ *       gc: true,
+ *     });
+ *     const bodyIdb = attachIndexedDb(bodyYdoc);
+ *     const bodySync = openCollaboration(bodyYdoc, {
+ *       url: roomWsUrl(apiUrl, bodyYdoc.guid),
+ *       openWebSocket: auth.openWebSocket,
+ *       waitFor: bodyIdb.whenLoaded,
+ *       installationId,
+ *       actions: {},
+ *     });
+ *     return {
+ *       ydoc: bodyYdoc,
+ *       body: attachRichText(bodyYdoc),
+ *       idb: bodyIdb,
+ *       sync: bodySync,
+ *       [Symbol.dispose]() {
+ *         bodyYdoc.destroy();
+ *       },
+ *     };
+ *   },
+ *   { gcTime: 5_000 },
+ * );
  * ```
  *
  * @packageDocumentation
@@ -23,166 +87,108 @@
 // ACTION SYSTEM
 // ════════════════════════════════════════════════════════════════════════════
 
-export type { Action, Actions, Mutation, Query } from './shared/actions';
+export type { Action, ActionManifest } from './shared/actions';
 export {
+	defineActions,
 	defineMutation,
 	defineQuery,
-	isAction,
-	isMutation,
-	isQuery,
-	iterateActions,
 } from './shared/actions';
 
 // ════════════════════════════════════════════════════════════════════════════
-// RPC
+// INSTALLATION IDENTITY
 // ════════════════════════════════════════════════════════════════════════════
 
-export type { InferRpcMap, RpcActionMap } from './rpc/types';
+export {
+	createInstallationId,
+	createInstallationIdAsync,
+} from './document/installation-id.js';
 
 // ════════════════════════════════════════════════════════════════════════════
-// LIFECYCLE PROTOCOL
+// PROJECT CONFIG (browser-safe surface)
 // ════════════════════════════════════════════════════════════════════════════
 
-export type {
-	Extension,
-	MaybePromise,
-} from './workspace/lifecycle';
-export type { DocumentContext } from './workspace/types';
+// Node-only helpers that resolve real paths (`findProjectRoot`,
+// `loadProjectConfig`, etc.) import `node:fs`, `node:path`, or `node:os`
+// at module top level. They are exported from `@epicenter/workspace/node`;
+// keeping them out of this root barrel stops browser bundles (fuji,
+// whispering, etc.) from traversing `node:*` modules. Platform paths
+// (data, log, cache, config, runtime) live in `@epicenter/constants/node`
+// behind `createEpicenterEnv`.
+export {
+	DEFAULT_PROJECT_CONFIG_SOURCE,
+	defineConfig,
+	defineWorkspace,
+	type EpicenterConfig,
+	PROJECT_CONFIG_FILENAME,
+} from './config/define-config.js';
+export type { ProjectDir } from './shared/types';
 
 // ════════════════════════════════════════════════════════════════════════════
-// ERROR TYPES
+// ID + DATE PRIMITIVES
 // ════════════════════════════════════════════════════════════════════════════
 
-export { ExtensionError } from './shared/errors';
-
-// ════════════════════════════════════════════════════════════════════════════
-// CORE TYPES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { AbsolutePath, ProjectDir } from './shared/types';
-
-// ════════════════════════════════════════════════════════════════════════════
-// ID UTILITIES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { Guid, Id } from './shared/id';
-export { generateGuid, generateId, Id as createId } from './shared/id';
-
-// ════════════════════════════════════════════════════════════════════════════
-// DATE UTILITIES
-// ════════════════════════════════════════════════════════════════════════════
-
-export type {
-	DateIsoString,
-	ParsedDateTimeString,
-	TimezoneId,
-} from './shared/datetime-string';
 export { DateTimeString } from './shared/datetime-string';
+export type { Guid, Id } from './shared/id';
+export { generateGuid, generateId } from './shared/id';
 
 // ════════════════════════════════════════════════════════════════════════════
-// TIMELINE
-// ════════════════════════════════════════════════════════════════════════════
-
-export type {
-	ContentType,
-	RichTextEntry,
-	SheetBinding,
-	SheetEntry,
-	TextEntry,
-	TimelineEntry,
-} from './timeline';
-export {
-	computeMidpoint,
-	type Timeline,
-} from './timeline';
-// ════════════════════════════════════════════════════════════════════════════
-// Y.DOC STORAGE KEYS
-// ════════════════════════════════════════════════════════════════════════════
-
-export type { KvKey, TableKey as TableKeyType } from './workspace/ydoc-keys';
-export { KV_KEY, TableKey } from './workspace/ydoc-keys';
-
-// ════════════════════════════════════════════════════════════════════════════
-// SCHEMA DEFINITIONS (Pure)
-// ════════════════════════════════════════════════════════════════════════════
-
-export { defineKv } from './workspace/define-kv';
-export { defineTable } from './workspace/define-table';
-export { defineWorkspace } from './workspace/define-workspace';
-
-// ════════════════════════════════════════════════════════════════════════════
-// WORKSPACE CREATION
-// ════════════════════════════════════════════════════════════════════════════
-
-export { createWorkspace } from './workspace/create-workspace';
-
-// ════════════════════════════════════════════════════════════════════════════
-// INTROSPECTION
-// ════════════════════════════════════════════════════════════════════════════
-
-export type {
-	ActionDescriptor,
-	SchemaDescriptor,
-	WorkspaceDescriptor,
-} from './workspace/describe-workspace';
-export { describeWorkspace } from './workspace/describe-workspace';
-
-// ════════════════════════════════════════════════════════════════════════════
-// TYPES
-// ════════════════════════════════════════════════════════════════════════════
-
-// Runtime schemas (arktype) — for validation at deserialization boundaries
-export {
-	EncryptionKey,
-	EncryptionKeys,
-	encryptionKeysFingerprint,
-} from './workspace/encryption-key';
-export type {
-	AnyWorkspaceClient,
-	AwarenessDefinitions,
-	AwarenessHelper,
-	AwarenessState,
-	BaseRow,
-	DocumentClient,
-	DocumentConfig,
-	DocumentHandle,
-	Documents,
-	DocumentsHelper,
-	ExtensionContext,
-	ExtensionFactory,
-	GetResult,
-	InferAwarenessValue,
-	InferKvValue,
-	InferTableRow,
-	InvalidRowResult,
-	KvChange,
-	KvDefinition,
-	KvDefinitions,
-	KvHelper,
-	NotFoundResult,
-	RowResult,
-	SharedExtensionContext,
-	TableDefinition,
-	TableDefinitions,
-	TableHelper,
-	TablesHelper,
-	UpdateResult,
-	ValidRowResult,
-	WorkspaceClient,
-	WorkspaceClientBuilder,
-	WorkspaceDefinition,
-} from './workspace/types';
-
-// ════════════════════════════════════════════════════════════════════════════
-// EPICENTER LINKS
+// DOCUMENT PRIMITIVES
 // ════════════════════════════════════════════════════════════════════════════
 
 export {
-	convertEpicenterLinksToWikilinks,
-	convertWikilinksToEpicenterLinks,
-	EPICENTER_LINK_RE,
-	type EpicenterLink,
-	isEpicenterLink,
-	makeEpicenterLink,
-	parseEpicenterLink,
-} from './links.js';
+	createDisposableCache,
+	type DisposableCache,
+} from './cache/disposable-cache.js';
+
+export { attachBroadcastChannel } from './document/attach-broadcast-channel.js';
+export { attachEncryption } from './document/attach-encryption.js';
+export { attachIndexedDb } from './document/attach-indexed-db.js';
+export {
+	attachKv,
+	type InferKvValue,
+	type Kv,
+	type KvDefinitions,
+} from './document/attach-kv.js';
+export { attachPlainText } from './document/attach-plain-text.js';
+export { attachRichText } from './document/attach-rich-text.js';
+export {
+	attachTable,
+	attachTables,
+	type BaseRow,
+	type InferTableRow,
+	type Table,
+	type Tables,
+} from './document/attach-table.js';
+export { attachTimeline } from './document/attach-timeline/index.js';
+export { defineKv } from './document/define-kv.js';
+export { defineTable } from './document/define-table.js';
+export {
+	type ActionInput,
+	type ActionOutput,
+	DispatchError,
+	type DispatchRequest,
+	type LiveDevice,
+	type TypedDispatch,
+	typedDispatch,
+} from './document/dispatch.js';
+export { docGuid } from './document/doc-guid.js';
+export type {
+	OpenWebSocket,
+	SyncStatus,
+} from './document/internal/sync-supervisor.js';
+export {
+	createLocalOwner,
+	type LocalOwner,
+} from './document/local-owner.js';
+export { onLocalUpdate } from './document/on-local-update.js';
+export {
+	type Collaboration,
+	openCollaboration,
+} from './document/open-collaboration.js';
+// Transport URL builder.
+//
+// `roomWsUrl(apiUrl, ydoc.guid)` builds the WebSocket URL for `/rooms/:room`.
+// A cloud doc is owned by the authenticated subject; the room id is the
+// Y.Doc guid and the server resolves it to `subject:${userId}:rooms:${room}`.
+// Both browser apps and the daemon use this one builder.
+export { roomWsUrl } from './document/transport.js';

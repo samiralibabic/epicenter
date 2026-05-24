@@ -58,7 +58,7 @@ import { createYjsFileSystem } from '@epicenter/filesystem';
 
 export const fs = createYjsFileSystem(
   workspace.tables.files,
-  workspace.documents.files.content,
+  workspace.tables.files.documents.content,
 );
 
 await fs.mkdir('/docs');

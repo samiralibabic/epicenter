@@ -10,27 +10,13 @@
  * Background streaming is free: each conversation has its own chat instance.
  * Switching away from a streaming conversation doesn't stop it.
  *
- * @example
- * ```svelte
- * <script>
- *   import { aiChatState } from '$lib/chat/chat-state.svelte';
- * </script>
- *
- * {#each aiChatState.conversations as conv (conv.id)}
- *   <button onclick={() => aiChatState.switchTo(conv.id)}>
- *     {conv.title}
- *   </button>
- * {/each}
- *
- * {#each aiChatState.active?.messages ?? [] as message (message.id)}
- *   <ChatBubble {message} />
- * {/each}
- * ```
+ * Components read this through `workspace.state.aiChat`.
  */
 
+import type { AuthClient } from '@epicenter/auth';
 import { AiChatHttpError } from '@epicenter/constants/ai-chat-errors';
-import { fromTable } from '@epicenter/svelte';
-import { createAiChatFetch } from '@epicenter/svelte/auth';
+import { APP_URLS } from '@epicenter/constants/vite';
+import { createAiChatFetch, fromTable } from '@epicenter/svelte';
 import { createChat, fetchServerSentEvents } from '@tanstack/ai-svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import type { JsonValue } from 'wellcrafted/json';
@@ -46,8 +32,8 @@ import {
 	TAB_MANAGER_SYSTEM_PROMPT,
 } from '$lib/chat/system-prompt';
 import { toUiMessage } from '$lib/chat/ui-message';
-import { auth, workspace, workspaceAiTools } from '$lib/client';
-import { getDeviceId } from '$lib/device/device-id';
+import type { SessionAiTools } from '$lib/session.svelte';
+import type { TabManagerBrowser } from '$lib/tab-manager/extension';
 import {
 	type ChatMessageId,
 	type Conversation,
@@ -56,30 +42,33 @@ import {
 	generateConversationId,
 } from '$lib/workspace';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// State Factory
-// ─────────────────────────────────────────────────────────────────────────────
-
-function createAiChatState() {
+export function createAiChatState({
+	auth,
+	tabManager,
+	sessionAiTools,
+}: {
+	auth: AuthClient;
+	tabManager: TabManagerBrowser;
+	sessionAiTools: SessionAiTools;
+}) {
 	// ── Conversation List (Y.Doc-backed) ──────────────────────────────
 
-	const conversationsMap = fromTable(workspace.tables.conversations);
+	const conversationsMap = fromTable(tabManager.tables.conversations);
 	const conversations = $derived(
-		[...conversationsMap.values()]
-			.sort((a, b) => b.updatedAt - a.updatedAt),
+		[...conversationsMap.values()].sort((a, b) => b.updatedAt - a.updatedAt),
 	);
 
 	/**
 	 * Ensure at least one conversation exists.
 	 *
-	 * Called after persistence loads. Safe to call multiple times —
-	 * only creates if truly empty.
+	 * Called after persistence loads. Safe to call multiple times because
+	 * it only creates if truly empty.
 	 */
 	function ensureDefaultConversation(): ConversationId | undefined {
 		if (conversations.length > 0) return undefined;
 		const id = generateConversationId();
 		const now = Date.now();
-		workspace.tables.conversations.set({
+		tabManager.tables.conversations.set({
 			id,
 			title: 'New Chat',
 			provider: DEFAULT_PROVIDER,
@@ -98,7 +87,7 @@ function createAiChatState() {
 		conversationId: ConversationId,
 		patch: Partial<Omit<Conversation, 'id'>>,
 	) {
-		workspace.tables.conversations.update(conversationId, {
+		tabManager.tables.conversations.update(conversationId, {
 			...patch,
 			updatedAt: Date.now(),
 		});
@@ -106,7 +95,7 @@ function createAiChatState() {
 
 	/** Load persisted messages for a conversation from Y.Doc. */
 	function loadMessages(conversationId: ConversationId) {
-		return workspace.tables.chatMessages
+		return tabManager.tables.chatMessages
 			.filter((m) => m.conversationId === conversationId)
 			.sort((a, b) => a.createdAt - b.createdAt)
 			.map(toUiMessage);
@@ -114,15 +103,11 @@ function createAiChatState() {
 
 	// ── Handle Registry ──────────────────────────────────────────────
 
-	/** Per-conversation handle projections (reactive — read in templates). */
+	/** Per-conversation handle projections used reactively in templates. */
 	const handles = new SvelteMap<
 		ConversationId,
 		ReturnType<typeof createConversationHandle>
 	>();
-
-	/** Internal lifecycle closures — not exposed on ConversationHandle. */
-	const destroyFns = new Map<ConversationId, () => void>();
-	const refreshFns = new Map<ConversationId, () => void>();
 
 	// ── Conversation Handle Factory ──────────────────────────────────
 
@@ -144,28 +129,25 @@ function createAiChatState() {
 
 		const chat = createChat({
 			initialMessages: loadMessages(conversationId),
-			tools: workspaceAiTools.tools,
-			connection: fetchServerSentEvents(
-				() => `${remoteServerUrl.current}/ai/chat`,
-				async () => {
-					const deviceId = await getDeviceId();
-					return {
-						fetchClient: createAiChatFetch(auth.fetch),
-						body: {
-							data: {
-								provider: metadata?.provider ?? DEFAULT_PROVIDER,
-								model: metadata?.model ?? DEFAULT_MODEL,
-								conversationId,
-								systemPrompts: [
-									buildDeviceConstraints(deviceId),
-									metadata?.systemPrompt ?? TAB_MANAGER_SYSTEM_PROMPT,
-								],
-								tools: workspaceAiTools.definitions,
-							},
+			tools: sessionAiTools.tools,
+			connection: fetchServerSentEvents(`${APP_URLS.API}/ai/chat`, async () => {
+				const deviceId = tabManager.installationId;
+				return {
+					fetchClient: createAiChatFetch(auth.fetch),
+					body: {
+						data: {
+							provider: metadata?.provider ?? DEFAULT_PROVIDER,
+							model: metadata?.model ?? DEFAULT_MODEL,
+							conversationId,
+							systemPrompts: [
+								buildDeviceConstraints(deviceId),
+								metadata?.systemPrompt ?? TAB_MANAGER_SYSTEM_PROMPT,
+							],
+							tools: sessionAiTools.definitions,
 						},
-					};
-				},
-			),
+					},
+				};
+			}),
 			onError: (err) => {
 				console.error(
 					'[ai-chat] stream error:',
@@ -175,7 +157,7 @@ function createAiChatState() {
 				);
 			},
 			onFinish: (message) => {
-				workspace.tables.chatMessages.set({
+				tabManager.tables.chatMessages.set({
 					id: message.id as ChatMessageId,
 					conversationId,
 					role: 'assistant',
@@ -185,13 +167,6 @@ function createAiChatState() {
 				});
 				updateConversation(conversationId, {});
 			},
-		});
-
-		// Register internal lifecycle closures
-		destroyFns.set(conversationId, () => chat.stop());
-		refreshFns.set(conversationId, () => {
-			if (chat.isLoading) return;
-			chat.setMessages(loadMessages(conversationId));
 		});
 
 		return {
@@ -307,7 +282,7 @@ function createAiChatState() {
 			// ── Derived convenience ──
 
 			get lastMessagePreview() {
-				const msgs = workspace.tables.chatMessages
+				const msgs = tabManager.tables.chatMessages
 					.filter((m) => m.conversationId === conversationId)
 					.sort((a, b) => b.createdAt - a.createdAt);
 				const last = msgs[0];
@@ -340,7 +315,7 @@ function createAiChatState() {
 					id: userMessageId,
 				});
 
-				workspace.tables.chatMessages.set({
+				tabManager.tables.chatMessages.set({
 					id: userMessageId,
 					conversationId,
 					role: 'user',
@@ -360,13 +335,28 @@ function createAiChatState() {
 			reload() {
 				const lastMessage = chat.messages.at(-1);
 				if (lastMessage?.role === 'assistant') {
-					workspace.tables.chatMessages.delete(lastMessage.id as ChatMessageId);
+					tabManager.tables.chatMessages.delete(
+						lastMessage.id as ChatMessageId,
+					);
 				}
 				void chat.reload();
 			},
 
 			stop() {
 				chat.stop();
+			},
+
+			/**
+			 * Reload messages from the Y.Doc into the chat instance.
+			 * Skips while a stream is in flight (`isLoading`) to avoid the
+			 * observer racing the chat's own message append: the user message
+			 * is written to Y.Doc immediately after `chat.sendMessage`, and if
+			 * this fired during the stream it would feed Svelte two copies of
+			 * the same id and crash.
+			 */
+			refreshFromDoc() {
+				if (chat.isLoading) return;
+				chat.setMessages(loadMessages(conversationId));
 			},
 
 			approveToolCall(approvalId: string) {
@@ -391,9 +381,7 @@ function createAiChatState() {
 
 	/** Stop client and remove the handle for a conversation. */
 	function destroyConversation(id: ConversationId) {
-		destroyFns.get(id)?.();
-		destroyFns.delete(id);
-		refreshFns.delete(id);
+		handles.get(id)?.stop();
 		handles.delete(id);
 	}
 
@@ -401,7 +389,7 @@ function createAiChatState() {
 	 * Sync handles with the conversationsMap.
 	 *
 	 * Creates handles for new conversation IDs, destroys handles
-	 * for deleted IDs. Existing handles survive — their chat instance
+	 * for deleted IDs. Existing handles survive, so their chat instance
 	 * and ephemeral state persist.
 	 */
 	function reconcileHandles() {
@@ -425,19 +413,22 @@ function createAiChatState() {
 
 	// ── Observers ────────────────────────────────────────────────────────────
 
-	const _unobserveConversations = workspace.tables.conversations.observe(() => {
-		reconcileHandles();
-	});
-	const _unobserveChatMessages = workspace.tables.chatMessages.observe(() => {
-		refreshFns.get(activeConversationId)?.();
+	const _unobserveConversations = tabManager.tables.conversations.observe(
+		() => {
+			reconcileHandles();
+		},
+	);
+	const _unobserveChatMessages = tabManager.tables.chatMessages.observe(() => {
+		handles.get(activeConversationId)?.refreshFromDoc();
 	});
 
 	// Initialize after persistence loads
-	void workspace.whenReady.then(() => {
+	void tabManager.idb.whenLoaded.then(() => {
 		reconcileHandles();
 		const newId = ensureDefaultConversation();
-		if (conversations.length > 0) {
-			activeConversationId = newId ?? conversations[0].id;
+		const [firstConversation] = conversations;
+		if (firstConversation) {
+			activeConversationId = newId ?? firstConversation.id;
 		}
 	});
 
@@ -445,22 +436,27 @@ function createAiChatState() {
 
 	// ── Conversation CRUD ────────────────────────────────────────────
 
-	function createConversation(opts?: {
+	function createConversation({
+		title = 'New Chat',
+		parentId,
+		sourceMessageId,
+		systemPrompt,
+	}: {
 		title?: string;
 		parentId?: ConversationId;
 		sourceMessageId?: ChatMessageId;
 		systemPrompt?: string;
-	}): ConversationId {
+	} = {}): ConversationId {
 		const id = generateConversationId();
 		const now = Date.now();
 		const current = handles.get(activeConversationId);
 
-		workspace.tables.conversations.set({
+		tabManager.tables.conversations.set({
 			id,
-			title: opts?.title ?? 'New Chat',
-			parentId: opts?.parentId,
-			sourceMessageId: opts?.sourceMessageId,
-			systemPrompt: opts?.systemPrompt,
+			title,
+			parentId,
+			sourceMessageId,
+			systemPrompt,
 			provider: current?.provider ?? DEFAULT_PROVIDER,
 			model: current?.model ?? DEFAULT_MODEL,
 			createdAt: now,
@@ -474,24 +470,24 @@ function createAiChatState() {
 
 	function switchConversation(conversationId: ConversationId) {
 		activeConversationId = conversationId;
-		refreshFns.get(conversationId)?.();
+		handles.get(conversationId)?.refreshFromDoc();
 	}
 
 	function deleteConversation(conversationId: ConversationId) {
 		destroyConversation(conversationId);
 
-		const msgs = workspace.tables.chatMessages
+		const msgs = tabManager.tables.chatMessages
 			.getAllValid()
 			.filter((m) => m.conversationId === conversationId);
-		workspace.batch(() => {
+		tabManager.batch(() => {
 			for (const m of msgs) {
-				workspace.tables.chatMessages.delete(m.id);
+				tabManager.tables.chatMessages.delete(m.id);
 			}
-			workspace.tables.conversations.delete(conversationId);
+			tabManager.tables.conversations.delete(conversationId);
 		});
 
 		if (activeConversationId === conversationId) {
-			const remaining = workspace.tables.conversations
+			const remaining = tabManager.tables.conversations
 				.getAllValid()
 				.sort((a, b) => b.updatedAt - a.updatedAt);
 			const first = remaining[0];
@@ -515,6 +511,15 @@ function createAiChatState() {
 	);
 
 	return {
+		[Symbol.dispose]() {
+			_unobserveConversations();
+			_unobserveChatMessages();
+			conversationsMap[Symbol.dispose]();
+			for (const id of handles.keys()) {
+				destroyConversation(id);
+			}
+		},
+
 		get active() {
 			return handles.get(activeConversationId);
 		},
@@ -537,24 +542,17 @@ function createAiChatState() {
 			switchConversation(conversationId);
 		},
 
-		get availableProviders() {
-			return AVAILABLE_PROVIDERS;
-		},
+		availableProviders: AVAILABLE_PROVIDERS,
 
 		modelsForProvider(providerName: string): readonly string[] {
 			return PROVIDER_MODELS[providerName as Provider] ?? [];
 		},
 
 		/** URL to the billing page for credit upgrades. */
-		get billingUrl() {
-			return `${remoteServerUrl.current}/billing`;
-		},
+		billingUrl: `${APP_URLS.API}/billing`,
 	};
 }
 
-export const aiChatState = createAiChatState();
-
 /** A reactive handle for a single conversation backed by `createChat`. */
-export type ConversationHandle = NonNullable<
-	ReturnType<(typeof aiChatState)['get']>
->;
+type AiChatState = ReturnType<typeof createAiChatState>;
+export type ConversationHandle = NonNullable<ReturnType<AiChatState['get']>>;

@@ -53,14 +53,14 @@
 	import { redo, undo, ySyncPlugin, yUndoPlugin } from 'y-prosemirror';
 	import type * as Y from 'yjs';
 
-	const taskList: NodeSpec = {
+	const taskList = {
 		group: 'block',
 		content: 'taskItem+',
 		parseDOM: [{ tag: 'ul.task-list' }],
 		toDOM: () => ['ul', { class: 'task-list' }, 0],
-	};
+	} satisfies NodeSpec;
 
-	const taskItem: NodeSpec = {
+	const taskItem = {
 		content: 'paragraph block*',
 		attrs: { checked: { default: false } },
 		parseDOM: [
@@ -91,14 +91,14 @@
 			],
 			['div', 0],
 		],
-	};
+	} satisfies NodeSpec;
 
-	const underline: MarkSpec = {
+	const underline = {
 		parseDOM: [{ tag: 'u' }, { style: 'text-decoration=underline' }],
 		toDOM: () => ['u', 0],
-	};
+	} satisfies MarkSpec;
 
-	const strike: MarkSpec = {
+	const strike = {
 		parseDOM: [
 			{ tag: 's' },
 			{ tag: 'del' },
@@ -106,7 +106,7 @@
 			{ style: 'text-decoration=line-through' },
 		],
 		toDOM: () => ['s', 0],
-	};
+	} satisfies MarkSpec;
 
 	const nodes = addListNodes(
 		basicSchema.spec.nodes.append({ taskList, taskItem }),
@@ -375,23 +375,21 @@
 	});
 </script>
 
-{#snippet toggleButton(pressed: boolean, onToggle: () => void, icon: typeof BoldIcon, label: string)}
+{#snippet toggleButton(pressed: boolean, onToggle: () => void, Icon: typeof BoldIcon, label: string)}
 	<Tooltip.Root>
 		<Tooltip.Trigger>
 			<Toggle size="sm" {pressed} onPressedChange={onToggle}>
-				<svelte:component this={icon} class="size-4" />
+				<Icon class="size-4" />
 			</Toggle>
 		</Tooltip.Trigger>
 		<Tooltip.Content>{label}</Tooltip.Content>
 	</Tooltip.Root>
 {/snippet}
 
-{#snippet groupItem(value: string, icon: typeof BoldIcon, label: string)}
+{#snippet groupItem(value: string, Icon: typeof BoldIcon, label: string)}
 	<Tooltip.Root>
 		<Tooltip.Trigger>
-			<ToggleGroup.Item {value}>
-				<svelte:component this={icon} class="size-4" />
-			</ToggleGroup.Item>
+			<ToggleGroup.Item {value}> <Icon class="size-4" /> </ToggleGroup.Item>
 		</Tooltip.Trigger>
 		<Tooltip.Content>{label}</Tooltip.Content>
 	</Tooltip.Root>

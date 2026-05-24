@@ -10,12 +10,11 @@
  */
 import * as Y from 'yjs';
 import { createEncryptedYkvLww } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww-encrypted';
-import { YKeyValueLww } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww';
-import {
-	generateEncryptionKey,
-	type EncryptedBlob,
-} from '../../../packages/workspace/src/shared/crypto';
-import type { YKeyValueLwwEntry } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww';
+import { YKeyValueLww } from '../../../packages/workspace/src/document/y-keyvalue/y-keyvalue-lww';
+import type { YKeyValueLwwEntry } from '../../../packages/workspace/src/document/y-keyvalue/y-keyvalue-lww';
+
+const generateEncryptionKey = (): Uint8Array =>
+	crypto.getRandomValues(new Uint8Array(32));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -52,14 +51,15 @@ const makeRow = (i: number): Row => ({
 header('TEST 1: Encryption overhead per entry (100 rows)');
 
 const key = generateEncryptionKey();
+const keyring = new Map([[1, key]]);
 
 const plainDoc = new Y.Doc({ guid: 'plain' });
 const plainArr = plainDoc.getArray<YKeyValueLwwEntry<Row>>('data');
 const plainKv = new YKeyValueLww<Row>(plainArr);
 
 const encDoc = new Y.Doc({ guid: 'encrypted' });
-const encArr = encDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const encKv = createEncryptedYkvLww<Row>(encArr, { key });
+const encKv = createEncryptedYkvLww<Row>(encDoc, 'data');
+encKv.activateEncryption(keyring);
 
 for (let i = 0; i < 100; i++) {
 	const row = makeRow(i);
@@ -81,8 +81,8 @@ console.log(`Per-entry overhead:     ~${Math.round((encSize - plainSize) / 100)}
 header('TEST 2: Tombstones with gc:true — add 1000, delete all, repeat 5x');
 
 const gcDoc = new Y.Doc({ guid: 'gc-true', gc: true });
-const gcArr = gcDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const gcKv = createEncryptedYkvLww<Row>(gcArr, { key });
+const gcKv = createEncryptedYkvLww<Row>(gcDoc, 'data');
+gcKv.activateEncryption(keyring);
 
 for (let cycle = 0; cycle < 5; cycle++) {
 	for (let i = 0; i < 1_000; i++) {
@@ -92,7 +92,7 @@ for (let cycle = 0; cycle < 5; cycle++) {
 		gcKv.delete(`item_${i}`);
 	}
 	console.log(
-		`  Cycle ${cycle + 1}: ${fmt(size(gcDoc)).padStart(10)}  (${gcKv.readableEntryCount} active)`,
+		`  Cycle ${cycle + 1}: ${fmt(size(gcDoc)).padStart(10)}  (${gcKv.size} active)`,
 	);
 }
 
@@ -103,8 +103,8 @@ for (let cycle = 0; cycle < 5; cycle++) {
 header('TEST 3: Tombstones with gc:false — add 1000, delete all, repeat 5x');
 
 const noGcDoc = new Y.Doc({ guid: 'gc-false', gc: false });
-const noGcArr = noGcDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const noGcKv = createEncryptedYkvLww<Row>(noGcArr, { key });
+const noGcKv = createEncryptedYkvLww<Row>(noGcDoc, 'data');
+noGcKv.activateEncryption(keyring);
 
 for (let cycle = 0; cycle < 5; cycle++) {
 	for (let i = 0; i < 1_000; i++) {
@@ -114,7 +114,7 @@ for (let cycle = 0; cycle < 5; cycle++) {
 		noGcKv.delete(`item_${i}`);
 	}
 	console.log(
-		`  Cycle ${cycle + 1}: ${fmt(size(noGcDoc)).padStart(10)}  (${noGcKv.readableEntryCount} active)`,
+		`  Cycle ${cycle + 1}: ${fmt(size(noGcDoc)).padStart(10)}  (${noGcKv.size} active)`,
 	);
 }
 
@@ -125,8 +125,8 @@ for (let cycle = 0; cycle < 5; cycle++) {
 header('TEST 4: 50 keys × 100 updates each (gc:true, encrypted)');
 
 const updateDoc = new Y.Doc({ guid: 'updates', gc: true });
-const updateArr = updateDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const updateKv = createEncryptedYkvLww<Row>(updateArr, { key });
+const updateKv = createEncryptedYkvLww<Row>(updateDoc, 'data');
+updateKv.activateEncryption(keyring);
 
 // Initial insert
 for (let i = 0; i < 50; i++) {
@@ -147,8 +147,8 @@ console.log(`After 5,000 updates:    ${fmt(size(updateDoc))}`);
 
 // Fresh doc with same final data
 const freshUpdateDoc = new Y.Doc({ guid: 'updates-fresh', gc: true });
-const freshUpdateArr = freshUpdateDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const freshUpdateKv = createEncryptedYkvLww<Row>(freshUpdateArr, { key });
+const freshUpdateKv = createEncryptedYkvLww<Row>(freshUpdateDoc, 'data');
+freshUpdateKv.activateEncryption(keyring);
 for (let i = 0; i < 50; i++) {
 	freshUpdateKv.set(`item_${i}`, {
 		...makeRow(i),
@@ -167,8 +167,8 @@ console.log(
 header('TEST 5: Interleaved add 20 / remove 10, 50 cycles (gc:true, encrypted)');
 
 const churnDoc = new Y.Doc({ guid: 'churn', gc: true });
-const churnArr = churnDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const churnKv = createEncryptedYkvLww<Row>(churnArr, { key });
+const churnKv = createEncryptedYkvLww<Row>(churnDoc, 'data');
+churnKv.activateEncryption(keyring);
 
 let nextId = 0;
 let activeKeys: string[] = [];
@@ -194,8 +194,8 @@ for (let cycle = 0; cycle < 50; cycle++) {
 
 // Fresh doc with same final data
 const freshChurnDoc = new Y.Doc({ guid: 'churn-fresh', gc: true });
-const freshChurnArr = freshChurnDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const freshChurnKv = createEncryptedYkvLww<Row>(freshChurnArr, { key });
+const freshChurnKv = createEncryptedYkvLww<Row>(freshChurnDoc, 'data');
+freshChurnKv.activateEncryption(keyring);
 for (const k of activeKeys) {
 	freshChurnKv.set(k, makeRow(Number(k.split('_')[1])));
 }
@@ -211,8 +211,8 @@ console.log(
 header('TEST 6: Scale — 10,000 encrypted rows');
 
 const scaleDoc = new Y.Doc({ guid: 'scale', gc: true });
-const scaleArr = scaleDoc.getArray<YKeyValueLwwEntry<EncryptedBlob | Row>>('data');
-const scaleKv = createEncryptedYkvLww<Row>(scaleArr, { key });
+const scaleKv = createEncryptedYkvLww<Row>(scaleDoc, 'data');
+scaleKv.activateEncryption(keyring);
 
 const scalePlainDoc = new Y.Doc({ guid: 'scale-plain', gc: true });
 const scalePlainArr = scalePlainDoc.getArray<YKeyValueLwwEntry<Row>>('data');

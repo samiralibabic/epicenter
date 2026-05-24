@@ -2,14 +2,14 @@ import { createPersistedState } from '@epicenter/svelte';
 import { type } from 'arktype';
 import { defineCommand } from 'just-bash';
 import { Ok, tryAsync } from 'wellcrafted/result';
-import { bash, fs } from '$lib/client';
-import { fsState } from '$lib/state/fs-state.svelte';
+import type { OpensidianBrowser } from '$lib/opensidian/browser';
+import type { FilesState } from '$lib/state/files-state.svelte';
 
 /**
  * A single entry in the terminal history.
  *
  * Input entries show the command the user typed (rendered with a `$` prompt).
- * Output entries carry the result of executing that command—stdout, stderr,
+ * Output entries carry the result of executing that command: stdout, stderr,
  * and the process exit code.
  */
 type TerminalEntry =
@@ -17,27 +17,34 @@ type TerminalEntry =
 	| { type: 'output'; stdout: string; stderr: string; exitCode: number };
 
 /**
- * Reactive terminal state singleton.
+ * Reactive terminal state factory.
  *
- * Follows the same factory pattern as `fs-state.svelte.ts`: a factory
+ * Follows the same factory pattern as `files-state.svelte.ts`: a factory
  * function creates all `$state` and exposes a public API via a returned
- * object with getters. Components import the singleton and read directly.
+ * object with getters. The session exposes it at
+ * `opensidian.state.terminal`.
  *
  * Manages:
  * - **History**: scrollable list of input/output entries
  * - **Command recall**: arrow-up/down cycles through previously executed commands
- * - **Execution**: delegates to `bash.exec()` from workspace.ts
+ * - **Execution**: delegates to `bash.exec()` from the opensidian binding
  * - **Visibility**: open/closed state for the terminal panel
  *
  * @example
  * ```svelte
  * <script>
- *   import { terminalState } from '$lib/state/terminal-state.svelte';
- *   terminalState.open // reactive boolean
+ *   const opensidian = requireOpensidian();
+ *   opensidian.state.terminal.open // reactive boolean
  * </script>
  * ```
  */
-function createTerminalState() {
+export function createTerminalState({
+	files,
+	binding,
+}: {
+	files: FilesState;
+	binding: OpensidianBrowser;
+}) {
 	const openState = createPersistedState({
 		key: 'opensidian.terminal-open',
 		schema: type('boolean'),
@@ -49,11 +56,11 @@ function createTerminalState() {
 	let running = $state(false);
 
 	// ── Custom commands ──────────────────────────────────────────────
-	// Registered once at singleton creation via bash.registerCommand().
+	// Registered once for the signed-in session via bash.registerCommand().
 	// Uses registerCommand() instead of the constructor's customCommands
-	// option to avoid a circular dependency (workspace → fs-state).
+	// option to avoid a circular dependency from workspace construction to files state.
 
-	bash.registerCommand(
+	binding.bash.registerCommand(
 		defineCommand('open', async (args) => {
 			const path = args[0];
 			if (!path)
@@ -62,19 +69,19 @@ function createTerminalState() {
 					stderr: 'Usage: open <path>',
 					exitCode: 1,
 				};
-			const id = fs.lookupId(path);
+			const id = binding.fs.lookupId(path);
 			if (!id)
 				return {
 					stdout: '',
 					stderr: `No such file: ${path}`,
 					exitCode: 1,
 				};
-			fsState.selectFile(id);
+			files.selectFile(id);
 			return { stdout: `Opened ${path}\n`, stderr: '', exitCode: 0 };
 		}),
 	);
 	const WELCOME_MESSAGE = [
-		'Welcome to Opensidian\u2014notes on CRDTs with a bash terminal.',
+		'Welcome to Opensidian: notes on CRDTs with a bash terminal.',
 		'',
 		'Try these:',
 		'  echo "# Hello HN" > /hello.md    create a file',
@@ -139,8 +146,8 @@ function createTerminalState() {
 		 *
 		 * @example
 		 * ```typescript
-		 * await terminalState.exec('echo "hello" > /greeting.md');
-		 * await terminalState.exec('cat /greeting.md');
+		 * await terminal.exec('echo "hello" > /greeting.md');
+		 * await terminal.exec('cat /greeting.md');
 		 * // history now has 4 entries: input, output, input, output
 		 * ```
 		 */
@@ -152,7 +159,7 @@ function createTerminalState() {
 			historyIndex = -1;
 			const { data: entry } = await tryAsync({
 				try: async () => {
-					const result = await bash.exec(command);
+					const result = await binding.bash.exec(command);
 					return {
 						type: 'output' as const,
 						stdout: result.stdout,
@@ -202,13 +209,5 @@ function createTerminalState() {
 			historyIndex = -1;
 			return undefined;
 		},
-
-		/** Clear all terminal output history. */
-		clear() {
-			history = [];
-		},
-
 	};
 }
-
-export const terminalState = createTerminalState();

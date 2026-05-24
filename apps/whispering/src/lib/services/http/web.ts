@@ -3,7 +3,7 @@ import { Err, tryAsync } from 'wellcrafted/result';
 import type { HttpService } from '.';
 import { HttpError } from './types';
 
-export function createHttpServiceWeb(): HttpService {
+export function createHttpServiceWeb() {
 	return {
 		async post({ body, url, schema, headers }) {
 			const { data: response, error: responseError } = await tryAsync({
@@ -45,5 +45,5 @@ export function createHttpServiceWeb(): HttpService {
 			});
 			return parseResult;
 		},
-	};
+	} satisfies HttpService;
 }

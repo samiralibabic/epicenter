@@ -6,7 +6,7 @@
 
 ## Overview
 
-A shared `createAuthState` factory that provides auth state management (session, tokens, sign-in/out) across all Epicenter client apps—web SPAs (honeycrisp, opensidian) and the Chrome extension (tab-manager). Platform differences (storage, OAuth flow) are injected via adapters, so the core auth logic is written once.
+A shared `createAuthState` factory that provides auth state management (session, tokens, sign-in/out) across all Epicenter client apps: web SPAs (honeycrisp, opensidian) and the Chrome extension (tab-manager). Platform differences (storage, OAuth flow) are injected via adapters, so the core auth logic is written once.
 
 ## Motivation
 
@@ -25,10 +25,10 @@ export default createWorkspace(honeycrisp).withExtension(
 Tab-manager has a full auth implementation in `auth.svelte.ts`, but it's coupled to Chrome extension APIs:
 
 ```typescript
-// Token storage — chrome.storage via WXT
-const authToken = createStorageState('local:authToken', { ... });
+// Token storage: chrome.storage via WXT
+const authToken = createStorageState('local:auth.token', { ... });
 
-// Google OAuth — chrome.identity API
+// Google OAuth: chrome.identity API
 const responseUrl = await browser.identity.launchWebAuthFlow({ ... });
 
 // Form state co-located with auth state
@@ -86,7 +86,7 @@ Same factory, same phase machine, same API surface. Different adapters.
 | Workspace integration | `onSignedIn` / `onSignedOut` callbacks | Each app wires its own workspace (encryption, sync reconnect). Factory doesn't know about workspace internals. |
 | Sync extension | Added to workspace client, reads `authState.token` | The sync extension's `getToken` already supports `undefined` (open mode). When signed out, sync runs unauthenticated or stays offline. |
 | AuthForm component | Per-app Svelte component using shadcn-svelte | Each app may style/position differently. Component owns form state, calls `authState.signIn({...})` with explicit args. |
-| Tab-manager migration | Deferred (Phase 3) | Get honeycrisp + opensidian working first. Migrate tab-manager later as a refactor—no user-facing changes. |
+| Tab-manager migration | Deferred (Phase 3) | Get honeycrisp + opensidian working first. Migrate tab-manager later as a refactor, with no user-facing changes. |
 
 ## Architecture
 
@@ -183,20 +183,20 @@ No gates, no paywalls.
 
 ### Phase 1: Shared Auth Factory + Honeycrisp Integration
 
-- [x] **1.1** Create `apps/honeycrisp/src/lib/auth/types.ts` — `AuthStorageAdapter` type, `AuthUser` schema, `AuthPhase` type, `AuthError` definitions
-- [x] **1.2** Create `apps/honeycrisp/src/lib/auth/local-storage-adapter.svelte.ts` — implements `AuthStorageAdapter` using `createPersistedState` from `@epicenter/svelte`
-- [x] **1.3** Create `apps/honeycrisp/src/lib/auth/create-auth-state.svelte.ts` — the factory: accepts config with adapters, returns auth state API. Phase machine, Better Auth client, session validation, token refresh—all the shared logic from tab-manager but with explicit parameters and injected storage
-- [x] **1.4** Create `apps/honeycrisp/src/lib/auth/index.ts` — instantiate `createAuthState` with honeycrisp-specific config (localStorage adapter, workspace callbacks)
+- [x] **1.1** Create `apps/honeycrisp/src/lib/auth/types.ts`: `AuthStorageAdapter` type, `AuthUser` schema, `AuthPhase` type, `AuthError` definitions
+- [x] **1.2** Create `apps/honeycrisp/src/lib/auth/local-storage-adapter.svelte.ts`: implements `AuthStorageAdapter` using `createPersistedState` from `@epicenter/svelte`
+- [x] **1.3** Create `apps/honeycrisp/src/lib/auth/create-auth-state.svelte.ts`: the factory accepts config with adapters and returns auth state API. Phase machine, Better Auth client, session validation, and token refresh are the shared logic from tab-manager, with explicit parameters and injected storage.
+- [x] **1.4** Create `apps/honeycrisp/src/lib/auth/index.ts`: instantiate `createAuthState` with honeycrisp-specific config (localStorage adapter, workspace callbacks)
 - [x] **1.5** Add `better-auth` dependency to honeycrisp `package.json`
 - [x] **1.6** Update honeycrisp workspace client (`workspace/client.ts`) to include sync extension with `getToken: async () => authState.token`
-- [x] **1.7** Create `apps/honeycrisp/src/lib/components/AuthForm.svelte` — login/signup form with local form state, calls `authState.signIn({email, password})` etc. Uses `@epicenter/ui` Field/Input/Button
-- [x] **1.8** Create `apps/honeycrisp/src/lib/components/AccountPopover.svelte` — cloud/sync status indicator with sign-in trigger and sign-out button (inspired by tab-manager's `SyncStatusIndicator`)
+- [x] **1.7** Create `apps/honeycrisp/src/lib/components/AuthForm.svelte`: login/signup form with local form state, calls `authState.signIn({email, password})` etc. Uses `@epicenter/ui` Field/Input/Button
+- [x] **1.8** Create `apps/honeycrisp/src/lib/components/AccountPopover.svelte`: cloud/sync status indicator with sign-in trigger and sign-out button (inspired by tab-manager's `SyncStatusIndicator`)
 - [x] **1.9** Wire `AccountPopover` into honeycrisp's layout or sidebar
 - [ ] **1.10** Test: app works without signing in (local-only), sign in activates sync
 
 ### Phase 2: Opensidian Integration
 
-- [x] **2.1** Copy auth files from honeycrisp to opensidian (types, adapter, factory, index) — adjust workspace callbacks for opensidian's workspace instance
+- [x] **2.1** Copy auth files from honeycrisp to opensidian (types, adapter, factory, index): adjust workspace callbacks for opensidian's workspace instance
 - [x] **2.2** Add `better-auth`, `wellcrafted`, `@epicenter/svelte` dependencies to opensidian `package.json`
 - [x] **2.3** Update opensidian workspace (`workspace.ts`) to include sync extension
 - [x] **2.4** Create opensidian `AuthForm.svelte` and `AccountPopover.svelte`
@@ -205,8 +205,8 @@ No gates, no paywalls.
 
 ### Phase 3: Tab-Manager Migration (deferred)
 
-- [ ] **3.1** Create `apps/tab-manager/src/lib/auth/chrome-storage-adapter.svelte.ts` — wraps existing `createStorageState` into `AuthStorageAdapter`
-- [ ] **3.2** Create `apps/tab-manager/src/lib/auth/chrome-identity-google.ts` — extracts `signInWithGoogle` into a standalone function matching the adapter signature
+- [ ] **3.1** Create `apps/tab-manager/src/lib/auth/chrome-storage-adapter.svelte.ts`: wraps existing `createStorageState` into `AuthStorageAdapter`
+- [ ] **3.2** Create `apps/tab-manager/src/lib/auth/chrome-identity-google.ts`: extracts `signInWithGoogle` into a standalone function matching the adapter signature
 - [ ] **3.3** Refactor `auth.svelte.ts` to use `createAuthState` with chrome-specific adapters
 - [ ] **3.4** Update `AuthForm.svelte` to use local form state instead of `authState.email` etc.
 - [ ] **3.5** Verify cross-context sync still works (popup ↔ sidebar)
@@ -219,7 +219,7 @@ No gates, no paywalls.
 2. Auth state needs workspace callbacks (`onSignedIn` → `workspace.activateEncryption`)
 3. Both are singletons that reference each other
 
-Solution: Lazy references. The sync extension's `getToken` is a function that reads `authState.token` at call time (not at construction). The auth factory's `onSignedIn`/`onSignedOut` are callbacks that reference the workspace at call time. No circular import—just two modules that reference each other's exports through closures.
+Solution: Lazy references. The sync extension's `getToken` is a function that reads `authState.token` at call time (not at construction). The auth factory's `onSignedIn`/`onSignedOut` are callbacks that reference the workspace at call time. No circular import, just two modules that reference each other's exports through closures.
 
 ### Sign Out While Syncing
 
@@ -233,7 +233,7 @@ Solution: Lazy references. The sync extension's `getToken` is a function that re
 1. User tries to sign in, but the network is down
 2. Better Auth client returns an error
 3. Phase transitions to `signed-out` with error message
-4. App continues working locally—no data loss
+4. App continues working locally, with no data loss
 
 ### Token Expiry Mid-Session
 
@@ -251,15 +251,15 @@ Solution: Lazy references. The sync extension's `getToken` is a function that re
 
 2. **Should web apps support Google OAuth at launch?**
    - Web apps can use Better Auth's built-in redirect flow for Google sign-in (no custom code needed). The factory's optional `signInWithGoogle` callback is for overrides (like chrome.identity).
-   - **Recommendation**: Include Google sign-in in AuthForm from the start. Better Auth's `client.signIn.social({ provider: 'google' })` handles the redirect flow automatically for web apps. No adapter needed—just call it directly.
+   - **Recommendation**: Include Google sign-in in AuthForm from the start. Better Auth's `client.signIn.social({ provider: 'google' })` handles the redirect flow automatically for web apps. No adapter needed, just call it directly.
 
 3. **Should sync run in open mode when signed out, or stay offline?**
-   - Options: (a) sync connects without token (open mode—server decides), (b) sync stays offline until signed in
+   - Options: (a) sync connects without token (open mode, server decides), (b) sync stays offline until signed in
    - **Recommendation**: (b) Stay offline. These are personal data apps (notes, files). Open mode sync without auth would mean anyone with the URL could read/write. Only connect sync when authenticated.
 
-4. **Encryption activation on sign-in—should it block the UI?**
+4. **Encryption activation on sign-in: should it block the UI?**
    - `refreshEncryptionKey()` fetches the session to get the encryption key, then activates encryption. This is async.
-   - **Recommendation**: Don't block. Activate encryption in the background after sign-in. The workspace already handles the transition gracefully—unencrypted local data stays readable, and encryption activates for future writes.
+   - **Recommendation**: Don't block. Activate encryption in the background after sign-in. The workspace already handles the transition gracefully: unencrypted local data stays readable, and encryption activates for future writes.
 
 ## Success Criteria
 
@@ -275,14 +275,14 @@ Solution: Lazy references. The sync extension's `getToken` is a function that re
 
 ## References
 
-- `apps/tab-manager/src/lib/state/auth.svelte.ts` — existing auth implementation to adapt from
-- `apps/tab-manager/src/lib/components/AuthForm.svelte` — existing auth UI
-- `apps/tab-manager/src/lib/components/SyncStatusIndicator.svelte` — account popover pattern
-- `apps/tab-manager/src/lib/workspace.ts` — sync extension + `getToken` wiring
-- `packages/svelte-utils/src/createPersistedState.svelte.ts` — localStorage adapter for web
-- `packages/workspace/src/extensions/sync.ts` — sync extension factory
-- `packages/sync-client/src/provider.ts` — sync provider with token handling
-- `apps/api/src/app.ts` — Better Auth server config + trusted origins
+- `apps/tab-manager/src/lib/state/auth.svelte.ts`: existing auth implementation to adapt from
+- `apps/tab-manager/src/lib/components/AuthForm.svelte`: existing auth UI
+- `apps/tab-manager/src/lib/components/SyncStatusIndicator.svelte`: account popover pattern
+- `apps/tab-manager/src/lib/workspace.ts`: sync extension + `getToken` wiring
+- `packages/svelte-utils/src/createPersistedState.svelte.ts`: localStorage adapter for web
+- `packages/workspace/src/extensions/sync.ts`: sync extension factory
+- `packages/sync-client/src/provider.ts`: sync provider with token handling
+- `apps/api/src/app.ts`: Better Auth server config + trusted origins
 
 ## Review
 

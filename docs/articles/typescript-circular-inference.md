@@ -2,6 +2,8 @@
 
 I needed an API where one property's type depends on another property's inferred type. Something like this:
 
+> **Note:** The `defineWorkspace({ tables, providers, actions })` API shown below is from an earlier Epicenter iteration and no longer exists — the current primitive is `defineDocument((id) => ({ ydoc, tables, ... }))` with inline composition instead of the `providers` / `actions` callback chain. The TypeScript circular-inference problem this article teaches generalizes to any config API where one property's type depends on another's inferred type.
+
 ```typescript
 defineWorkspace({
 	tables: {

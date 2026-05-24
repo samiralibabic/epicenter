@@ -16,7 +16,7 @@
 	import { nanoid } from 'nanoid/non-secure';
 	import { onDestroy, onMount } from 'svelte';
 	import { extractErrorMessage } from 'wellcrafted/error';
-	import { Err, partitionResults, tryAsync } from 'wellcrafted/result';
+	import { partitionResults, tryAsync } from 'wellcrafted/result';
 	import { commandCallbacks } from '$lib/commands';
 	import TranscriptDialog from '$lib/components/copyable/TranscriptDialog.svelte';
 	import {
@@ -34,6 +34,7 @@
 	} from '$lib/constants/audio';
 	import { getShortcutDisplayLabel } from '$lib/constants/keyboard';
 	import { rpc } from '$lib/query';
+	import { WhisperingErr } from '$lib/result';
 	import { services } from '$lib/services';
 	import { desktopServices } from '$lib/services/desktop';
 	import { deviceConfig } from '$lib/state/device-config.svelte';
@@ -51,8 +52,6 @@
 		...rpc.audio.getPlaybackUrl(() => latestRecording?.id ?? '').options,
 		enabled: !!latestRecording?.id,
 	}));
-
-	const blobUrl = $derived(audioPlaybackUrlQuery.data);
 
 	const availableModes = $derived(
 		RECORDING_MODE_OPTIONS.filter((mode) => {
@@ -152,21 +151,20 @@
 					},
 				);
 			},
-			catch: (error) => Err(error),
+			catch: (error) =>
+				WhisperingErr({
+					title: '❌ Failed to set up drag drop listener',
+					description: extractErrorMessage(error),
+				}),
 		});
-		if (error) {
-			rpc.notify.error({
-				title: '❌ Failed to set up drag drop listener',
-				description: extractErrorMessage(error),
-			});
-		}
+		if (error) rpc.notify.error(error);
 	});
 
 	onDestroy(() => {
 		unlistenDragDrop?.();
 		// Clean up audio URL when component unmounts to prevent memory leaks
 		if (latestRecording?.id) {
-			services.db.recordings.revokeAudioUrl(latestRecording.id);
+			services.blobs.audio.revokeUrl(latestRecording.id);
 		}
 	});
 
@@ -376,7 +374,7 @@
 						description: 'Are you sure you want to delete this recording?',
 						confirm: { text: 'Delete', variant: 'destructive' },
 						onConfirm: () => {
-							services.db.recordings.revokeAudioUrl(latestRecording.id);
+							services.blobs.audio.revokeUrl(latestRecording.id);
 							recordings.delete(latestRecording.id);
 							rpc.notify.success({
 								title: 'Deleted recording!',
@@ -387,12 +385,12 @@
 				}}
 			/>
 
-			{#if blobUrl}
+			{#if audioPlaybackUrlQuery.data}
 				<audio
 					style="view-transition-name: {viewTransition.recording(
 						latestRecording.id,
 					).audio}"
-					src={blobUrl}
+					src={audioPlaybackUrlQuery.data}
 					controls
 					class="h-8 w-full"
 				></audio>

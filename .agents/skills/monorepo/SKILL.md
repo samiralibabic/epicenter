@@ -1,6 +1,6 @@
 ---
 name: monorepo
-description: Monorepo script commands, package boilerplate, and conventions for this codebase. Use when the user says "how do I run", "bun run", "build this", "run tests", "typecheck", "create a new package", or when running builds, tests, formatting, linting, type checking, or scaffolding new packages.
+description: 'Monorepo scripts, package boilerplate, conventions. Use when: "how do I run", "bun run", "build this", "run tests", "typecheck", "create a new package", linting, scaffolding packages.'
 metadata:
   author: epicenter
   version: '2.0'
@@ -10,8 +10,8 @@ metadata:
 
 ## Reference Repositories
 
-- [jsrepo](https://github.com/jsrepojs/jsrepo) — Package distribution for monorepos
-- [WXT](https://github.com/wxt-dev/wxt) — Browser extension framework (used by tab-manager app)
+- [jsrepo](https://github.com/jsrepojs/jsrepo) : Package distribution for monorepos
+- [WXT](https://github.com/wxt-dev/wxt) : Browser extension framework (used by tab-manager app)
 
 The monorepo uses consistent script naming conventions:
 
@@ -31,24 +31,32 @@ Use this pattern when you need to:
 | `bun lint`         | **Fix** lint issues (biome)                    | Development |
 | `bun lint:check`   | Check lint issues                              | CI          |
 | `bun typecheck`    | Type checking (tsc, svelte-check, astro check) | Both        |
+| `bun test`         | Run unit tests (`*.test.ts` only)              | Both        |
+| `bun bench`        | Run benchmarks (`*.bench.ts`; reports, no assertions) | Manual |
 
 ## Convention
 
 - No suffix = **fix** (modifies files)
 - `:check` suffix = check only (for CI, no modifications)
 - `typecheck` alone = type checking (separate concern, cannot auto-fix)
+- `test` runs only `*.test.ts`; `bench` runs only `*.bench.ts`. A file is
+  one or the other : never both. Benchmarks print reports; tests assert.
 
 ## Dev Scripts
 
-Every app uses explicit `dev:local` / `dev:remote` naming:
+Apps use either a single `dev` script (when there is only one sensible local
+workflow) or a `dev:local` alias (kept for symmetry with `:remote` db scripts).
+The suffix convention applies primarily to database commands:
 
 | Script | Meaning |
 | --- | --- |
-| `dev:local` | Local everything—local API, local secrets |
-| `dev:remote` | Local app, remote/prod resources |
-| `dev` | Alias for `dev:local` (convenience) |
+| `dev` | The default local workflow. May still require Infisical login for app secrets (e.g. API keys), but only ever talks to local infrastructure at runtime. |
+| `dev:local` | Used when an app keeps the `dev` -> `dev:local` alias for explicit naming. Equivalent to `dev`. |
+| `db:*:local` | Runs against local Postgres. Works without Infisical login. |
+| `db:*:remote` | Wraps with `infisical run --env=prod`. Production data; treat as admin. |
 
-Not every app has `dev:remote`—only add it when there's a real use case.
+There is no `dev:remote`. Production data is reached only through `:remote` db
+scripts and `deploy`, never through a development server.
 
 ## CLI (`epicenter`)
 
@@ -60,7 +68,7 @@ bun epicenter list files -C playground/opensidian-e2e
 ```
 
 The bare `epicenter` command (global install) defaults to `api.epicenter.so`.
-Config files read `process.env.EPICENTER_SERVER` with a prod fallback—the root
+Config files read `process.env.EPICENTER_SERVER` with a prod fallback:the root
 script sets it automatically.
 
 ## After Completing Code Changes
@@ -83,8 +91,6 @@ When creating a new package in `packages/`, follow this exact structure.
 {
   "name": "@epicenter/<package-name>",
   "version": "0.0.1",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -102,23 +108,26 @@ When creating a new package in `packages/`, follow this exact structure.
 
 Key conventions:
 
-- `main` and `types` both point to `./src/index.ts` (no build step—consumers import source directly).
+- `exports` only, no `main`/`types`: modern resolvers ignore `main`/`types` when `exports` is present. The entry point is `./src/index.ts`; there is no build step, consumers import the source directly.
 - Use `"workspace:*"` for internal deps (e.g., `"@epicenter/workspace": "workspace:*"`).
 - Use `"catalog:"` for shared versions managed in the root `package.json` catalogs.
 - `peerDependencies` for packages consumers must also install (e.g., `yjs`).
 
 ### `tsconfig.json`
 
+A leaf config picks a tier and adds nothing that repeats a base. For a Bun library:
+
 ```json
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "preserve",
+    "types": ["bun"],
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noPropertyAccessFromIndexSignature": false
+    "noUnusedParameters": true
   }
 }
 ```
+
+A Svelte or browser library extends `../../tsconfig.dom.json` instead. For all eight leaf tiers, the never-redeclare list, and the module strategy, see the `tsconfig` skill.
 
 After creating the package, run `bun install` from the repo root to register it in the workspace.

@@ -1,5 +1,7 @@
 # Home Dotfiles Beat XDG for Developer Tools
 
+> **Note (2026-05-22)**: This article is superseded. Current Epicenter does not write machine-wide auth, runtime files, logs, or global persistence under top-level `~/.epicenter/`. Machine auth uses the platform data directory from `env-paths('epicenter')`, daemon runtime files use the OS runtime directory, daemon logs use the platform log directory, and generated project data stays under `<projectDir>/.epicenter/`.
+
 We wrote an article a few months ago arguing for XDG compliance. The position was that `~/.config/` is the correct place for application settings, `~/.local/share/` for data, and apps that dump dotfiles in `~/` are "bad citizens." That argument is technically correct and practically wrong for developer tools.
 
 Here's what the tools developers actually use every day chose:

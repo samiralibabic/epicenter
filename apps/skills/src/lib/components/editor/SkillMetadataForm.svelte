@@ -4,13 +4,16 @@
 	import * as Field from '@epicenter/ui/field';
 	import { Input } from '@epicenter/ui/input';
 	import { Textarea } from '@epicenter/ui/textarea';
-	import { skillsState } from '$lib/state/skills-state.svelte';
+	import {
+		type SkillMetadataUpdate,
+		skillsState,
+	} from '$lib/state/skills-state.svelte';
 	import { validateSkill } from '$lib/utils/validation';
 
 	let { skill }: { skill: Skill } = $props();
 
 	/**
-	 * Live validation errors—recomputed on every reactive change to skill fields.
+	 * Live validation errors, recomputed on every reactive change to skill fields.
 	 * Shown inline but never block writes. The table is the source of truth.
 	 */
 	const errors = $derived(
@@ -22,13 +25,8 @@
 		}),
 	);
 
-	function update(
-		field: 'name' | 'description' | 'license' | 'compatibility',
-		value: string,
-	) {
-		skillsState.updateSkill(skill.id, {
-			[field]: value || undefined,
-		});
+	function updateSkill(updates: SkillMetadataUpdate) {
+		skillsState.updateSkill(skill.id, updates);
 	}
 </script>
 
@@ -49,13 +47,16 @@
 			<Field.Content>
 				<Input
 					value={skill.name}
-					oninput={(e) => update('name', e.currentTarget.value)}
+					onblur={(e) => {
+						const next = e.currentTarget.value;
+						if (next !== skill.name) updateSkill({ name: next });
+					}}
 					placeholder="my-skill"
 					class="font-mono text-sm"
 				/>
 			</Field.Content>
 			<Field.Description
-				>Lowercase, hyphens only (1–64 chars)</Field.Description
+				>Lowercase, hyphens only (1 to 64 chars)</Field.Description
 			>
 		</Field.Field>
 
@@ -64,7 +65,10 @@
 			<Field.Content>
 				<Input
 					value={skill.license ?? ''}
-					oninput={(e) => update('license', e.currentTarget.value)}
+					onblur={(e) => {
+						const next = e.currentTarget.value || undefined;
+						if (next !== skill.license) updateSkill({ license: next });
+					}}
 					placeholder="MIT"
 				/>
 			</Field.Content>
@@ -76,7 +80,10 @@
 		<Field.Content>
 			<Textarea
 				value={skill.description}
-				oninput={(e) => update('description', e.currentTarget.value)}
+				onblur={(e) => {
+					const next = e.currentTarget.value;
+					if (next !== skill.description) updateSkill({ description: next });
+				}}
 				placeholder="Describe when and why to use this skill..."
 				rows={2}
 				class="resize-none"
@@ -92,12 +99,15 @@
 		<Field.Content>
 			<Input
 				value={skill.compatibility ?? ''}
-				oninput={(e) => update('compatibility', e.currentTarget.value)}
+				onblur={(e) => {
+					const next = e.currentTarget.value || undefined;
+					if (next !== skill.compatibility) updateSkill({ compatibility: next });
+				}}
 				placeholder="Claude Code, OpenCode, Cursor..."
 			/>
 		</Field.Content>
 		<Field.Description
-			>Which agents/tools this skill targets (optional, ≤500 chars)</Field.Description
+			>Which agents/tools this skill targets (optional, up to 500 chars)</Field.Description
 		>
 	</Field.Field>
 

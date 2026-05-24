@@ -1,6 +1,6 @@
 ---
 name: elysia
-description: Elysia.js server patterns for error handling, status responses, and plugin composition. Use when the user mentions Elysia, Eden Treaty, or when writing API route handlers, returning HTTP errors, creating server plugins, or working with type-safe API clients.
+description: 'Elysia.js: error handling, status responses, plugin composition. Use for Elysia, Eden Treaty, API route handlers, HTTP errors, type-safe clients.'
 metadata:
   author: epicenter
   version: '1.0'
@@ -9,8 +9,14 @@ metadata:
 # Elysia.js Patterns (v1.2+)
 ## Reference Repositories
 
-- [Hono](https://github.com/honojs/hono) — Ultrafast web framework for Cloudflare Workers
-- [Cloudflare Docs](https://github.com/cloudflare/cloudflare-docs) — Cloudflare Workers, Durable Objects, KV documentation
+- [Hono](https://github.com/honojs/hono) : Ultrafast web framework for Cloudflare Workers
+- [Cloudflare Docs](https://github.com/cloudflare/cloudflare-docs) : Cloudflare Workers, Durable Objects, KV documentation
+
+## Upstream Grounding
+
+When Worker runtime behavior, Hono middleware semantics, request/response streaming, Durable Objects, WebSockets, or Cloudflare deployment limits affect correctness, ask DeepWiki a narrow question against `honojs/hono` or `cloudflare/cloudflare-docs` before relying on memory. Use it to orient, then verify decisive details against local installed types, source, or official docs before changing code.
+
+Skip DeepWiki for Elysia-specific conventions already documented below.
 
 ## When to Apply This Skill
 
@@ -203,7 +209,7 @@ response: {
 
 ## Plugin Composition
 
-Elysia plugins are just functions that return Elysia instances. Use `new Elysia()` inside the plugin, not `new Elysia({ prefix })` — let the consumer control mounting:
+Elysia plugins are just functions that return Elysia instances. Use `new Elysia()` inside the plugin, not `new Elysia({ prefix })` : let the consumer control mounting:
 
 ```typescript
 // GOOD: Plugin is prefix-agnostic

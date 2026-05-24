@@ -2,7 +2,16 @@
 	Installed from @ieedan/std
 */
 
-import { isLetter } from './is-letter.js';
+const LETTER_REGEX = /[a-zA-Z]/;
+
+function isLetter(char: string): boolean {
+	if (char.length > 1) {
+		throw new Error(
+			`You probably only meant to pass a character to this function. Instead you gave ${char}`,
+		);
+	}
+	return LETTER_REGEX.test(char);
+}
 
 /** Converts a `camelCase` string to a `snake_case` string
  *
@@ -19,25 +28,28 @@ export function camelToSnake(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// is uppercase letter
-		if (isLetter(str[i]) && str[i].toUpperCase() === str[i]) {
+		if (
+			isLetter(str.charAt(i)) &&
+			str.charAt(i).toUpperCase() === str.charAt(i)
+		) {
 			let l = i;
 
 			while (
 				l < str.length &&
-				isLetter(str[l]) &&
-				str[l].toUpperCase() === str[l]
+				isLetter(str.charAt(l)) &&
+				str.charAt(l).toUpperCase() === str.charAt(l)
 			) {
 				l++;
 			}
 
-			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}_${str[l - 1].toLocaleLowerCase()}`;
+			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}_${str.charAt(l - 1).toLocaleLowerCase()}`;
 
 			i = l - 1;
 
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -59,7 +71,7 @@ export function pascalToSnake(str: string): string {
 	let firstLetter: number | undefined;
 
 	for (let i = 0; i < str.length; i++) {
-		if (firstLetter === undefined && isLetter(str[i])) {
+		if (firstLetter === undefined && isLetter(str.charAt(i))) {
 			firstLetter = i;
 		}
 
@@ -67,27 +79,27 @@ export function pascalToSnake(str: string): string {
 		if (
 			firstLetter !== undefined &&
 			i > firstLetter &&
-			isLetter(str[i]) &&
-			str[i].toUpperCase() === str[i]
+			isLetter(str.charAt(i)) &&
+			str.charAt(i).toUpperCase() === str.charAt(i)
 		) {
 			let l = i;
 
 			while (
 				l < str.length &&
-				isLetter(str[l]) &&
-				str[l].toUpperCase() === str[l]
+				isLetter(str.charAt(l)) &&
+				str.charAt(l).toUpperCase() === str.charAt(l)
 			) {
 				l++;
 			}
 
-			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}_${str[l - 1].toLocaleLowerCase()}`;
+			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}_${str.charAt(l - 1).toLocaleLowerCase()}`;
 
 			i = l - 1;
 
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -108,25 +120,29 @@ export function camelToKebab(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// is uppercase letter
-		if (i > 0 && isLetter(str[i]) && str[i].toUpperCase() === str[i]) {
+		if (
+			i > 0 &&
+			isLetter(str.charAt(i)) &&
+			str.charAt(i).toUpperCase() === str.charAt(i)
+		) {
 			let l = i;
 
 			while (
 				l < str.length &&
-				isLetter(str[l]) &&
-				str[l].toUpperCase() === str[l]
+				isLetter(str.charAt(l)) &&
+				str.charAt(l).toUpperCase() === str.charAt(l)
 			) {
 				l++;
 			}
 
-			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}-${str[l - 1].toLocaleLowerCase()}`;
+			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}-${str.charAt(l - 1).toLocaleLowerCase()}`;
 
 			i = l - 1;
 
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -147,25 +163,29 @@ export function pascalToKebab(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// is uppercase letter (ignoring the first)
-		if (i > 0 && isLetter(str[i]) && str[i].toUpperCase() === str[i]) {
+		if (
+			i > 0 &&
+			isLetter(str.charAt(i)) &&
+			str.charAt(i).toUpperCase() === str.charAt(i)
+		) {
 			let l = i;
 
 			while (
 				l < str.length &&
-				isLetter(str[l]) &&
-				str[l].toUpperCase() === str[l]
+				isLetter(str.charAt(l)) &&
+				str.charAt(l).toUpperCase() === str.charAt(l)
 			) {
 				l++;
 			}
 
-			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}-${str[l - 1].toLocaleLowerCase()}`;
+			newStr += `${str.slice(i, l - 1).toLocaleLowerCase()}-${str.charAt(l - 1).toLocaleLowerCase()}`;
 
 			i = l - 1;
 
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -182,7 +202,7 @@ export function pascalToKebab(str: string): string {
  * ```
  */
 export function camelToPascal(str: string): string {
-	return `${str[0].toLocaleUpperCase()}${str.slice(1)}`;
+	return `${str.charAt(0).toLocaleUpperCase()}${str.slice(1)}`;
 }
 
 /** Converts a `PascalCase` string to a `camelCase` string (makes first letter uppercase)
@@ -196,7 +216,7 @@ export function camelToPascal(str: string): string {
  * ```
  */
 export function pascalToCamel(str: string): string {
-	return `${str[0].toLocaleLowerCase()}${str.slice(1)}`;
+	return `${str.charAt(0).toLocaleLowerCase()}${str.slice(1)}`;
 }
 
 /** Converts a `snake_case` string to a `PascalCase` string
@@ -218,24 +238,24 @@ export function snakeToPascal(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// capitalize first letter
-		if (firstLetter && isLetter(str[i])) {
+		if (firstLetter && isLetter(str.charAt(i))) {
 			firstLetter = false;
-			newStr += str[i].toUpperCase();
+			newStr += str.charAt(i).toUpperCase();
 			continue;
 		}
 
 		// capitalize first after a _ (ignoring the first)
-		if (!firstLetter && str[i] === '_') {
+		if (!firstLetter && str.charAt(i) === '_') {
 			i++;
 			if (i <= str.length - 1) {
-				newStr += str[i].toUpperCase();
+				newStr += str.charAt(i).toUpperCase();
 			} else {
 				newStr += '_';
 			}
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -260,24 +280,24 @@ export function snakeToCamel(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// capitalize first letter
-		if (firstLetter && isLetter(str[i])) {
+		if (firstLetter && isLetter(str.charAt(i))) {
 			firstLetter = false;
-			newStr += str[i].toLowerCase();
+			newStr += str.charAt(i).toLowerCase();
 			continue;
 		}
 
 		// capitalize first after a _ (ignoring the first)
-		if (!firstLetter && str[i] === '_') {
+		if (!firstLetter && str.charAt(i) === '_') {
 			i++;
 			if (i <= str.length - 1) {
-				newStr += str[i].toUpperCase();
+				newStr += str.charAt(i).toUpperCase();
 			} else {
 				newStr += '_';
 			}
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -299,20 +319,20 @@ export function kebabToPascal(str: string): string {
 	for (let i = 0; i < str.length; i++) {
 		// capitalize first
 		if (i === 0) {
-			newStr += str[i].toUpperCase();
+			newStr += str.charAt(i).toUpperCase();
 			continue;
 		}
 
 		// capitalize first after a -
-		if (str[i] === '-') {
+		if (str.charAt(i) === '-') {
 			i++;
 			if (i <= str.length - 1) {
-				newStr += str[i].toUpperCase();
+				newStr += str.charAt(i).toUpperCase();
 			}
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;
@@ -334,15 +354,15 @@ export function kebabToCamel(str: string): string {
 
 	for (let i = 0; i < str.length; i++) {
 		// capitalize first after a -
-		if (str[i] === '-') {
+		if (str.charAt(i) === '-') {
 			i++;
 			if (i <= str.length - 1) {
-				newStr += str[i].toUpperCase();
+				newStr += str.charAt(i).toUpperCase();
 			}
 			continue;
 		}
 
-		newStr += str[i].toLocaleLowerCase();
+		newStr += str.charAt(i).toLocaleLowerCase();
 	}
 
 	return newStr;

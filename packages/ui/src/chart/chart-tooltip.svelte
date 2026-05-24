@@ -2,7 +2,7 @@
 	import { getChartContext, Tooltip as TooltipPrimitive } from 'layerchart';
 	import type { Snippet } from 'svelte';
 	import type { HTMLAttributes } from 'svelte/elements';
-	import { cn, type WithElementRef, type WithoutChildren } from '#/utils.js';
+	import { cn, type WithElementRef, type WithoutChildren } from '../utils.js';
 	import {
 		getPayloadConfigFromPayload,
 		type TooltipPayload,
@@ -68,6 +68,7 @@
 
 		const [item] = visibleSeries;
 		const tooltipData = chartCtx.tooltip.data;
+		if (!item) return null;
 
 		// Get the x-axis label value from the raw tooltip data (e.g. a Date or month string)
 		const dataLabel = tooltipData != null ? chartCtx.x(tooltipData) : undefined;

@@ -1,5 +1,5 @@
 /**
- * # Encrypted KV-LWW—Composition Wrapper
+ * # Encrypted KV-LWW: Composition Wrapper
  *
  * Transparent encryption layer over `YKeyValueLww`. All CRDT logic (timestamps,
  * conflict resolution, pending/map architecture) stays in `YKeyValueLww`; this
@@ -9,7 +9,7 @@
  *
  * Yjs `ContentAny` stores entry objects by **reference**. `YKeyValueLww` relies
  * on `indexOf()` (strict `===`) to find entries in the Y.Array during conflict
- * resolution. A fork that decrypts into new objects breaks `indexOf`—the map
+ * resolution. A fork that decrypts into new objects breaks `indexOf`: the map
  * entries are no longer the same JS objects as the yarray entries.
  *
  * See `docs/articles/yjs-reference-equality-why-we-compose-encrypted-crdts.md`.
@@ -26,23 +26,26 @@
  * ```
  *
  * There is no plaintext cache. Every read decrypts from the inner store.
- * XChaCha20-Poly1305 decrypt of a small JSON blob is microseconds—caching
+ * XChaCha20-Poly1305 decrypt of a small JSON blob is microseconds. Caching
  * adds complexity (dual-map sync, diffAndEmit, transaction-gap fallback)
  * for negligible performance gain.
  *
  * ## Encryption Lifecycle
  *
- * Encryption is **one-way** by API surface—there is no
+ * Encryption is **one-way** by API surface. There is no
  * `deactivateEncryption()`. Once `activateEncryption()` is called, the
  * `encryption` state is set and no method clears it. The only reset
- * path is destroying the wrapper via `clearLocalData()`.
+ * path is destroying the wrapper as part of an app-owned local reset.
  *
  * ## Re-encryption on Activation
  *
- * When `activateEncryption()` is called, only **plaintext** entries are
- * re-encrypted. Existing encrypted blobs (even on older key versions) are
- * left alone—they're already safe. Old-version ciphertext is lazily migrated
- * on the next `set()` for that key.
+ * When `activateEncryption()` is called, every entry converges to the current
+ * key version: plaintext is encrypted, old-version ciphertext (decryptable via
+ * the keyring) is re-encrypted under the current key, current-version
+ * ciphertext is skipped, and ciphertext at an unknown version is left alone
+ * (it'll catch up on a future `activateEncryption()` that includes the key).
+ * This makes `activateEncryption()` the one method that handles both
+ * post-login encryption and key rotation.
  *
  * ## Error Containment
  *
@@ -52,116 +55,68 @@
  *
  * ## Related Modules
  *
- * - {@link ../crypto/index.ts}—Encryption primitives (encryptValue, decryptValue, isEncryptedBlob)
- * - {@link ./y-keyvalue-lww.ts}—Inner CRDT that handles conflict resolution (unaware of encryption)
+ * - `@epicenter/encryption`: Encryption primitives (encryptValue, decryptValue, isEncryptedBlob)
+ * - {@link ./y-keyvalue-lww.ts}: Inner CRDT that handles conflict resolution (unaware of encryption)
  *
  * @module
  */
-import type * as Y from 'yjs';
+
 import {
 	decryptValue,
 	type EncryptedBlob,
 	encryptValue,
 	getKeyVersion,
 	isEncryptedBlob,
-} from '../crypto/index.js';
+	type ReadonlyWorkspaceKeyring,
+} from '@epicenter/encryption';
+import { defineErrors, type InferErrors } from 'wellcrafted/error';
+import { createLogger, type Logger } from 'wellcrafted/logger';
+import type * as Y from 'yjs';
 import {
+	type KvEntry,
+	type KvStoreChange,
+	type KvStoreChangeHandler,
 	YKeyValueLww,
-	type YKeyValueLwwChange,
 	type YKeyValueLwwEntry,
-} from './y-keyvalue-lww.js';
+} from '../../document/y-keyvalue/index.js';
+
+/**
+ * Errors emitted when the encrypted observer fails to decrypt an entry.
+ * Silent-data-loss territory. We log and continue, but the log is the only
+ * record this happened, so it's typed so apps can aggregate/count.
+ */
+export const EncryptedKvError = defineErrors({
+	DecryptFailed: ({ key, reason }: { key: string; reason: string }) => ({
+		message: `[encrypted-kv] Failed to decrypt entry "${key}": ${reason}`,
+		key,
+		reason,
+	}),
+});
+export type EncryptedKvError = InferErrors<typeof EncryptedKvError>;
 
 const textEncoder = new TextEncoder();
 /** Transaction origin for re-encryption writes. Observer skips events with this origin. */
 const REENCRYPT_ORIGIN = Symbol('re-encrypt');
 
-/**
- * Change handler for the encrypted KV wrapper.
- *
- * Receives the Yjs transaction origin for real CRDT changes, or `undefined`
- * for synthetic events emitted during `activateEncryption()` (which have
- * no backing Yjs transaction).
- */
-export type EncryptedKvObserver<T> = (
-	changes: Map<string, YKeyValueLwwChange<T>>,
-	origin: unknown,
-) => void;
-
 type EncryptionState = {
-	keyring: ReadonlyMap<number, Uint8Array>;
+	keyring: ReadonlyWorkspaceKeyring;
 	currentKey: Uint8Array;
 	currentVersion: number;
 };
 
 /**
- * Return type of `createEncryptedYkvLww`. Same API surface as `YKeyValueLww<T>`
- * plus encryption-specific members (`unreadableEntryCount`, `activateEncryption`).
- * All values exposed through this type are **plaintext**—encryption is fully
- * transparent to consumers.
+ * Return type of `createEncryptedYkvLww`.
+ *
+ * IS-A `ObservableKvStore<T>` (the shared contract) plus encryption lifecycle
+ * (`activateEncryption`, `unreadableEntryCount`), disposal, and direct access
+ * to the underlying `yarray` / `doc` for sync providers.
+ *
+ * All values exposed through the `ObservableKvStore` surface are **plaintext**.
+ * Encryption is transparent to consumers.
  */
-export type EncryptedYKeyValueLww<T> = {
-	set(key: string, val: T): void;
-	bulkSet(entries: Array<{ key: string; val: T }>): void;
-	get(key: string): T | undefined;
-	has(key: string): boolean;
-	delete(key: string): void;
-	bulkDelete(keys: string[]): void;
-	entries(): IterableIterator<[string, YKeyValueLwwEntry<T>]>;
-	observe(handler: EncryptedKvObserver<T>): void;
-	unobserve(handler: EncryptedKvObserver<T>): void;
-
-	/**
-	 * Activate encryption with a versioned keyring. The highest-version key
-	 * becomes the current key for new encryptions. Decryption reads
-	 * `getKeyVersion(blob)` to select the correct key from the keyring.
-	 *
-	 * There is no deactivation path—this is one-way by API surface.
-	 * Calling again with a new keyring updates the active keys.
-	 *
-	 * Only plaintext entries are re-encrypted on activation. Existing
-	 * encrypted blobs (even on older key versions) are left alone—they're
-	 * already safe. Old-version ciphertext is lazily migrated on the next
-	 * `set()` for that key.
-	 *
-	 * @param keyring Map from version number to 32-byte encryption key
-	 */
-	activateEncryption(keyring: ReadonlyMap<number, Uint8Array>): void;
-
-	/**
-	 * Unregister the inner observer and release resources. Call when this
-	 * wrapper is no longer needed but the underlying Y.Array continues to exist.
-	 */
-	dispose(): void;
-
-	/**
-	 * Number of entries in the inner store that cannot be decrypted.
-	 *
-	 * When a key is active, this counts entries that failed to decrypt
-	 * (corrupted blobs, wrong key version not in keyring). When no key
-	 * is active, this counts all encrypted entries.
-	 *
-	 * Computed by iterating `inner.map` and counting undecryptable entries.
-	 */
-	readonly unreadableEntryCount: number;
-
-	/**
-	 * Iterate all decryptable entries. Decrypts on the fly from the inner
-	 * store—there is no separate plaintext cache.
-	 *
-	 * TableHelper uses this for `getAll()`, `filter()`, `find()`, `clear()`.
-	 * Entries that cannot be decrypted are silently omitted.
-	 */
-	readableEntries(): IterableIterator<[string, YKeyValueLwwEntry<T>]>;
-
-	/** Count of decryptable entries. TableHelper uses this for `count()`. */
-	readonly readableEntryCount: number;
-
-	/** The underlying Y.Array. Contains **ciphertext** when a key is active. */
-	readonly yarray: Y.Array<YKeyValueLwwEntry<EncryptedBlob | T>>;
-
-	/** The Y.Doc that owns the array. */
-	readonly doc: Y.Doc;
-};
+export type EncryptedYKeyValueLww<T> = ReturnType<
+	typeof createEncryptedYkvLww<T>
+>;
 
 /**
  * Compose transparent encryption onto `YKeyValueLww` without forking CRDT logic.
@@ -169,147 +124,102 @@ export type EncryptedYKeyValueLww<T> = {
  * `YKeyValueLww` remains the single source for conflict resolution; this wrapper
  * only transforms values at the boundary (`set` encrypts, `get`/observer decrypts).
  *
- * When no key is available, all operations pass through without
- * encryption—zero overhead, identical to a plain `YKeyValueLww<T>`.
+ * Construction always starts in passthrough mode: zero overhead, identical to
+ * a plain `YKeyValueLww<T>`. Call `activateEncryption(keyring)` when the key
+ * becomes available (typically post-login) to enable encryption and upgrade
+ * any existing plaintext or old-version entries.
  *
  * @example
  * ```typescript
- * // Start in plaintext, transition to encrypted when key arrives
- * const kv = createEncryptedYkvLww<TabData>(yarray);
+ * const kv = createEncryptedYkvLww<TabData>(ydoc, 'tabs');
  * kv.set('tab-1', { url: '...' }); // stored as plaintext
  *
  * kv.activateEncryption(new Map([[1, encryptionKey]]));
  * kv.set('tab-2', { url: '...' }); // stored as EncryptedBlob
  * // tab-1 was re-encrypted during activation
  * ```
+ *
+ * @param ydoc - The Y.Doc that owns the underlying Y.Array
+ * @param arrayKey - Name of the Y.Array under `ydoc.getArray(arrayKey)`
  */
 export function createEncryptedYkvLww<T>(
-	yarray: Y.Array<YKeyValueLwwEntry<EncryptedBlob | T>>,
-	initialKeyring?: ReadonlyMap<number, Uint8Array>,
-): EncryptedYKeyValueLww<T> {
+	ydoc: Y.Doc,
+	arrayKey: string,
+	{ log = createLogger('encrypted-kv') }: { log?: Logger } = {},
+) {
+	const yarray = ydoc.getArray<YKeyValueLwwEntry<EncryptedBlob | T>>(arrayKey);
 	/**
-	 * The inner LWW store. It sees `EncryptedBlob | T` as its value type—it
+	 * The inner LWW store. It sees `EncryptedBlob | T` as its value type. It
 	 * doesn't know or care that some values are ciphertext. Timestamps, conflict
 	 * resolution, and observer mechanics all live here.
 	 */
 	const inner = new YKeyValueLww<EncryptedBlob | T>(yarray);
-	const changeHandlers = new Set<EncryptedKvObserver<T>>();
+	const changeHandlers = new Set<KvStoreChangeHandler<T>>();
 
 	/** Active encryption state. `undefined` = passthrough mode. */
 	let encryption: EncryptionState | undefined;
 
-	if (initialKeyring) {
-		if (initialKeyring.size === 0)
-			throw new Error('Keyring must contain at least one key');
-		const version = Math.max(...initialKeyring.keys());
-		const currentKey = initialKeyring.get(version);
-		if (!currentKey) throw new Error(`Missing key for version ${version}`);
-		encryption = {
-			keyring: initialKeyring,
-			currentKey,
-			currentVersion: version,
-		};
-	}
-
 	/**
-	 * Best-effort blob decryption with keyring fallback.
+	 * Decrypt a stored value to plaintext, or return plaintext unchanged.
 	 *
-	 * Tries currentKey first (most blobs use the latest version).
-	 * On failure, reads the blob's embedded key version and tries
-	 * the matching key from the keyring.
+	 * - Plaintext input (non-blob) passes through regardless of state.
+	 * - Blob + no state (passthrough mode) → undefined (unreadable).
+	 * - Blob + state → try currentKey, fall back to the blob's recorded version.
 	 *
-	 * Pure function—no logging, no side effects. Callers decide
-	 * what to do with `undefined` (warn, skip, etc.).
+	 * Silent on failure. Callers decide what to do with `undefined`.
 	 *
-	 * @param state - Defaults to the closure's `encryption`. Overridden by
-	 *   `activateEncryption()` to compare before/after readability without
-	 *   mutating the closure mid-iteration.
+	 * @param state Defaults to the closure's `encryption`. Overridden by
+	 *   `activateEncryption()` to decrypt against `nextEncryption` without
+	 *   confusing the closure mid-iteration.
 	 */
-	const tryDecryptBlob = (
-		blob: EncryptedBlob,
+	const decrypt = (
+		stored: EncryptedBlob | T,
 		aad: Uint8Array,
 		state: EncryptionState | undefined = encryption,
-	): string | undefined => {
+	): T | undefined => {
+		if (!isEncryptedBlob(stored)) return stored as T;
 		if (!state) return undefined;
 		try {
-			return decryptValue(blob, state.currentKey, aad);
+			return JSON.parse(decryptValue(stored, state.currentKey, aad)) as T;
 		} catch {
-			// Current key didn't work — try the blob's recorded key version
+			// Current key didn't work. Try the blob's recorded key version.
 		}
-		const versionKey = state.keyring.get(getKeyVersion(blob));
-		if (!versionKey || versionKey === state.currentKey) return undefined; // Missing version, or same key we already tried
+		const versionKey = state.keyring.get(getKeyVersion(stored));
+		if (!versionKey || versionKey === state.currentKey) return undefined;
 		try {
-			return decryptValue(blob, versionKey, aad);
+			return JSON.parse(decryptValue(stored, versionKey, aad)) as T;
 		} catch {
 			return undefined;
 		}
 	};
 
 	/**
-	 * Attempt to decrypt an entry. Returns a plaintext entry on success,
-	 * `undefined` on failure. When a key IS active and decryption still fails,
-	 * logs a single warning with the entry key and actionable failure reason.
+	 * Produce the value to hand to the inner store: encrypted blob when a key
+	 * is active, plaintext passthrough otherwise. Pure function of the
+	 * closure's `encryption`.
 	 */
-	const tryDecryptEntry = (
-		key: string,
-		entry: YKeyValueLwwEntry<EncryptedBlob | T>,
-	): YKeyValueLwwEntry<T> | undefined => {
-		if (!isEncryptedBlob(entry.val)) return { ...entry, val: entry.val as T }; // Plaintext — nothing to decrypt
-		const json = tryDecryptBlob(entry.val, textEncoder.encode(key));
-		if (json !== undefined) return { ...entry, val: JSON.parse(json) as T };
-		if (!encryption) return undefined; // No key loaded yet — skip silently, activateEncryption() will catch up
-
-		const blobVersion = getKeyVersion(entry.val);
-		const isKnownKeyVersion = encryption.keyring.has(blobVersion);
-		const reason = isKnownKeyVersion
-			? 'wrong key material or corrupted blob'
-			: `keyVersion=${blobVersion} not in keyring [${[...encryption.keyring.keys()].join(', ')}]`;
-		console.warn(`[encrypted-kv] Failed to decrypt entry "${key}": ${reason}`);
-		return undefined;
-	};
-
-	/** Silent decrypt—returns plaintext value or `undefined`. No console warning. */
-	const tryDecryptValue = (
-		raw: EncryptedBlob | T,
-		aad: Uint8Array,
-		state: EncryptionState | undefined = encryption,
-	): T | undefined => {
-		if (!isEncryptedBlob(raw)) return raw as T;
-		const json = tryDecryptBlob(raw, aad, state);
-		if (!json) return undefined;
-		return JSON.parse(json) as T;
-	};
-
-	/** Count entries that can be decrypted (or are plaintext) with the current keyring. */
-	const countDecryptable = (): number => {
-		let count = 0;
-		for (const [key, entry] of inner.map)
-			if (tryDecryptValue(entry.val, textEncoder.encode(key)) !== undefined)
-				count++;
-		return count;
-	};
-
-	/** Iterate entries, decrypting each on the fly. Undecryptable entries are skipped. */
-	const iterateDecrypted = function* (
-		iterable: Iterable<[string, YKeyValueLwwEntry<EncryptedBlob | T>]>,
-	): IterableIterator<[string, YKeyValueLwwEntry<T>]> {
-		for (const [key, entry] of iterable) {
-			const val = tryDecryptValue(entry.val, textEncoder.encode(key));
-			if (val !== undefined) yield [key, { ...entry, val }];
-		}
+	const toStored = (key: string, val: T): EncryptedBlob | T => {
+		if (!encryption) return val;
+		return encryptValue(
+			JSON.stringify(val),
+			encryption.currentKey,
+			textEncoder.encode(key),
+			encryption.currentVersion,
+		);
 	};
 
 	/**
 	 * Inner observer. When entries change in the CRDT, decrypt and forward
-	 * plaintext change events to registered handlers. Skips REENCRYPT_ORIGIN writes
-	 * (those are internal re-encryption during activation, not user changes).
+	 * plaintext change events to registered handlers. Skips REENCRYPT_ORIGIN
+	 * writes (those are internal re-encryption during activation, not user
+	 * changes). Logs a single warning on undecryptable remote entries.
 	 */
-	const observer: Parameters<typeof inner.observe>[0] = (
+	const observer: KvStoreChangeHandler<EncryptedBlob | T> = (
 		changes,
-		transaction,
+		origin,
 	) => {
-		if (transaction.origin === REENCRYPT_ORIGIN) return;
-		const decryptedChanges = new Map<string, YKeyValueLwwChange<T>>();
+		if (origin === REENCRYPT_ORIGIN) return;
+		const decryptedChanges = new Map<string, KvStoreChange<T>>();
 		for (const [key, change] of changes) {
 			if (change.action === 'delete') {
 				decryptedChanges.set(key, { action: 'delete' });
@@ -317,152 +227,178 @@ export function createEncryptedYkvLww<T>(
 			}
 			const entry = inner.map.get(key);
 			if (!entry) continue;
-			const decrypted = tryDecryptEntry(key, entry);
-			if (!decrypted) continue;
-			decryptedChanges.set(key, {
-				action: change.action,
-				newValue: decrypted.val,
-			});
+			const val = decrypt(entry.val, textEncoder.encode(key));
+			if (val === undefined) {
+				if (encryption && isEncryptedBlob(entry.val)) {
+					const blobVersion = getKeyVersion(entry.val);
+					const reason = encryption.keyring.has(blobVersion)
+						? 'wrong key material or corrupted blob'
+						: `keyVersion=${blobVersion} not in keyring [${[...encryption.keyring.keys()].join(', ')}]`;
+					log.warn(EncryptedKvError.DecryptFailed({ key, reason }));
+				}
+				continue;
+			}
+			decryptedChanges.set(key, { action: change.action, newValue: val });
 		}
 		if (decryptedChanges.size === 0) return;
-		for (const handler of changeHandlers)
-			handler(decryptedChanges, transaction.origin);
+		for (const handler of changeHandlers) handler(decryptedChanges, origin);
 	};
 
 	inner.observe(observer);
 
 	return {
-		set(key, val) {
-			if (!encryption) {
-				inner.set(key, val);
-				return;
-			}
-			inner.set(
-				key,
-				encryptValue(
-					JSON.stringify(val),
-					encryption.currentKey,
-					textEncoder.encode(key),
-					encryption.currentVersion,
-				),
-			);
+		set(key: string, val: T): void {
+			inner.set(key, toStored(key, val));
 		},
-		bulkSet(entries) {
-			if (!encryption) {
-				inner.bulkSet(entries);
-				return;
-			}
-
+		bulkSet(entries: Array<KvEntry<T>>): void {
 			inner.bulkSet(
-				entries.map(({ key, val }) => ({
-					key,
-					val: encryptValue(
-						JSON.stringify(val),
-						encryption.currentKey,
-						textEncoder.encode(key),
-						encryption.currentVersion,
-					),
-				})),
+				entries.map(({ key, val }) => ({ key, val: toStored(key, val) })),
 			);
 		},
 		/**
 		 * Get a decrypted value by key. Reads from the inner store and decrypts
 		 * on the fly (~0.01ms for XChaCha20-Poly1305 on a small JSON blob).
 		 */
-		get(key) {
-			const raw = inner.get(key);
-			if (raw === undefined) return undefined;
-			return tryDecryptValue(raw, textEncoder.encode(key));
+		get(key: string): T | undefined {
+			const stored = inner.get(key);
+			if (stored === undefined) return undefined;
+			return decrypt(stored, textEncoder.encode(key));
 		},
-		has(key) {
-			const raw = inner.get(key);
-			if (raw === undefined) return false;
-			return tryDecryptValue(raw, textEncoder.encode(key)) !== undefined;
+		has(key: string): boolean {
+			return this.get(key) !== undefined;
 		},
-		delete(key) {
+		delete(key: string): void {
 			inner.delete(key);
 		},
-		bulkDelete(keys) {
+		bulkDelete(keys: string[]): void {
 			inner.bulkDelete(keys);
 		},
-		*entries() {
-			yield* iterateDecrypted(inner.entries());
+		*entries(): IterableIterator<[string, KvEntry<T>]> {
+			for (const [key, entry] of inner.entries()) {
+				const val = decrypt(entry.val, textEncoder.encode(key));
+				if (val !== undefined) yield [key, { ...entry, val }];
+			}
 		},
-		observe(handler) {
+		observe(handler: KvStoreChangeHandler<T>): void {
 			changeHandlers.add(handler);
 		},
-		unobserve(handler) {
+		unobserve(handler: KvStoreChangeHandler<T>): void {
 			changeHandlers.delete(handler);
 		},
-		activateEncryption(keyring) {
+		/**
+		 * Activate encryption with a versioned keyring. The highest-version key
+		 * becomes the current key for new encryptions. Decryption reads
+		 * `getKeyVersion(blob)` to select the correct key from the keyring.
+		 *
+		 * There is no deactivation path. This is one-way by API surface. Calling
+		 * again with a new keyring updates the active keys AND re-encrypts any
+		 * entries that aren't already at the current key version.
+		 *
+		 * After this call, every decryptable entry is stored as ciphertext under
+		 * the current-version key:
+		 *
+		 * - Plaintext entries → encrypted with the current-version key.
+		 * - Ciphertext at a non-current version (decryptable via the keyring) →
+		 *   decrypted and re-encrypted with the current-version key. This is how
+		 *   key rotation upgrades at-rest data.
+		 * - Ciphertext already at the current version → no-op.
+		 * - Ciphertext whose key version is not in the keyring → skipped
+		 *   (unreadable; left unchanged).
+		 *
+		 * @param keyring Map from version number to 32-byte encryption key
+		 */
+		activateEncryption(keyring: ReadonlyWorkspaceKeyring): void {
 			if (keyring.size === 0)
 				throw new Error('Keyring must contain at least one key');
 			const previousEncryption = encryption;
 			const nextVersion = Math.max(...keyring.keys());
 			const nextKey = keyring.get(nextVersion);
 			if (!nextKey) throw new Error(`Missing key for version ${nextVersion}`);
-			const nextEncryption: EncryptionState = {
+			const nextEncryption = {
 				keyring,
 				currentKey: nextKey,
 				currentVersion: nextVersion,
-			};
+			} satisfies EncryptionState;
 			encryption = nextEncryption;
 
+			// Walk every entry and converge it to the current key version. Three
+			// cases, handled in priority order:
+			//   1. Ciphertext already at currentVersion → no-op (cheap skip).
+			//   2. Ciphertext at a non-current version that IS in the keyring →
+			//      decrypt + re-encrypt with currentKey. This is how rotation
+			//      upgrades at-rest data.
+			//   3. Plaintext entries → encrypt with currentKey.
+			// Ciphertext whose key version is not in the keyring is skipped
+			// (unreadable; left as-is for a future activateEncryption that
+			// includes it).
+			//
+			// Newly-readable entries (decryptable under nextEncryption but whose
+			// version was NOT in previousEncryption's keyring) get a synthetic
+			// `add` event so observers catch up. The check is a map lookup,
+			// under authenticated crypto with immutable key versions,
+			// "version was in previous keyring" ⇔ "was decryptable before",
+			// for entries that decrypt under the new keyring.
 			const newlyReadable = new Map<string, T>();
-			const plaintextToEncrypt: Array<{ key: string; val: T }> = [];
+			const toRewrite: Array<{ key: string; val: T }> = [];
 			for (const [key, entry] of inner.map) {
-				if (isEncryptedBlob(entry.val)) {
-					const before = tryDecryptValue(
-						entry.val,
-						textEncoder.encode(key),
-						previousEncryption,
-					);
-					if (before !== undefined) continue;
-					const after = tryDecryptValue(
-						entry.val,
-						textEncoder.encode(key),
-						nextEncryption,
-					);
-					if (after !== undefined) newlyReadable.set(key, after);
+				const aad = textEncoder.encode(key);
+				if (!isEncryptedBlob(entry.val)) {
+					toRewrite.push({ key, val: entry.val as T });
 					continue;
 				}
-				plaintextToEncrypt.push({ key, val: entry.val as T });
+				const version = getKeyVersion(entry.val);
+				if (version === nextEncryption.currentVersion) continue;
+				const val = decrypt(entry.val, aad, nextEncryption);
+				if (val === undefined) continue;
+				toRewrite.push({ key, val });
+				const wasReadable = previousEncryption?.keyring.has(version) ?? false;
+				if (!wasReadable) newlyReadable.set(key, val);
 			}
 
-			inner.doc.transact(() => {
-				for (const { key: entryKey, val } of plaintextToEncrypt)
-					inner.set(
-						entryKey,
-						encryptValue(
-							JSON.stringify(val),
-							nextEncryption.currentKey,
-							textEncoder.encode(entryKey),
-							nextEncryption.currentVersion,
-						),
-					);
-			}, REENCRYPT_ORIGIN);
+			// One transaction for the whole pass. Filtered by observers via
+			// REENCRYPT_ORIGIN. Downstream consumers don't see re-encryption
+			// as a change (the decrypted value didn't change).
+			if (toRewrite.length > 0) {
+				inner.doc.transact(() => {
+					for (const { key, val } of toRewrite)
+						inner.set(key, toStored(key, val));
+				}, REENCRYPT_ORIGIN);
+			}
 
 			if (newlyReadable.size === 0) return;
-			const syntheticChanges = new Map<string, YKeyValueLwwChange<T>>();
+			const syntheticChanges = new Map<string, KvStoreChange<T>>();
 			for (const [key, val] of newlyReadable)
 				syntheticChanges.set(key, { action: 'add', newValue: val });
 			for (const handler of changeHandlers)
 				handler(syntheticChanges, undefined);
 		},
+		/**
+		 * Number of entries in the inner store that cannot be decrypted.
+		 *
+		 * When a key is active, this counts entries that failed to decrypt
+		 * (corrupted blobs, wrong key version not in keyring). When no key
+		 * is active, this is always 0 (passthrough mode treats every entry
+		 * as readable plaintext).
+		 */
 		get unreadableEntryCount() {
-			return inner.map.size - countDecryptable();
+			if (!encryption) return 0;
+			let count = 0;
+			for (const [key, entry] of inner.map)
+				if (decrypt(entry.val, textEncoder.encode(key)) === undefined) count++;
+			return count;
 		},
-		*readableEntries() {
-			yield* iterateDecrypted(inner.entries());
+		get size() {
+			return inner.map.size - this.unreadableEntryCount;
 		},
-		get readableEntryCount() {
-			return countDecryptable();
-		},
+		/** The underlying Y.Array. Contains **ciphertext** when a key is active. */
 		yarray: inner.yarray,
-		doc: inner.doc,
-		dispose() {
+		/**
+		 * Unregister the inner observer and release resources. Call when this
+		 * wrapper is no longer needed but the underlying Y.Array continues to exist.
+		 */
+		[Symbol.dispose](): void {
 			inner.unobserve(observer);
-			inner.dispose();
+			inner[Symbol.dispose]();
 		},
 	};
 }

@@ -1,6 +1,6 @@
 ---
 name: specification-writing
-description: Write technical specifications that give agents enough context to implement features autonomously. Use when the user says "write a spec", "plan this feature", "create a planning doc", or when planning features, documenting architecture decisions, or creating implementation guides.
+description: Write technical specs that let agents implement autonomously. Use for "write a spec", "plan this feature", "create a planning doc".
 metadata:
   author: epicenter
   version: '1.0'
@@ -24,6 +24,12 @@ Use this pattern when you need to:
 - Capture open questions and recommendations without over-prescribing.
 - Lay out architecture with tables/diagrams instead of wall-of-prose plans.
 
+## References
+
+Load these on demand based on the spec's decision surface:
+
+- If writing a spec with **many trade-offs, migration cleanup, or "keep for consistency" decisions**, read [references/decision-hygiene.md](references/decision-hygiene.md).
+
 ## The Core Philosophy
 
 Specs should:
@@ -34,6 +40,28 @@ Specs should:
 - **Enable autonomous implementation**: An agent reading this should spawn sub-agents to verify and extend
 
 A good spec is a launching pad, not a script to follow.
+
+**Before outlining sections, apply the [one-sentence-test](../one-sentence-test/SKILL.md).** If you can't name what this spec is about in one concrete sentence, the design is not coherent yet. That is the finding, and the spec is not ready.
+
+---
+
+## Decision Hygiene
+
+Classify every material decision:
+
+| Class | Resolved by | Rule |
+| --- | --- | --- |
+| 1 | Evidence | Verify with source, test, or version check. |
+| 2 | Design coherence | Apply the spec thesis consistently. |
+| 3 | Taste under constraints | Pick deliberately and write the constraint. |
+
+Before any "keep" decision, ask: "Would I add this if it did not already exist?"
+
+- If yes, record the use case.
+- If no but removal is churn, record it as a Class 3 keep in the Decisions Log.
+- If no and removal is cheap, drop it now.
+
+Never let evidence questions hide behind design coherence. Verify before deleting old paths. For examples and failure modes, read [references/decision-hygiene.md](references/decision-hygiene.md).
 
 ---
 
@@ -62,7 +90,7 @@ One paragraph max. Describe what the feature does. Don't sell it.
 
 ### Motivation
 
-Structure as **Current State** → **Problems** → **Desired State**.
+Structure as **Current State**, **Problems**, then **Desired State**.
 
 ```markdown
 ## Motivation
@@ -97,7 +125,7 @@ This is where specs shine. Document what you FOUND, not what you assumed.
 | [Project/Lib] | [What they do] | [Their approach] |
 | [Project/Lib] | [What they do] | [Their approach] |
 
-**Key finding**: [Your main discovery—could be that no standard exists, or that everyone does X]
+**Key finding**: [Your main discovery, for example that no standard exists, or that everyone does X]
 
 **Implication**: [What this means for your design decisions]
 ```
@@ -110,16 +138,17 @@ Include:
 
 ### Design Decisions
 
-Use a table for traceability. Every decision should have a rationale.
+Use a table for traceability. Every material decision should have a class and rationale.
 
 ```markdown
 ## Design Decisions
 
-| Decision            | Choice           | Rationale                       |
-| ------------------- | ---------------- | ------------------------------- |
-| [Decision point]    | [What you chose] | [Why this over alternatives]    |
-| [Decision point]    | [What you chose] | [Why this over alternatives]    |
-| [Deferred decision] | Deferred         | [Why it's out of scope for now] |
+| Decision            | Class       | Choice           | Rationale                       |
+| ------------------- | ----------- | ---------------- | ------------------------------- |
+| [Decision point]    | 1 evidence  | [What you chose] | [Source, test, or version checked] |
+| [Decision point]    | 2 coherence | [What you chose] | [How this follows the thesis]   |
+| [Decision point]    | 3 taste     | [What you chose] | [Constraint and trade-off]      |
+| [Deferred decision] | Deferred    | Deferred         | [Why it's out of scope for now] |
 ```
 
 ### Architecture
@@ -180,9 +209,22 @@ Break into phases. Use checkboxes for tracking. Phase 1 should be detailed; late
 
 ### Phase 2: [Phase Name]
 
-- [ ] **2.1** [Higher-level task—implementer will break down]
+- [ ] **2.1** [Higher-level task the implementer will break down]
 - [ ] **2.2** [Higher-level task]
 ```
+
+#### Wave ordering for clean breaks: Build, Prove, Remove
+
+If the spec replaces an old code path with a new one, write separate phases:
+
+```txt
+1. Build the new path                     (waves 1 to N)
+2. Stop importing the old path             (one wave; old code stays on disk, unused)
+3. Verify (typecheck, tests, smoke)        (one wave; rollback is one revert)
+4. Delete the old path                     (final cleanup wave)
+```
+
+Do not schedule deletion before verification passes. [cohesive-clean-breaks](../cohesive-clean-breaks/SKILL.md) owns the full Build, Prove, Remove rationale.
 
 ### Edge Cases
 
@@ -218,6 +260,17 @@ This section signals "you decide this" to the implementer. Include your recommen
 2. **[Another unresolved question]**
    - [Context about why this is uncertain]
    - **Recommendation**: [Suggestion or "Defer until X"]
+```
+
+### Decisions Log
+
+Use this section only for Class 3 keeps. Each entry must name the constraint and a revisit trigger.
+
+```markdown
+## Decisions Log
+
+- Keep `[name]`: [constraint or trade-off].
+  Revisit when: [specific signal that would make the keep decision worth re-opening].
 ```
 
 ### Success Criteria
@@ -301,6 +354,9 @@ If your spec is too prescriptive, the agent will blindly follow it. If it's too 
   - [ ] Key findings
   - [ ] Implications
 - [ ] Design Decisions (table with rationale)
+- [ ] Design decisions have classes
+- [ ] Class 1 decisions were verified
+- [ ] Class 3 keeps are logged with `Revisit when:`
 - [ ] Architecture (ASCII diagrams)
 - [ ] Implementation Plan (phased checkboxes)
 - [ ] Edge Cases

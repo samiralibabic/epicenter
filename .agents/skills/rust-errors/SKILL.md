@@ -1,6 +1,6 @@
 ---
 name: rust-errors
-description: Rust to TypeScript error handling patterns for Tauri apps. Use when the user mentions Rust errors, Tauri command errors, invoke errors, or when defining Rust error types for TypeScript consumption or creating discriminated union error types from Rust.
+description: Rust to TypeScript error handling for Tauri apps. Use when mentioning Rust errors, Tauri command errors, invoke errors, or defining Rust error types for TS consumption.
 metadata:
   author: epicenter
   version: '1.0'
@@ -167,3 +167,52 @@ impl Serialize for MyError {
 ```
 
 This pattern ensures clean, type-safe error handling across the Rust-TypeScript boundary with minimal boilerplate and maximum type safety.
+
+## `tracing` ↔ `wellcrafted/logger`
+
+`defineErrors` mirrors `thiserror`; the workspace logger mirrors `tracing`. Together they give TypeScript the same split Rust has: errors are data, level is chosen at the emit site.
+
+### Level mapping (5 levels, no `fatal`)
+
+| `tracing` macro | Workspace `Logger` method | Use when |
+|---|---|---|
+| `tracing::trace!(...)` | `log.trace(message, data?)` | Per-token / per-message noise for deep debugging |
+| `tracing::debug!(...)` | `log.debug(message, data?)` | Internal state transitions (handshakes, cache fills) |
+| `tracing::info!(...)` | `log.info(message, data?)` | Lifecycle events (connected, loaded, flushed) |
+| `tracing::warn!(?err)` | `log.warn(err)` | Recoverable failure — retry path, fallback taken |
+| `tracing::error!(?err)` | `log.error(err)` | Unrecoverable at this layer — call it loudly |
+
+`tracing` has no `fatal`; neither do we. Process termination is the app's decision (`process.exit`), not the library's.
+
+### Level on the variant? No.
+
+```rust
+// Rust: level is on the CALL, not the enum variant
+tracing::warn!(?err, "cache miss"); // same err, different sites
+tracing::error!(?err, "giving up");
+```
+
+```ts
+// TS: same rule
+log.warn(CacheError.Miss({ key }));  // recoverable
+log.error(CacheError.Miss({ key })); // terminal
+```
+
+No Rust logging crate attaches level to the error type (`thiserror`, `anyhow`, `slog`, `log`). `miette` is the exception — but `miette` is a compiler-diagnostics library, not a general logger. We follow `tracing`: level is context, not identity.
+
+### The `?err` idiom ↔ `tapErr`
+
+`tracing`'s `?err` interpolates a structured error field into the log event. In TS, the Result-flow equivalent is `tapErr`:
+
+```rust
+let result = do_thing().inspect_err(|err| tracing::warn!(?err, "do_thing failed"));
+```
+
+```ts
+const result = await tryAsync({
+  try: () => doThing(),
+  catch: (cause) => DoThingError.Failed({ cause }),
+}).then(tapErr(log.warn));
+```
+
+Both: pass-through on success, log the structured error on failure.

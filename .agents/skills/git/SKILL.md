@@ -1,6 +1,6 @@
 ---
 name: git
-description: Git commit and pull request guidelines using conventional commits. Use when the user says "commit this", "stage and commit", "write a commit message", "create a PR", or when creating commits, writing commit messages, or reviewing PR descriptions.
+description: 'Git commits and PRs using conventional commits. Use when: "commit this", "stage and commit", "write a commit message", "create a PR", or reviewing PR descriptions.'
 metadata:
   author: epicenter
   version: '2.0'
@@ -8,13 +8,20 @@ metadata:
 
 # Git Commit and Pull Request Guidelines
 
-> **Related Skills**: See `incremental-commits` for breaking multi-file changes into atomic commits.
+> **Related Skills**: See `standalone-commits` for making each commit reviewable and auditable. See `incremental-commits` for breaking multi-file changes into ordered waves.
+
+## Skill Shape
+
+Keep commits, branch orchestration, and pull requests in this one skill. They are usually one workflow in practice: inspect the diff, split commits, push branches, write PR descriptions, merge in order. Split out a separate pull-request skill only if PR writing starts needing its own scripts, templates, or long reference set that makes the git skill noisy.
+
+For now, keep the top-level skill small and put detailed PR writing guidance in `references/pull-request-guidelines.md`.
 
 ## When to Apply This Skill
 
 Use this pattern when you need to:
 
 - Write commit messages that follow conventional commit rules.
+- Check whether a staged commit is reviewable as a standalone unit.
 - Decide commit type/scope formatting and breaking-change notation.
 - Draft PR descriptions as continuous narrative prose, opening with WHY.
 - Add required user-facing changelog entries for `feat:`/`fix:` PRs.
@@ -83,7 +90,7 @@ Load these on demand based on what you're working on:
 Our monorepo uses a unified version scheme (`8.Y.Z`) where major version 8 is permanent:
 
 - **Patch** (default): Every merged PR increments `Z` (e.g., `8.0.1` → `8.0.2`)
-- **Minor**: Add `!` after type/scope: `feat(api)!: change endpoint structure` — increments `Y`, resets `Z`
+- **Minor**: Add `!` after type/scope: `feat(api)!: change endpoint structure`, increments `Y`, resets `Z`
 - **Major**: Manual only. Reserved for "if ever needed." Do not use `!` expecting a major bump.
 
 Include `BREAKING CHANGE:` in the commit footer with details when using `!`.

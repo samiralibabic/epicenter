@@ -1,7 +1,7 @@
 /**
  * Reactive transformation state backed by Yjs workspace tables.
  *
- * Replaces TanStack Query + DbService for transformation CRUD. The workspace
+ * Replaces TanStack Query + BlobStore for transformation CRUD. The workspace
  * model stores transformations as metadata rows (title, description, timestamps)
  * without embedded steps—steps live in a separate `transformationSteps` table.
  *
@@ -21,27 +21,23 @@
 
 import { fromTable } from '@epicenter/svelte';
 import { nanoid } from 'nanoid/non-secure';
-import { workspace } from '$lib/client';
-import {
-	type TransformationStep,
-	transformationSteps,
-} from './transformation-steps.svelte';
-
-/** Transformation row type inferred from the workspace table schema. */
-export type Transformation = ReturnType<
-	typeof workspace.tables.transformations.getAllValid
->[number];
+import { whispering } from '$lib/whispering/client';
+import type { Transformation, TransformationStep } from '$lib/workspace';
+import { transformationSteps } from './transformation-steps.svelte';
 
 function createTransformations() {
-	const map = fromTable(workspace.tables.transformations);
+	const map = fromTable(whispering.tables.transformations);
 
 	// Memoize sorted array with $derived for referential stability.
 	const sorted = $derived(
-		[...map.values()]
-			.sort((a, b) => a.title.localeCompare(b.title)),
+		[...map.values()].sort((a, b) => a.title.localeCompare(b.title)),
 	);
 
 	return {
+		[Symbol.dispose]() {
+			map[Symbol.dispose]();
+		},
+
 		/**
 		 * All transformations as a reactive SvelteMap.
 		 *
@@ -70,21 +66,21 @@ function createTransformations() {
 		 * Create or update a transformation. Writes to Yjs → observer updates SvelteMap.
 		 */
 		set(transformation: Transformation) {
-			workspace.tables.transformations.set(transformation);
+			whispering.tables.transformations.set(transformation);
 		},
 
 		/**
 		 * Partially update a transformation by ID.
 		 */
 		update(id: string, partial: Partial<Omit<Transformation, 'id' | '_v'>>) {
-			return workspace.tables.transformations.update(id, partial);
+			return whispering.tables.transformations.update(id, partial);
 		},
 
 		/**
 		 * Delete a transformation by ID.
 		 */
 		delete(id: string) {
-			workspace.tables.transformations.delete(id);
+			whispering.tables.transformations.delete(id);
 		},
 
 		/** Total number of transformations. */
@@ -95,6 +91,10 @@ function createTransformations() {
 }
 
 export const transformations = createTransformations();
+
+if (import.meta.hot) {
+	import.meta.hot.dispose(() => transformations[Symbol.dispose]());
+}
 
 /**
  * Generate a default transformation with sensible defaults.
@@ -141,7 +141,7 @@ export function saveTransformationWithSteps(
 	transformation: Transformation,
 	steps: TransformationStep[],
 ) {
-	workspace.batch(() => {
+	whispering.batch(() => {
 		transformations.set({
 			...transformation,
 			updatedAt: new Date().toISOString(),

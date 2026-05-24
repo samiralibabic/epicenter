@@ -150,11 +150,11 @@ Show how components stack:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  defineWorkspace() + workspace.create()                     │  ← High-level
-│    Creates Y.Doc internally, binds tables/kv/capabilities   │
+│  createDisposableCache((id) => { ... }).open(id)            │  ← High-level
+│    User-owned Y.Doc builder, composes attach* primitives    │
 ├─────────────────────────────────────────────────────────────┤
-│  createTables(ydoc, {...}) / createKv(ydoc, {...})          │  ← Mid-level
-│    Binds to existing Y.Doc                                  │
+│  attachTables(ydoc, {...}) / attachKv(ydoc, {...})          │  ← Mid-level
+│    Binds to an existing Y.Doc                               │
 ├─────────────────────────────────────────────────────────────┤
 │  defineTable() / defineKv()                                 │  ← Low-level
 │    Pure schema definitions                                  │
@@ -259,6 +259,91 @@ Never let prose run for more than a short paragraph without a visual break. The 
 
 Each visual (code snippet, ASCII diagram, before/after block) should be preceded by 1-3 sentences of context and optionally followed by a sentence explaining the subtle detail. If you're writing more than 4-5 sentences of prose in a row, you're missing an opportunity for a diagram or code block.
 
+#### Reviewer-Oriented Bodies for Stacked PRs
+
+When rewriting descriptions for a stack that has already been split, write for the developer who is deciding where to spend attention. They care about the contract, the shape change, and the shortest honest review path. They do not need a second changelog, a test transcript, or a list of files GitHub already shows.
+
+Use this as a pressure test:
+
+- What contract stayed stable or changed?
+- What one call site teaches the new shape?
+- What ownership boundary should the reviewer understand before reading files?
+- Is there a best file order for reviewing the diff?
+
+For a cleanup PR where the public surface stays stable, make that stability explicit before discussing internals:
+
+```ts
+// Still the public shape:
+const thing = createThing(options);
+
+await thing.start();
+await thing.refresh();
+await thing.stop();
+```
+
+Then use a tiny tree to show what moved:
+
+```txt
+Before:
+  createThing
+    -> helperA
+    -> helperB
+    -> internal type visible outside the module
+
+After:
+  createThing
+    -> owns helper mechanics locally
+    -> exposes only the public contract
+```
+
+For a tracer or architecture PR, show the shape before prose gets abstract:
+
+```txt
+feature-root/
+  shared.ts   shared model, schema, actions
+  client.ts   browser or UI runtime
+  server.ts   server, daemon, or persistence runtime
+```
+
+Then show how two runtimes compose the same shared root:
+
+```ts
+const clientFeature = openFeature(owner.shared);
+attachClientRuntime(clientFeature);
+
+const serverFeature = openFeature(server.shared);
+attachServerRuntime(serverFeature);
+```
+
+For a loader, convention, or framework change, make the new rule small enough to remember:
+
+```txt
+<root>/<name>/<entrypoint>.ts
+```
+
+Then show the smallest user-written module that proves the contract:
+
+```ts
+export default defineFeature({
+	async open(ctx) {
+		const feature = openFeature(ctx.shared);
+		return attachRuntime(feature, ctx);
+	},
+});
+```
+
+The review path is not a "Changes" section. It is a map for the human reviewer:
+
+```md
+Good review path:
+
+1. Start with the contract or discovery file.
+2. Read the runtime adapter that consumes it.
+3. Skim one migrated caller as proof the shape works.
+```
+
+Only include that path when the order genuinely helps. For a two-file fix, prose plus one code snippet is enough.
+
 #### Framing Patterns That Work
 
 These patterns consistently produce strong PR descriptions. They're not formulas—they're thinking tools for finding the angle.
@@ -274,6 +359,62 @@ State the simplest possible description of what the old system accomplished, the
 **Bad**: "The encryption system was complex and needed simplification." (no contrast, no specifics)
 
 The fix then lands with zero effort—the reader is already rooting for it.
+
+##### Lead with What Dies (API-collapse PRs)
+
+For PRs that delete or fundamentally reshape an established API surface — especially when the change ripples across many call sites or packages — flip the usual "open with WHY" into a stronger variant: **open with what dies, named explicitly, and let the deletion verb do the work.** The reader anchors on what's gone before what arrives, which makes the rest of the description make sense.
+
+Use this only for PRs where the deletion IS the news. Bug fixes, additive features, and refactors that don't change call sites should use the standard motivation-first opener instead. Counting callers is the quick test — if the change is invisible to call sites, this isn't the right framing.
+
+Four moves that compose:
+
+**1. Open with the deletion verb, naming the dying API.**
+
+> This branch deletes `defineWorkspace` and the `withExtension` chain that drove every workspace in the codebase for a year. The terminal API is **`attach*` primitives composed inline against a Y.Doc the caller owns** — no builder, no extension slots, no framework-imposed bundle shape.
+
+Not "this PR introduces a new composition primitive." Not "we restructured how workspaces are built." *Deletes*, named, with the timespan that makes the stakes clear.
+
+**2. Show concrete before/after at the headline.**
+
+The before/after code block goes in the first hundred words, not after pages of context. A reader who only reads the opening already knows the shape change. This is stronger than the standard "code examples mandatory for API changes" rule — for API-collapse PRs, the before/after IS the headline.
+
+**3. Diagnose the old API without abstract complaints.**
+
+> The chain wasn't doing real work. Each `.withExtension(name, factory)` call was a typed closure with extra ceremony to make the extension's exports reachable through the framework's generic shape. Once you have a Y.Doc as a local variable, `attachIndexedDb(ydoc)` is shorter and exposes its own typed handle (`idb.whenLoaded`, `idb.clearLocal`) without traveling through a slot.
+
+Specific. Falsifiable. A reader who disagrees can point to which sentence is wrong. Not "the chain was unmaintainable" or "the API didn't scale."
+
+**4. Name every type that died as an explicit inventory; name the survivor with the reason it earned its keep.**
+
+> `Document` (a structural contract for "what a workspace returns"), `DocumentBundle`, `DocumentHandle` (a refcounted brand around bundles), `DocumentFactory`, `createDocumentFactory`, `defineDocument`, `defineWorkspace`, `ActionIndex` (a flat map of branded actions walked from arbitrary bundles), `iterateActions`, `ACTION_BRAND` (the symbol that made the walk possible), `entry.handle` envelope in the CLI loader — all gone. What's left is the smallest set of primitives that can build everything those layers were built to do, plus one piece of factory-shaped infrastructure (`createDisposableCache`) that survived because it does work the caller can't trivially do inline: refcount + grace-period teardown for any `Disposable`.
+
+Not "and other types" — the actual list, parenthetically annotated. Two reasons: (a) it lets the reader grep, (b) it forces the author to verify the inventory is exhaustive. The survivor gets a *justification* in the same sentence — not "we kept the cache" but "survived because it does work the caller can't trivially do inline." Without that justification, the reader assumes the survivor is leftover scaffolding and tries to delete it later.
+
+**Cascade structure when the deletion ripples through layers.**
+
+If the deletion forces structural changes to surrounding code (package surface, app shape, consumer wiring), make the cascade explicit. Each layer's collapse caused the next. The PR-A body's opener uses this:
+
+```
+API change       → defineWorkspace dies; attach* primitives become the surface
+       │
+       ▼
+Package surface  → @epicenter/document gets merged into @epicenter/workspace
+       │            (one published surface, one barrel)
+       ▼
+App shape        → apps split into iso/env/client three files because the iso
+                    layer being importable from Node was the whole point
+       │
+       ▼
+Metadata         → 520 commits, 19 packages — held until AFTER the story
+```
+
+Hold metadata (commit count, scope, file count) until after the story. Numbers don't tell the reader anything until they understand what the numbers count.
+
+**Bad version of this pattern** (just listing deletions without the diagnosis or survivor justification):
+
+> This PR deletes `Document`, `DocumentBundle`, `DocumentHandle`, `createDocumentFactory`, `defineDocument`, `defineWorkspace`, `ActionIndex`, `iterateActions`, `ACTION_BRAND`. We replaced them with inline `attach*` calls. Net: 520 commits, 534 files.
+
+The list is there, but the reader has no idea why any of those types existed in the first place, why they were wrong, or what survived. It reads as destruction without architecture. The good version makes the reader understand the *necessity* of each deletion before the inventory lands.
 
 ##### Bold Topic Sentences for Long PRs
 
@@ -460,36 +601,37 @@ The old encryption system had five moving parts to answer one question: does thi
 
 ```typescript
 // Before — 3 steps, async, stateful
-const client = createWorkspace(def)
-  .withEncryption()
-  .withExtension('persistence', ...)
+const ydoc = new Y.Doc({ guid: id });
+const encryption = attachEncryption(ydoc, { encryptionKeys });
+const tables = encryption.attachTables(defs);
 
-await client.encryption.unlock(keys)
+await encryption.unlock(keys);
 ```
 
-Now it's one synchronous call, no builder step, no state machine:
+Now keys are read lazily at every registration site, with no unlock step and no state machine:
 
 ```typescript
-// After — sync, idempotent, no builder step
-const client = createWorkspace(def)
-  .withExtension('persistence', ...)
-
-client.applyEncryptionKeys(keys)  // done
+// After — sync, lazy reads, no mutation hook
+const ydoc = new Y.Doc({ guid: id });
+const encryption = attachEncryption(ydoc, {
+	encryptionKeys: () => requireSignedIn(auth).encryptionKeys,
+});
+const tables = encryption.attachTables(defs);
+// done, registration and activation happen in one call
 ```
 
-`applyEncryptionKeys()` is idempotent and safe to call multiple times. The encrypted Y.Map wrapper no longer maintains a dual-cache — it encrypts on write and decrypts on read, one direction each way. The encryption runtime, key stores, IndexedDB wrappers, and dual-cache logic are all gone.
+The encrypted Y.Map wrapper no longer maintains a dual-cache: it encrypts on write and decrypts on read, one direction each way. The encryption runtime, key stores, IndexedDB wrappers, and dual-cache logic are all gone. Encrypted stores derive their keyring when they attach; same-user key rotation needs a re-attach to affect already-attached stores.
 
 ```
 Before:
-  WorkspaceClient
-    └── .withEncryption()
-        ├── encryption-runtime.ts (state machine)
-        ├── user-key-store.ts (IndexedDB persistence)
-        └── y-keyvalue-lww-encrypted.ts (dual-cache: encrypted + decrypted)
+  attachEncryption(ydoc, { encryptionKeys })
+    ├── encryption-runtime.ts (state machine)
+    ├── user-key-store.ts (IndexedDB persistence)
+    └── y-keyvalue-lww-encrypted.ts (dual-cache: encrypted + decrypted)
 
 After:
-  WorkspaceClient
-    └── .applyEncryptionKeys(keys)  // sync, one method
+  attachEncryption(ydoc, { encryptionKeys })
+    └── reads encryptionKeys() when each encrypted store attaches
         └── y-keyvalue-lww-encrypted.ts (one-way: encrypt on write, decrypt on read)
 ```
 
@@ -547,13 +689,14 @@ RESPONSE: [101] [1=RES] [requestId] [requesterClientId]                         
 The DO is a dumb relay. It forwards a REQUEST to the target peer if they're connected, or synthesizes a PeerOffline RESPONSE if they're not. No RPC logic lives in the server — it just routes bytes.
 
 ```typescript
-const peers = workspace.extensions.sync.peers();
-const ext = peers.find(p => p.client === 'browser-extension');
+const ext = workspace.collaboration.peers
+  .list()
+  .find((p) => p.replicaId === 'browser-extension');
 
-const { data, error } = await workspace.extensions.sync.rpc(
-  ext.clientId,
-  'tabs.close',
-  { tabIds: [1, 2] }
+const { data, error } = await workspace.collaboration.dispatch(
+  'tabs_close',
+  { tabIds: [1, 2] },
+  { to: ext.connId, signal: AbortSignal.timeout(10_000) },
 );
 ```
 

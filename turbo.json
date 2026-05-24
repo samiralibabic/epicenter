@@ -20,6 +20,14 @@
 			"cache": false,
 			"inputs": ["**/*.{ts,tsx,js,jsx,svelte,md,json}"]
 		},
+		"test": {
+			"cache": false,
+			"inputs": ["**/*.{ts,tsx,js,jsx,svelte,json}"]
+		},
+		"bench": {
+			"cache": false,
+			"inputs": ["**/*.bench.ts"]
+		},
 		"format": {
 			"cache": false,
 			"inputs": ["**/*.{ts,tsx,js,jsx,svelte,md,json}"]
@@ -29,10 +37,6 @@
 			"inputs": ["**/*.{ts,tsx,js,jsx,svelte,md,json}"]
 		},
 		"dev": {
-			"cache": false,
-			"persistent": true
-		},
-		"dev:secrets": {
 			"cache": false,
 			"persistent": true
 		}

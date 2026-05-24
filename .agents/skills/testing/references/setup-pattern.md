@@ -26,8 +26,9 @@ Every test file that needs shared infrastructure MUST have a `setup()` function.
 ```typescript
 // Good — always an object, even for one thing
 function setup() {
-	const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-	return { files: ws.tables.files };
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const tables = attachTables(ydoc, { files: filesTable });
+	return { files: tables.files };
 }
 
 test('creates a file', () => {
@@ -40,8 +41,9 @@ test('creates a file', () => {
 ```typescript
 // Bad — returns value directly
 function setup() {
-	const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-	return ws.tables.files; // No destructuring = breaks convention
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const tables = attachTables(ydoc, { files: filesTable });
+	return tables.files; // No destructuring = breaks convention
 }
 ```
 
@@ -76,7 +78,7 @@ When tests need additional setup beyond the base, create composable setup varian
 function setup() {
 	const tableDef = defineTable(fileSchema);
 	const ydoc = new Y.Doc({ guid: 'test-workspace' });
-	const tables = createTables(ydoc, { files: tableDef });
+	const tables = attachTables(ydoc, { files: tableDef });
 	return { ydoc, tables };
 }
 
@@ -108,14 +110,16 @@ Use `beforeEach`/`afterEach` ONLY for cleanup that must run even if a test fails
 // Bad — mutable state, hidden setup
 let files: TableHelper;
 beforeEach(() => {
-	const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-	files = ws.tables.files;
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const tables = attachTables(ydoc, { files: filesTable });
+	files = tables.files;
 });
 
 // Good — setup function, immutable per-test
 function setup() {
-	const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-	return { files: ws.tables.files };
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const tables = attachTables(ydoc, { files: filesTable });
+	return { files: tables.files };
 }
 ```
 
@@ -134,8 +138,9 @@ const fileSchema = type({
 const filesTable = defineTable(fileSchema);
 
 function setup() {
-	const ws = createWorkspace({ id: 'test', tables: { files: filesTable } });
-	return { files: ws.tables.files };
+	const ydoc = new Y.Doc({ guid: 'test' });
+	const tables = attachTables(ydoc, { files: filesTable });
+	return { files: tables.files };
 }
 ```
 

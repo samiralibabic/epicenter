@@ -10,8 +10,9 @@
  */
 import * as Y from 'yjs';
 import { createEncryptedYkvLww } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww-encrypted';
-import { generateEncryptionKey, type EncryptedBlob } from '../../../packages/workspace/src/shared/crypto';
-import type { YKeyValueLwwEntry } from '../../../packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww';
+
+const generateEncryptionKey = (): Uint8Array =>
+	crypto.getRandomValues(new Uint8Array(32));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ const makeSkill = (i: number, edit = 0): Skill => ({
 });
 
 const key = generateEncryptionKey();
+const keyring = new Map([[1, key]]);
 
 // ═══════════════════════════════════════════════════════════════════════
 // SCENARIO 1: Growing collection (20 → ~140 skills over 10 years)
@@ -61,8 +63,8 @@ console.log('');
 
 {
 	const doc = new Y.Doc({ guid: 'growing', gc: true });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const kv = createEncryptedYkvLww<Skill>(arr, { key });
+	const kv = createEncryptedYkvLww<Skill>(doc, 'data');
+	kv.activateEncryption(keyring);
 
 	let nextId = 0;
 	const active: string[] = [];
@@ -106,8 +108,8 @@ console.log('');
 
 	// Fresh comparison
 	const fresh = new Y.Doc({ guid: 'growing-fresh', gc: true });
-	const freshArr = fresh.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const freshKv = createEncryptedYkvLww<Skill>(freshArr, { key });
+	const freshKv = createEncryptedYkvLww<Skill>(fresh, 'data');
+	freshKv.activateEncryption(keyring);
 	for (const k of active) {
 		freshKv.set(k, makeSkill(Number(k.split('_')[1]), 9999));
 	}
@@ -132,8 +134,8 @@ console.log('');
 
 {
 	const doc = new Y.Doc({ guid: 'churn', gc: true });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const kv = createEncryptedYkvLww<Skill>(arr, { key });
+	const kv = createEncryptedYkvLww<Skill>(doc, 'data');
+	kv.activateEncryption(keyring);
 
 	let nextId = 0;
 	const active: string[] = [];
@@ -170,8 +172,8 @@ console.log('');
 	}
 
 	const fresh = new Y.Doc({ guid: 'churn-fresh', gc: true });
-	const freshArr = fresh.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const freshKv = createEncryptedYkvLww<Skill>(freshArr, { key });
+	const freshKv = createEncryptedYkvLww<Skill>(fresh, 'data');
+	freshKv.activateEncryption(keyring);
 	for (const k of active) {
 		freshKv.set(k, makeSkill(Number(k.split('_')[1]), 9999));
 	}
@@ -194,8 +196,8 @@ header('SCENARIO 3: Add-then-delete — does size return to baseline?');
 
 {
 	const doc = new Y.Doc({ guid: 'baseline', gc: true });
-	const arr = doc.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const kv = createEncryptedYkvLww<Skill>(arr, { key });
+	const kv = createEncryptedYkvLww<Skill>(doc, 'data');
+	kv.activateEncryption(keyring);
 
 	for (let i = 0; i < 3; i++) kv.set(`skill_${i}`, makeSkill(i));
 	const baseline = size(doc);
@@ -227,8 +229,8 @@ header('SCENARIO 3: Add-then-delete — does size return to baseline?');
 
 	// Fresh comparison
 	const fresh = new Y.Doc({ guid: 'baseline-fresh', gc: true });
-	const freshArr = fresh.getArray<YKeyValueLwwEntry<EncryptedBlob | Skill>>('data');
-	const freshKv = createEncryptedYkvLww<Skill>(freshArr, { key });
+	const freshKv = createEncryptedYkvLww<Skill>(fresh, 'data');
+	freshKv.activateEncryption(keyring);
 	for (let i = 0; i < 3; i++) freshKv.set(`skill_${i}`, makeSkill(i, 49));
 	console.log(`Fresh (same 3 skills):  ${fmt(size(fresh))}`);
 }

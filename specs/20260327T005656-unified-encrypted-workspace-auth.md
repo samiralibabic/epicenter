@@ -1,8 +1,16 @@
 # Unified Encrypted Workspace Auth
 
 **Date**: 2026-03-27
-**Status**: In Progress
+**Status**: Superseded
 **Author**: Codex
+
+**Superseded on 2026-05-07**: The product direction landed, but the public API
+described here did not remain the active shape. All authenticated workspace
+apps now use encrypted workspace state, including Zhongwen, but current
+`origin/main` routes that through `@epicenter/auth`,
+`@epicenter/auth-svelte`, `createSession`, and
+`attachEncryption(ydoc, { encryptionKeys })` instead of one shared
+`packages/svelte-utils` auth constructor.
 
 ## Overview
 
@@ -263,6 +271,10 @@ Expected outcome: keep the existing watch-based behavior in tab-manager.
 - [ ] Route-level startup uses `whenReady` or a compatibility alias backed by the same promise.
 - [ ] Sign-out still clears local encrypted data across apps.
 
+The checklist is intentionally left as historical state. Some goals landed,
+but not through the exact API in this spec. Marking every item complete would
+hide the fact that the implementation moved to a different boundary.
+
 ## References
 
 - `packages/svelte-utils/src/auth.svelte.ts` - current shared workspace auth controller
@@ -300,3 +312,25 @@ Verification notes:
 Remaining follow-up:
 
 - Do a runtime sign-out sanity pass to confirm `workspace.clearLocalData()` still behaves as expected in Zhongwen.
+
+### Supersession Notes
+
+The important outcome from this spec is now true: Zhongwen is no longer a
+plain-auth exception, and authenticated apps construct encrypted signed-in
+workspace state. The mechanism changed:
+
+```text
+Old target in this spec
+  createAuth({ baseURL, token, user, workspace })
+    -> workspace unlock / clear local data
+
+Current origin/main
+  createCookieAuth(...) / createBearerAuth(...)
+    -> createSession({ auth, build })
+    -> open app workspace with encryptionKeys getter
+    -> attachEncryption(ydoc, { encryptionKeys })
+```
+
+The old follow-up about `workspace.clearLocalData()` should be translated
+before execution. In current code, review disposal, reload-on-user-change, and
+encrypted IndexedDB lifecycle rather than looking for that exact method.

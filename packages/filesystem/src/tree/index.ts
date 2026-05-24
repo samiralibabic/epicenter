@@ -4,7 +4,7 @@ export {
 	validateName,
 } from './naming.js';
 export {
-	createFileSystemIndex,
+	attachFileSystemIndex,
 	type FileSystemIndex,
 } from './path-index.js';
-export { createFileTree, type FileTree } from './tree.js';
+export { attachFileTree, type FileTree } from './tree.js';

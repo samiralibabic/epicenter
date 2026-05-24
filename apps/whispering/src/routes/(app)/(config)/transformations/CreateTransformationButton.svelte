@@ -6,11 +6,11 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { Editor } from '$lib/components/transformations-editor';
 	import { rpc } from '$lib/query';
-	import { type TransformationStep } from '$lib/state/transformation-steps.svelte';
 	import {
 		generateDefaultTransformation,
 		saveTransformationWithSteps,
 	} from '$lib/state/transformations.svelte';
+	import type { TransformationStep } from '$lib/workspace';
 
 	let isModalOpen = $state(false);
 	let transformation = $state(generateDefaultTransformation());

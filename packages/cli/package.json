@@ -1,7 +1,7 @@
 {
 	"name": "@epicenter/cli",
 	"version": "0.1.0",
-	"description": "CLI for Epicenter workspaces. Inspect tables, query data, run actions, and manage sync from the terminal.",
+	"description": "Introspect and invoke defineQuery/defineMutation actions from config-routed daemon extensions.",
 	"keywords": [
 		"local-first",
 		"CLI",
@@ -18,13 +18,22 @@
 		"directory": "packages/cli"
 	},
 	"homepage": "https://epicenter.so",
-	"main": "./src/index.ts",
-	"types": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts"
+	},
 	"bin": {
 		"epicenter": "./bin/epicenter.mjs"
 	},
+	"scripts": {
+		"cli": "bun src/bin.ts",
+		"cli:local": "EPICENTER_API_URL=http://localhost:8787 bun src/bin.ts"
+	},
 	"dependencies": {
+		"@epicenter/auth": "workspace:*",
 		"@epicenter/workspace": "workspace:*",
+		"@hono/standard-validator": "catalog:",
+		"arktype": "catalog:",
+		"hono": "catalog:",
 		"typebox": "catalog:",
 		"wellcrafted": "catalog:",
 		"yargs": "catalog:",
@@ -34,8 +43,8 @@
 		"@epicenter/api": "workspace:*",
 		"@epicenter/honeycrisp": "workspace:*",
 		"@epicenter/tab-manager": "workspace:*",
+		"@types/bun": "catalog:",
 		"@types/yargs": "catalog:",
-		"arktype": "catalog:",
 		"typescript": "catalog:"
 	},
 	"license": "MIT"

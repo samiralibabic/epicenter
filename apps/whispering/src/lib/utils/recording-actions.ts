@@ -37,7 +37,7 @@ export const recordingActions = {
 	 */
 	deleteWithConfirmation(
 		toDelete: Recording | Recording[],
-		options?: { onSuccess?: () => void },
+		{ onSuccess }: { onSuccess?: () => void } = {},
 	) {
 		const arr = Array.isArray(toDelete) ? toDelete : [toDelete];
 		const isSingle = arr.length === 1;
@@ -50,14 +50,14 @@ export const recordingActions = {
 			onConfirm: () => {
 				// Clean up audio URLs before deleting to prevent memory leaks
 				for (const recording of arr) {
-					services.db.recordings.revokeAudioUrl(recording.id);
+					services.blobs.audio.revokeUrl(recording.id);
 					recordings.delete(recording.id);
 				}
 				rpc.notify.success({
 					title: `Deleted ${noun}!`,
 					description: `Your ${noun} ${isSingle ? 'has' : 'have'} been deleted.`,
 				});
-				options?.onSuccess?.();
+				onSuccess?.();
 			},
 		});
 	},

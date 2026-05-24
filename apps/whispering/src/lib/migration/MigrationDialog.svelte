@@ -4,9 +4,10 @@
 	import * as Field from '@epicenter/ui/field';
 	import type { Snippet } from 'svelte';
 	import { migrationDialog } from './migration-dialog.svelte';
-	import { MOCK_RECORDING_COUNT, MOCK_TRANSFORMATION_COUNT } from './migration-test-data';
+	import { MOCK_RECORDING_COUNT } from './migration-test-data';
 
-	let { trigger }: { trigger?: Snippet<[{ props: Record<string, unknown> }]> } = $props();
+	let { trigger }: { trigger?: Snippet<[{ props: Record<string, unknown> }]> } =
+		$props();
 
 	let logsContainer = $state<HTMLDivElement | null>(null);
 
@@ -62,21 +63,32 @@
 			{/if}
 
 			{#if migrationDialog.migrationResult}
-				{@const r = migrationDialog.migrationResult}
 				<Field.Set class="rounded-lg border p-4">
 					<Field.Legend variant="label">Results</Field.Legend>
 					<div class="space-y-1">
 						<Field.Description>
-							Recordings: {r.recordings.migrated} migrated,
-							{r.recordings.skipped} skipped, {r.recordings.failed} failed (of {r.recordings.total})
+							Recordings:
+							{migrationDialog.migrationResult.recordings.migrated}
+							migrated,
+							{migrationDialog.migrationResult.recordings.skipped}
+							skipped, {migrationDialog.migrationResult.recordings.failed}
+							failed (of {migrationDialog.migrationResult.recordings.total})
 						</Field.Description>
 						<Field.Description>
-							Transformations: {r.transformations.migrated} migrated,
-							{r.transformations.skipped} skipped, {r.transformations.failed} failed (of {r.transformations.total})
+							Transformations:
+							{migrationDialog.migrationResult.transformations.migrated}
+							migrated,
+							{migrationDialog.migrationResult.transformations.skipped}
+							skipped,
+							{migrationDialog.migrationResult.transformations.failed}
+							failed (of
+							{migrationDialog.migrationResult.transformations.total})
 						</Field.Description>
 						<Field.Description>
-							Steps: {r.steps.migrated} migrated, {r.steps.skipped} skipped,
-							{r.steps.failed} failed (of {r.steps.total})
+							Steps: {migrationDialog.migrationResult.steps.migrated} migrated,
+							{migrationDialog.migrationResult.steps.skipped}
+							skipped, {migrationDialog.migrationResult.steps.failed}
+							failed (of {migrationDialog.migrationResult.steps.total})
 						</Field.Description>
 					</div>
 				</Field.Set>
@@ -97,7 +109,7 @@
 								>
 									{migrationDialog.isSeeding
 										? 'Seeding\u2026'
-										: `Seed ${MOCK_RECORDING_COUNT} Recordings + ${MOCK_TRANSFORMATION_COUNT} Transformations`}
+									: `Seed ${MOCK_RECORDING_COUNT} Recordings`}
 								</Button>
 								<Button
 									onclick={migrationDialog.clearIndexedDB}
@@ -113,7 +125,8 @@
 						<Field.Set>
 							<Field.Legend variant="label">Reset</Field.Legend>
 							<Field.Description>
-								Clears workspace tables and resets localStorage—re-enables the migration button.
+								Clears workspace tables and resets localStorage—re-enables the
+								migration button.
 							</Field.Description>
 							<Button
 								onclick={migrationDialog.resetMigration}

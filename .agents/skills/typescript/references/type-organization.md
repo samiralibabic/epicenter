@@ -55,6 +55,78 @@ export type Tab = { id: string; deviceId: string /* ... */ };
 
 If every type in a `types.ts` can be derived with `typeof`, `z.infer`, `InferTableRow`, `ReturnType`, etc., the file is redundant. Put each type next to the runtime value it's computed from.
 
+## Factory Return Types Should Follow the Factory
+
+When an exported type is the public handle returned by one `create*` factory, the factory return object is the source of truth.
+
+```typescript
+export type DisposableCache<
+	TId extends string | number,
+	TValue extends Disposable,
+> = ReturnType<typeof createDisposableCache<TId, TValue>>;
+
+export function createDisposableCache<
+	TId extends string | number,
+	TValue extends Disposable,
+>(build: (id: TId) => TValue) {
+	return {
+		open(id: TId): TValue & Disposable {
+			// ...
+		},
+		has(id: TId): boolean {
+			// ...
+		},
+	};
+}
+```
+
+This is different from annotating the factory as `: DisposableCache<TId, TValue>`. The annotation checks the shape, but it also makes editor navigation prefer the named type. The derived alias keeps the public name while letting Go to Definition walk into the actual returned member.
+
+If the public type is a nested slice of a factory result, use a focused inference helper instead of forcing `ReturnType` to name the whole result. For example, session modules use `InferSignedIn<typeof session>` because the app-owned payload lives inside `session.current`, not at the top level of the object returned by `createSession`.
+
+Use this pattern when:
+
+- The type is exactly the return shape of one factory.
+- The factory and type live together.
+- The returned object is the easiest place to understand the API.
+
+Do not use it when the type is a shared contract implemented by multiple factories, a protocol shape, or a deliberate abstraction boundary. In those cases, keep the contract as the source of truth and make implementations `satisfies` it when you want conformance without losing implementation navigation.
+
+## Inline vs Extract: The Hop Test
+
+The classic question — "is this used in multiple places?" — only answers *whether* you could extract. It doesn't answer *whether you should*. The better question:
+
+> **If a reader lands on the call site, do they get more out of seeing this inline, or out of jumping to another file?**
+
+Extraction has a cost: every reader pays attention tax to context-switch into the extracted file, then back. For non-trivial things that's worth it — you get a named concept with its own responsibility. For trivial things (a 3-line type alias, a single template function, one const string), the hop costs more than the dupe.
+
+### Decision table
+
+| Situation | Action |
+|---|---|
+| Used in exactly 1 place | **Inline.** No DRY benefit exists. |
+| Used in many places, ≤5 lines, no independent name worth giving it | **Probably inline.** Hop > dupe. |
+| Used in many places, ≥10 lines OR has its own name/contract/tests | **Extract.** |
+| Public API surface, documented contract, or package boundary | **Always extract, even if trivial.** It *is* the contract. |
+| Sits in a multi-purpose bucket file (`types.ts`, `utils.ts`, `helpers.ts`) | **Extract OUT of the bucket.** Co-locate with consumer or promote to its own named file. |
+
+### Concrete examples from this codebase
+
+- `DocumentHandle` / `DocumentFactory` — previously in their own `create-document-factory.types.ts` file that existed only to keep them out of a bucket. Used only by `create-document-factory.ts`. **Inlined** back into `create-document-factory.ts` — zero reader benefit to the separation, and the separate file's own docstring admitted it was a workaround.
+- `ContentHandle` / `ContentStrategy` — declared, exported, zero importers. **Deleted** (dead extraction).
+- `CombinedStandardSchema` — 5-line type, imported by 9+ files across two packages, documented public contract. **Extracted** to `standard-schema.ts` — small, but crosses a package boundary and has a named reason to exist.
+- `KV_KEY = 'kv'` / `TableKey(name)` — one-line constant + one-line function, but they're the reserved-prefix contract documented in public READMEs. **Extracted** — the contract is the value, not the size.
+- `BaseRow`, `Table<T>`, `RowResult<T>` — many definitions describing what `attachTable` returns. **Co-located** inside `attach-table.ts` — moving them out of a bucket into their natural home.
+
+### The bucket trap
+
+The worst outcome isn't "inline vs extract" — it's "extracted into a generic bucket." A `types.ts` or `utils.ts` with unrelated members gets all the extraction cost (hop overhead, import bloat) with none of the naming benefit. Either:
+
+1. Move each member to its natural home (the file that owns the concept), or
+2. Rename the bucket to the single concern it actually covers (`row-results.ts`, not `types.ts`).
+
+If neither is possible, the members probably don't belong together and some are dead.
+
 # Constant Array Naming Conventions
 
 ## Pattern Summary

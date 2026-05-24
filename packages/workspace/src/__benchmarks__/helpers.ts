@@ -6,8 +6,8 @@
  */
 
 import { type } from 'arktype';
-import { defineKv } from '../workspace/define-kv.js';
-import { defineTable } from '../workspace/define-table.js';
+import { defineKv } from '../document/define-kv.js';
+import { defineTable } from '../document/define-table.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Table & KV Definitions

@@ -1,5 +1,7 @@
 # YJS Persistence Rollout: Handoff Document
 
+> **Historical.** This document describes the October 2025 `createWorkspace({ setupYDoc })` + `defineEpicenter({ workspaces: [...] })` flow. Both of those APIs are gone. Persistence today is a single `attachSqlite(ydoc, { filePath })` (or `attachIndexedDb(ydoc)` in the browser) call inside a `defineDocument((id) => { ... })` builder — see `apps/whispering/src/lib/client.ts` and `playground/opensidian-e2e/epicenter.config.ts` for the current pattern. Preserved for history.
+
 **Date**: October 14, 2025
 **Status**: Ready for Implementation
 **Reference Implementation**: `examples/basic-workspace`
@@ -110,7 +112,7 @@ project-root/
 **Important**: Use the workspace `id` to create a unique filename for each workspace.
 
 ```typescript
-const blogWorkspace = defineWorkspace({
+const blogWorkspace = createWorkspace({
 	id: 'blog', // ← This ID determines the .yjs filename
 	version: 1,
 	name: 'blog',
@@ -154,7 +156,7 @@ const blogWorkspace = defineWorkspace({
 
 ```typescript
 // Pages workspace
-const pages = defineWorkspace({
+const pages = createWorkspace({
 	id: 'pages', // → .epicenter/pages.yjs
 	setupYDoc: (ydoc) => {
 		const filePath = path.join('./.epicenter', 'pages.yjs');
@@ -163,7 +165,7 @@ const pages = defineWorkspace({
 });
 
 // Content-hub workspace
-const contentHub = defineWorkspace({
+const contentHub = createWorkspace({
 	id: 'content-hub', // → .epicenter/content-hub.yjs
 	setupYDoc: (ydoc) => {
 		const filePath = path.join('./.epicenter', 'content-hub.yjs');
@@ -534,7 +536,7 @@ Both workspaces are completely isolated. The dependency relationship is at the A
 
 ```typescript
 // Pages workspace (dependency)
-const pages = defineWorkspace({
+const pages = createWorkspace({
 	id: 'pages', // → .epicenter/pages.yjs
 	setupYDoc: (ydoc) => {
 		const filePath = path.join('./.epicenter', 'pages.yjs');
@@ -543,7 +545,7 @@ const pages = defineWorkspace({
 });
 
 // Content-hub workspace (depends on pages)
-const contentHub = defineWorkspace({
+const contentHub = createWorkspace({
 	id: 'content-hub', // → .epicenter/content-hub.yjs
 	dependencies: [pages],
 	setupYDoc: (ydoc) => {
