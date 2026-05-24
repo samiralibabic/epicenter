@@ -2,6 +2,14 @@ import type { SchemaClient } from '@better-auth/oauth-provider';
 import { APPS, localUrl } from '#apps';
 
 /**
+ * Dev port for the dashboard SPA. The dashboard is served at
+ * `api.epicenter.so/dashboard` in production (same origin as the API), so it
+ * has no `APPS` entry. In dev it runs on its own Vite server; this port is
+ * the single source of truth, mirrored by `apps/dashboard/vite.config.ts`.
+ */
+const DASHBOARD_DEV_PORT = 5178;
+
+/**
  * Shape of one checked-in first-party public OAuth client.
  *
  * Better Auth calls server-side confidential clients `web`. Epicenter's
@@ -88,7 +96,7 @@ export function buildTrustedOAuthClients(apiBaseURL: string) {
 			type: 'user-agent-based',
 			redirectUris: [
 				`${apiBaseURL}/dashboard/auth/callback`,
-				`${localUrl(APPS.DASHBOARD)}/dashboard/auth/callback`,
+				`http://localhost:${DASHBOARD_DEV_PORT}/dashboard/auth/callback`,
 			],
 		},
 		{

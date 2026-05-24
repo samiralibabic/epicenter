@@ -75,5 +75,5 @@
 		"y-codemirror.next": "^0.3.5",
 		"yjs": "catalog:"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

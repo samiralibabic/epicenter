@@ -4,13 +4,8 @@
  * A workspace owns several `EncryptedYKeyValueLww` stores (one per table plus
  * the KV store). This attachment derives a per-workspace HKDF keyring at
  * attach time and calls `activateEncryption(keyring)` on each store before
- * the caller gets it back.
- *
- * ## Method-on-coordinator pattern
- *
- * The coordinator owns the method surface for attaching its sibling
- * primitives. Instead of top-level `attachEncryptedTable(ydoc, encryption, ...)`
- * exports, call the methods on the returned attachment:
+ * the caller gets it back. Call the methods on the returned attachment to
+ * register encrypted resources:
  *
  * ```ts
  * const encryption = attachEncryption(ydoc, { keyring: () => subjectKeyring });
@@ -18,9 +13,9 @@
  * const kv = encryption.attachKv(defs);
  * ```
  *
- * The method names deliberately mirror the plaintext primitives
- * (`attachTable`, `attachTables`, `attachKv`) so the pattern reads
- * symmetrically: "encryption's attach-tables" vs "plain attach-tables."
+ * The method names mirror the plaintext primitives (`attachTable`,
+ * `attachTables`, `attachKv`) so the pattern reads symmetrically:
+ * "encryption's attach-tables" vs "plain attach-tables."
  *
  * ## Key source: lazy callback
  *
@@ -35,13 +30,13 @@
  * different-subject transitions; same-subject updates are observed lazily
  * via the `keyring` callback the next time it runs.
  *
- * ## Local owner concerns live on `createLocalOwner`
+ * ## Local persistence concerns live elsewhere
  *
- * Encrypted IndexedDB, owner-scoped BroadcastChannel, and local-data wipe are
- * identity-scoped (one signed-in user) rather than ydoc-scoped, so they live
- * on `createLocalOwner` (`./local-owner.ts`). Daemons that only need
- * encryption call `attachEncryption` directly; browsers go through
- * `LocalOwner`, which delegates encryption to this function.
+ * Encrypted IndexedDB persistence and owner-scoped BroadcastChannel are
+ * subject-scoped (one signed-in user) rather than ydoc-scoped, so they live
+ * on `attachLocalStorage(ydoc, { subject, keyring })`. Local-data wipe lives
+ * on `wipeLocalStorage({ subject })`. Both are free functions in this
+ * package; callers compose them around `attachEncryption` at use sites.
  *
  * ## Disposal
  *
@@ -52,7 +47,7 @@
  *
  * ## What this attachment does NOT do
  *
- * - It does not wipe CRDT state. `LocalOwner.wipeLocalYjsData` owns that.
+ * - It does not wipe local storage. `wipeLocalStorage({ subject })` owns that.
  * - It does not validate that every encryption-capable slot on the Y.Doc got
  *   registered. The caller owns the composition: if you pair a plaintext
  *   `attachTable` with `encryption.attachTable` targeting the *same slot

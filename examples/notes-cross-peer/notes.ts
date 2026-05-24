@@ -3,18 +3,20 @@
  *
  * Each peer's `daemon.ts` calls `openNotes(ctx-derived-args)` so both peers
  * agree on the workspace id, the table schema, and the action set; the only
- * thing that differs between peers is the `installationId` (the daemon ctx default
- * is `${route}-daemon`, but cross-peer sync requires distinct installationIds for
- * the same workspace, so each peer hard-codes its own).
+ * thing that differs between peers is the `installationId` (the daemon ctx
+ * default is `${route}-daemon`, but cross-peer sync requires distinct
+ * installationIds for the same workspace, so each peer hard-codes its own).
  */
 
+import type { Owner } from '@epicenter/auth';
 import { EPICENTER_API_URL } from '@epicenter/constants/apps';
-import type { OpenWebSocket } from '@epicenter/workspace';
 import {
 	attachTables,
 	defineMutation,
 	defineQuery,
 	defineTable,
+	type OnReconnectSignal,
+	type OpenWebSocketFn,
 	openCollaboration,
 	roomWsUrl,
 } from '@epicenter/workspace';
@@ -31,10 +33,14 @@ const Note = defineTable(type({ id: 'string', body: 'string', _v: '1' }));
 
 export function openNotes({
 	installationId,
+	owner,
 	openWebSocket,
+	onReconnectSignal,
 }: {
 	installationId: string;
-	openWebSocket: OpenWebSocket;
+	owner: Owner;
+	openWebSocket: OpenWebSocketFn;
+	onReconnectSignal: OnReconnectSignal;
 }) {
 	const ydoc = new Y.Doc({ guid: WORKSPACE_ID });
 	const tables = attachTables(ydoc, { notes: Note });
@@ -55,9 +61,14 @@ export function openNotes({
 	};
 
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl(EPICENTER_API_URL, ydoc.guid),
+		url: roomWsUrl({
+			baseURL: EPICENTER_API_URL,
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		openWebSocket,
-		installationId,
+		onReconnectSignal,
 		actions,
 	});
 

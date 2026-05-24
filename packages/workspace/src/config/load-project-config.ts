@@ -10,7 +10,7 @@ import {
 } from 'wellcrafted/error';
 import { Ok, type Result } from 'wellcrafted/result';
 
-import type { DaemonWorkspaceDefinition } from '../daemon/define-daemon-workspace.js';
+import type { DaemonWorkspaceDefinition } from '../daemon/define-workspace.js';
 import type { ProjectDir } from '../shared/types.js';
 import {
 	DEFAULT_PROJECT_CONFIG_SOURCE,

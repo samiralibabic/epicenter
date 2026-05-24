@@ -56,7 +56,7 @@
 -->
 {#await doc.current.idb.whenLoaded}
 	<Loading class="h-full" />
-{:then _}
+{:then}
 	<CodeMirrorEditor
 		ytext={doc.current.content.asText()}
 		{extensions}

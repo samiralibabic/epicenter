@@ -40,7 +40,7 @@
 		"y-indexeddb": "catalog:",
 		"yjs": "catalog:"
 	},
-	"license": "MIT",
+	"license": "AGPL-3.0-or-later",
 	"dependencies": {
 		"mode-watcher": "^1.1.0"
 	}

@@ -83,15 +83,16 @@ export default defineConfig({
 });
 ```
 
-The imported module exports a route-agnostic daemon workspace definition. The route name comes from the `daemon.routes` object key:
+The imported module exports a route-agnostic daemon workspace definition. The route name comes from the `daemon.routes` object key (for multi-route configs) or from the project directory's basename (for single-workspace configs).
 
 ```ts
-import { defineDaemonWorkspace } from '@epicenter/workspace/daemon';
+import { defineWorkspace } from '@epicenter/workspace';
 
-export default defineDaemonWorkspace({
-	async open({ attachEncryption, openWebSocket, projectDir, route }) {
+export default defineWorkspace({
+	async open({ keyring, openWebSocket, projectDir, route, owner, installationId, yDocClientId }) {
 		// Open the long-lived local runtime.
-		// `route` was supplied by epicenter.config.ts.
+		// `route` was supplied by epicenter.config.ts (or derived from the
+		// project directory's basename in single-workspace projects).
 		// Return { collaboration, [Symbol.asyncDispose] }.
 	},
 });

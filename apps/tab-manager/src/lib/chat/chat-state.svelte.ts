@@ -479,7 +479,7 @@ export function createAiChatState({
 		const msgs = tabManager.tables.chatMessages
 			.getAllValid()
 			.filter((m) => m.conversationId === conversationId);
-		tabManager.batch(() => {
+		tabManager.ydoc.transact(() => {
 			for (const m of msgs) {
 				tabManager.tables.chatMessages.delete(m.id);
 			}

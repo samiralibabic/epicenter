@@ -172,7 +172,8 @@ function apiSessionOk(subject = 'user-1'): Route {
 	return () =>
 		jsonResponse({
 			user: { id: subject, email: `${subject}@example.com` },
-			localIdentity: { subject, keyring: [...keyring] },
+			owner: { kind: 'personal' as const, userId: subject },
+			keyring: [...keyring],
 		});
 }
 
@@ -222,7 +223,8 @@ test('loginWithOob writes PersistedAuth and returns identity', async () => {
 			refreshToken: 'refresh-1',
 			accessTokenExpiresAt: NOW + 3_600_000,
 		},
-		localIdentity: { subject: 'user-1', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: [...keyring],
 	});
 
 	if (process.platform !== 'win32') {
@@ -316,7 +318,8 @@ async function preWriteCell(filePath: string, subject = 'user-1') {
 			refreshToken: 'refresh-stored',
 			accessTokenExpiresAt: NOW + 3_600_000,
 		},
-		localIdentity: { subject, keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: subject },
+		keyring: [...keyring],
 	};
 	await writeCell(filePath, cell);
 	return cell;
@@ -342,7 +345,7 @@ test('sign-in writes the new persisted shape', async () => {
 	expectOk(result);
 	const raw = await fs.readFile(filePath, 'utf-8');
 	const parsed = JSON.parse(raw) as Record<string, unknown>;
-	expect(Object.keys(parsed).sort()).toEqual(['grant', 'localIdentity']);
+	expect(Object.keys(parsed).sort()).toEqual(['grant', 'keyring', 'owner']);
 	expect('unlock' in parsed).toBe(false);
 });
 
@@ -550,7 +553,8 @@ test('createMachineAuthClient loads file and attaches Bearer after gate', async 
 		if (url.endsWith('/api/session')) {
 			return jsonResponse({
 				user: { id: 'user-1', email: 'user-1@example.com' },
-				localIdentity: { subject: 'user-1', keyring: [...keyring] },
+				owner: { kind: 'personal' as const, userId: 'user-1' },
+				keyring: [...keyring],
 			});
 		}
 		if (url.endsWith('/api/something')) {

@@ -1,30 +1,35 @@
 /**
- * Opensidian workspace definition: files plus chat metadata.
+ * Opensidian workspace schema: id, branded types, tables, actions factory, and
+ * per-row derived guids. Pure data. No Y.Doc, no encryption, no openers.
  *
- * This file stays isomorphic so the same schema can be imported by the app,
- * CLI tooling, and any future sync or migration code.
+ * Distribution: `apps/opensidian/package.json` exports this file as the
+ * `opensidian` package root. Browser code, daemon code, and tests all import
+ * from here. The table shapes here are the wire contract for sync; forking a
+ * column shape breaks sync compatibility with peers running the canonical
+ * schema.
  *
- * Distribution: this file is the `opensidian` package root export. The table
- * shapes here are the wire contract for sync: forking a column shape breaks
- * sync compatibility with peers running the canonical schema. Browser and
- * daemon entrypoints compose runtime-specific attachments around the shared
- * opener below.
+ * Composition lives elsewhere:
+ *  - `apps/opensidian/src/lib/opensidian/browser.ts` -> `openOpensidianBrowser({ signedIn, installationId })`
+ *  - `apps/opensidian/daemon.ts`                     -> `openOpensidianDaemon(ctx)`
  */
 
-import { filesTable } from '@epicenter/filesystem';
+import {
+	type FileId,
+	fileContentDocGuid,
+	filesTable,
+} from '@epicenter/filesystem';
 import {
 	defineTable,
 	generateId,
 	type Id,
 	type InferTableRow,
-	type LocalOwner,
+	type Tables,
 } from '@epicenter/workspace';
 import { type } from 'arktype';
 import type { Brand } from 'wellcrafted/brand';
 import type { JsonValue } from 'wellcrafted/json';
-import * as Y from 'yjs';
 
-export const OPENSIDIAN_WORKSPACE_ID = 'epicenter.opensidian';
+export const OPENSIDIAN_ID = 'epicenter.opensidian';
 
 /**
  * Branded conversation ID for a single chat thread.
@@ -124,7 +129,6 @@ export type ToolTrust = InferTableRow<typeof toolTrustTable>;
  *
  * Combines the filesystem-backed notes table with the chat tables so the app
  * can store notes, conversations, messages, and tool approvals in one schema.
- * Passed to `attachTables(ydoc, opensidianTables)` inside the client closure.
  */
 export const opensidianTables = {
 	files: filesTable,
@@ -132,27 +136,18 @@ export const opensidianTables = {
 	chatMessages: chatMessagesTable,
 	toolTrust: toolTrustTable,
 };
-type AttachOpensidianEncryption = LocalOwner['attachEncryption'];
+export type OpensidianTables = Tables<typeof opensidianTables>;
 
-export function openOpensidianWorkspace(
-	attachEncryption: AttachOpensidianEncryption,
-	options: { clientId?: number } = {},
-) {
-	const ydoc = new Y.Doc({ guid: OPENSIDIAN_WORKSPACE_ID, gc: true });
-	if (options.clientId !== undefined) {
-		ydoc.clientID = options.clientId;
-	}
-	const encryption = attachEncryption(ydoc);
-	const tables = encryption.attachTables(opensidianTables);
-	const kv = encryption.attachKv({});
-
-	return {
-		ydoc,
-		encryption,
-		tables,
-		kv,
-		batch: (fn: () => void) => ydoc.transact(fn),
-	};
+/**
+ * Deterministic guid of a file's content sub-doc.
+ *
+ * Browser editors, daemon materializers, and wipe paths reach this same
+ * function so every layer points at the same Y.Doc identity. Thin wrapper
+ * around {@link fileContentDocGuid} that pins the workspace id.
+ */
+export function opensidianFileContentDocGuid(fileId: FileId): string {
+	return fileContentDocGuid({
+		workspaceId: OPENSIDIAN_ID,
+		fileId,
+	});
 }
-
-export type OpensidianWorkspace = ReturnType<typeof openOpensidianWorkspace>;

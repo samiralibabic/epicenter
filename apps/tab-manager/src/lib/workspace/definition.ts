@@ -19,7 +19,7 @@ import { type } from 'arktype';
 import type { Brand } from 'wellcrafted/brand';
 import type { JsonValue } from 'wellcrafted/json';
 
-export const TAB_MANAGER_WORKSPACE_ID = 'epicenter.tab-manager';
+export const TAB_MANAGER_ID = 'epicenter.tab-manager';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Branded ID Types
@@ -282,7 +282,8 @@ export type ToolTrust = InferTableRow<typeof toolTrustTable>;
 
 /**
  * Table definitions for the tab-manager workspace. Composed in
- * `lib/tab-manager/extension.ts` via `encryption.attachTables(tabManagerTables)`.
+ * `lib/tab-manager/extension.ts` via `encryption.attachTables(tabManagerTables)`
+ * against an `attachEncryption(ydoc, { keyring })` attachment.
  * Kept separate so actions and future consumers can derive their input
  * types from one source of truth.
  */

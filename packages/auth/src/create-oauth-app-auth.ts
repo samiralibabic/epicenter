@@ -16,6 +16,7 @@ import {
 	type PersistedAuth as PersistedAuthType,
 } from './auth-types.js';
 import { parseOAuthTokenGrant } from './oauth-token-response.js';
+import { ownerId } from './owner.js';
 
 /**
  * Storage adapter for the single `PersistedAuth` cell (grant + localIdentity).
@@ -177,7 +178,8 @@ export function createOAuthAppAuth({
 				if (authSession.persistedAuth !== startedFrom) return false;
 				const next: PersistedAuthType = {
 					grant,
-					localIdentity: startedFrom.localIdentity,
+					owner: startedFrom.owner,
+					keyring: startedFrom.keyring,
 				};
 				await authSession.write(next);
 				if (authSession.persistedAuth !== startedFrom) return false;
@@ -255,20 +257,16 @@ export function createOAuthAppAuth({
 			const current = authSession.persistedAuth;
 			if (current !== startedFrom) return Ok(session);
 
-			if (current.localIdentity.subject !== session.localIdentity.subject) {
+			if (ownerId(current.owner) !== ownerId(session.owner)) {
 				await clearPersistedAuth();
 				return Ok(session);
 			}
 
-			if (
-				!subjectKeyringsEqual(
-					current.localIdentity.keyring,
-					session.localIdentity.keyring,
-				)
-			) {
+			if (!subjectKeyringsEqual(current.keyring, session.keyring)) {
 				const next: PersistedAuthType = {
 					grant: current.grant,
-					localIdentity: session.localIdentity,
+					owner: session.owner,
+					keyring: session.keyring,
 				};
 				await authSession.write(next);
 				if (authSession.persistedAuth !== startedFrom) return Ok(session);
@@ -359,14 +357,15 @@ export function createOAuthAppAuth({
 		if (!isCurrentSignIn(generation)) return Ok(undefined);
 		if (
 			previous !== null &&
-			previous.localIdentity.subject !== session.localIdentity.subject
+			ownerId(previous.owner) !== ownerId(session.owner)
 		) {
 			await clearAuthSession();
 			if (!isCurrentSignIn(generation)) return Ok(undefined);
 		}
 		const next: PersistedAuthType = {
 			grant,
-			localIdentity: session.localIdentity,
+			owner: session.owner,
+			keyring: session.keyring,
 		};
 		await authSession.write(next);
 		if (!isCurrentSignIn(generation)) return Ok(undefined);
@@ -378,6 +377,7 @@ export function createOAuthAppAuth({
 		get state() {
 			return authSession.state;
 		},
+		baseURL,
 		onStateChange(fn) {
 			return authSession.onStateChange(fn);
 		},
@@ -560,12 +560,14 @@ function publicStateFromRuntime(runtimeState: RuntimeAuthState): AuthState {
 	if (runtimeState.networkAccess === 'paused') {
 		return {
 			status: 'reauth-required',
-			localIdentity: runtimeState.persistedAuth.localIdentity,
+			owner: runtimeState.persistedAuth.owner,
+			keyring: runtimeState.persistedAuth.keyring,
 		};
 	}
 	return {
 		status: 'signed-in',
-		localIdentity: runtimeState.persistedAuth.localIdentity,
+		owner: runtimeState.persistedAuth.owner,
+		keyring: runtimeState.persistedAuth.keyring,
 	};
 }
 
@@ -574,11 +576,8 @@ function authStatesEqual(left: AuthState, right: AuthState) {
 	if (left.status === 'signed-out') return true;
 	if (right.status === 'signed-out') return false;
 	return (
-		left.localIdentity.subject === right.localIdentity.subject &&
-		subjectKeyringsEqual(
-			left.localIdentity.keyring,
-			right.localIdentity.keyring,
-		)
+		ownerId(left.owner) === ownerId(right.owner) &&
+		subjectKeyringsEqual(left.keyring, right.keyring)
 	);
 }
 

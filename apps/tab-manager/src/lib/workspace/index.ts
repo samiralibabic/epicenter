@@ -14,6 +14,7 @@ export {
 	generateSavedTabId,
 	type SavedTab,
 	SavedTabId,
+	TAB_MANAGER_ID,
 	type ToolTrust,
 	tabManagerTables,
 } from './definition';

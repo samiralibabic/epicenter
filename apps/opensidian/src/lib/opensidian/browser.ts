@@ -1,72 +1,105 @@
-import type { AuthClient } from '@epicenter/auth';
-import { APP_URLS } from '@epicenter/constants/vite';
+/**
+ * Opensidian browser composition.
+ *
+ * Single source of truth for "how Opensidian mounts in a browser." Calls
+ * Tier 1 primitives inline so every line is visible top-to-bottom:
+ *
+ *  1. workspace root doc (encrypted tables + KV via attachEncryption)
+ *  2. local storage + cloud sync for root (attachLocalStorage + openCollaboration)
+ *  3. per-file child content docs (plaintext timeline + encrypted IDB storage)
+ *  4. file system, sqlite index, bash, and action registry
+ *  5. wipe / dispose teardown
+ *
+ * `openCollaboration` owns reconnect-on-auth-change internally, so this file
+ * has no per-app onStateChange listener.
+ *
+ * The bundle's `wipe()` drops every encrypted IDB database for this subject;
+ * `Symbol.dispose` tears down the root + cached child Y.Docs without touching
+ * local storage.
+ */
+
 import {
 	attachYjsFileSystem,
 	createSqliteIndex,
 	type FileId,
-	fileContentDocGuid,
 } from '@epicenter/filesystem';
+import type { SignedIn } from '@epicenter/svelte';
 import {
+	attachEncryption,
+	attachLocalStorage,
 	attachTimeline,
 	createDisposableCache,
-	type LocalOwner,
 	onLocalUpdate,
 	openCollaboration,
 	roomWsUrl,
+	wipeLocalStorage,
 } from '@epicenter/workspace';
 import { Bash } from 'just-bash';
-import { openOpensidianWorkspace } from 'opensidian';
+import {
+	OPENSIDIAN_ID,
+	opensidianFileContentDocGuid,
+	opensidianTables,
+} from 'opensidian';
 import * as Y from 'yjs';
 import { createOpensidianActions } from './actions';
 
 export function openOpensidianBrowser({
-	owner,
+	signedIn,
 	installationId,
-	auth,
 }: {
-	owner: LocalOwner;
+	signedIn: SignedIn;
 	installationId: string;
-	auth: AuthClient;
 }) {
-	const workspace = openOpensidianWorkspace(owner.attachEncryption);
-	const { ydoc: rootYdoc, tables, kv } = workspace;
+	const ydoc = new Y.Doc({ guid: OPENSIDIAN_ID, gc: true });
+	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
+	const tables = encryption.attachTables(opensidianTables);
+	const kv = encryption.attachKv({});
 
-	const idb = owner.attachLocal(rootYdoc);
+	const idb = attachLocalStorage(ydoc, {
+		server: signedIn.server,
+		owner: signedIn.owner,
+		keyring: signedIn.keyring,
+	});
 
 	const fileContentDocs = createDisposableCache((fileId: FileId) => {
-		const childDocId = fileContentDocGuid({
-			workspaceId: rootYdoc.guid,
-			fileId,
-		});
-		const ydoc = new Y.Doc({
-			guid: childDocId,
+		const childYdoc = new Y.Doc({
+			guid: opensidianFileContentDocGuid(fileId),
 			gc: true,
 		});
-		onLocalUpdate(ydoc, () =>
+		onLocalUpdate(childYdoc, () =>
 			tables.files.update(fileId, { updatedAt: Date.now() }),
 		);
-		const childIdb = owner.attachLocal(ydoc);
-		// File bodies sync through Cloud so device loss doesn't drop the
-		// largest data class.
-		const childSync = openCollaboration(ydoc, {
-			url: roomWsUrl(APP_URLS.API, ydoc.guid),
-			openWebSocket: auth.openWebSocket,
+		const childIdb = attachLocalStorage(childYdoc, {
+			server: signedIn.server,
+			owner: signedIn.owner,
+			keyring: signedIn.keyring,
+		});
+		// File bodies sync through Cloud so device loss doesn't drop the largest
+		// data class.
+		const childSync = openCollaboration(childYdoc, {
+			url: roomWsUrl({
+				baseURL: signedIn.auth.baseURL,
+				owner: signedIn.owner,
+				guid: childYdoc.guid,
+				installationId,
+			}),
+			openWebSocket: signedIn.auth.openWebSocket,
+			onReconnectSignal: signedIn.auth.onStateChange,
 			waitFor: childIdb.whenLoaded,
-			installationId,
 			actions: {},
 		});
 		return {
-			ydoc,
-			content: attachTimeline(ydoc),
+			ydoc: childYdoc,
+			content: attachTimeline(childYdoc),
 			idb: childIdb,
 			sync: childSync,
 			/**
-			 * child disposer rejections do not propagate; bundle.wipe() relies on
+			 * Child disposer rejections do not propagate; bundle.wipe() relies on
 			 * IDB's deleteDatabase native blocking as belt-and-suspenders for
 			 * storage deletion.
 			 */
 			[Symbol.dispose]() {
-				ydoc.destroy();
+				childYdoc.destroy();
 			},
 		};
 	});
@@ -94,7 +127,7 @@ export function openOpensidianBrowser({
 		tables,
 	});
 	const sqliteIndexExports = sqliteIndex.exports;
-	const fs = attachYjsFileSystem(rootYdoc, tables.files, fileContent);
+	const fs = attachYjsFileSystem(ydoc, tables.files, fileContent);
 	const bash = new Bash({ fs, cwd: '/' });
 	const actions = createOpensidianActions({
 		fs,
@@ -102,24 +135,17 @@ export function openOpensidianBrowser({
 		bash,
 	});
 
-	const collaboration = openCollaboration(rootYdoc, {
-		url: roomWsUrl(APP_URLS.API, rootYdoc.guid),
-		openWebSocket: auth.openWebSocket,
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl({
+			baseURL: signedIn.auth.baseURL,
+			owner: signedIn.owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
+		openWebSocket: signedIn.auth.openWebSocket,
+		onReconnectSignal: signedIn.auth.onStateChange,
 		waitFor: idb.whenLoaded,
-		installationId,
 		actions,
-	});
-
-	// Auth transitions: tell live sockets to retry.
-	// Sign-in: a previously-rejected socket reconnects with the new token.
-	// Sign-out: the server closes the existing socket on its own (4401);
-	//   reconnect() ensures the supervisor doesn't sit in 'failed' if the
-	//   user signs back in.
-	const unsubscribeAuth = auth.onStateChange(() => {
-		collaboration.reconnect();
-		for (const child of fileContentDocs.values()) {
-			child.sync.reconnect();
-		}
 	});
 
 	let docsTornDown = false;
@@ -129,36 +155,29 @@ export function openOpensidianBrowser({
 		docsTornDown = true;
 		fileContentDocs[Symbol.dispose]();
 		sqliteIndex[Symbol.dispose]();
-		rootYdoc.destroy();
+		ydoc.destroy();
 	}
 
 	return {
-		ydoc: rootYdoc,
+		ydoc,
 		tables,
 		kv,
-		batch: workspace.batch,
 		idb,
 		fileContentDocs,
 		sqliteIndex: sqliteIndexExports,
 		fs,
 		bash,
+		actions,
 		collaboration,
 		async wipe() {
-			const fallbackGuids = [
-				rootYdoc.guid,
-				...tables.files.getAllValid().map((file) =>
-					fileContentDocGuid({
-						workspaceId: rootYdoc.guid,
-						fileId: file.id,
-					}),
-				),
-			];
 			teardownDocs();
 			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
-			await owner.wipeLocalYjsData(fallbackGuids);
+			await wipeLocalStorage({
+				server: signedIn.server,
+				owner: signedIn.owner,
+			});
 		},
 		[Symbol.dispose]() {
-			unsubscribeAuth();
 			teardownDocs();
 		},
 	};

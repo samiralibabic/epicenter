@@ -26,5 +26,5 @@ Browser code composes browser-only attachments around the same `open<App>Workspa
 
 1. Add `apps/<app>/workspace.ts`.
 2. Point `package.json` `exports["."]` at `./workspace.ts`.
-3. Add `apps/<app>/daemon.ts` with `export default defineDaemonWorkspace({ open })`.
+3. Add `apps/<app>/daemon.ts` exporting `open<App>Daemon(ctx)` as a free factory. The project's `epicenter.config.ts` default-exports `defineWorkspace({ open: openXDaemon })` (single-workspace shape) or registers it under `defineConfig({ daemon: { routes: { ... } } })` (multi-route monorepo shape).
 4. Run `epicenter daemon up -C <repoRoot>` and confirm the route appears in `epicenter list`.

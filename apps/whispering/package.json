@@ -19,7 +19,7 @@
 		"tauri": "tauri",
 		"deploy": "bun run build && wrangler deploy"
 	},
-	"license": "MIT",
+	"license": "AGPL-3.0-or-later",
 	"devDependencies": {
 		"@epicenter/ui": "workspace:*",
 		"@types/bun": "catalog:",

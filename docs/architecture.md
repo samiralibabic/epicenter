@@ -94,7 +94,7 @@ The split is conceptual, not cosmetic. Definitions describe what data means; the
 ### 3. Extend means adding more `attach*` calls
 There is no plugin chain. Persistence, indexing, and materializers all mount through `attach*` functions; the workspace's network surface (sync + presence + dispatch) mounts through the `openCollaboration` primitive. You add them to the builder alongside tables and KV.
 
-The example below syncs a cloud document. A cloud doc is owned by the authenticated subject and addressed by its own `ydoc.guid`, so the client builds the URL with `roomWsUrl(apiUrl, ydoc.guid)`; the server resolves it to the room `subject:${userId}:rooms:${room}`. There is no workspace lookup and no membership check: ownership is identity.
+The example below syncs a cloud document. A cloud doc is owned by the authenticated `owner` and addressed by its own `ydoc.guid`, so the client builds the URL with `roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId })`; the server resolves it to the DO name `users/${userId}/rooms/${room}` (personal) or `rooms/${room}` (team). There is no workspace lookup and no membership check: ownership is identity.
 
 ```ts
 import * as Y from 'yjs';
@@ -113,9 +113,15 @@ const app = defineDocument((id: string) => {
 	const kv = attachKv(ydoc, { themeMode });
 	const idb = attachIndexedDb(ydoc);
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl('https://api.example.com', ydoc.guid),
+		url: roomWsUrl({
+			baseURL: auth.baseURL,
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
+		openWebSocket: auth.openWebSocket,
+		onReconnectSignal: auth.onStateChange,
 		waitFor: idb.whenLoaded,
-		installationId: 'browser',
 		actions: {},
 	});
 	return { id, ydoc, tables, kv, idb, collaboration, /* ... */ };
@@ -235,10 +241,15 @@ const opensidian = defineDocument((id: string) => {
 		}),
 	});
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl(APP_URLS.API, ydoc.guid),
+		url: roomWsUrl({
+			baseURL: auth.baseURL,
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		openWebSocket: auth.openWebSocket,
+		onReconnectSignal: auth.onStateChange,
 		waitFor: idb.whenLoaded,
-		installationId: 'browser',
 		actions,
 	});
 	return { id, ydoc, tables, idb, collaboration, sqliteIndex, /* ... */ };
@@ -255,7 +266,7 @@ defineDocument(builder).open('opensidian')
     +-- attachTables(ydoc, {...})
     +-- attachIndexedDb(ydoc)
     +-- createSqliteIndex(...)
-    +-- openCollaboration(ydoc, { waitFor: idb.whenLoaded, installationId, actions })
+    +-- openCollaboration(ydoc, { url, openWebSocket, onReconnectSignal, waitFor: idb.whenLoaded, actions })
     |
     +-- attachYjsFileSystem(...)              -> editor + terminal + file tree
     +-- actionsToAiTools(...).tools           -> local AI tool execution

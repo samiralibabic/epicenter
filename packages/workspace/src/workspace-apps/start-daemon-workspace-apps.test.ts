@@ -19,7 +19,7 @@ import { expectErr, expectOk } from 'wellcrafted/testing';
 import type {
 	DaemonWorkspaceContext,
 	DaemonWorkspaceDefinition,
-} from '../daemon/define-daemon-workspace.js';
+} from '../daemon/define-workspace.js';
 import type { DaemonRuntime } from '../daemon/types.js';
 
 import { startDaemonWorkspaceApps } from './start-daemon-workspace-apps.js';
@@ -39,7 +39,15 @@ function disposeMarkerPath(route: string): string {
 }
 
 function stubAuthClient(): AuthClient {
-	return { state: { status: 'signed-in' } } as AuthClient;
+	return {
+		state: {
+			status: 'signed-in',
+			owner: { kind: 'personal', userId: 'test-user' },
+			keyring: [] as never,
+		},
+		openWebSocket: () => Promise.resolve({} as WebSocket),
+		onStateChange: () => () => {},
+	} as unknown as AuthClient;
 }
 
 function testRuntime(

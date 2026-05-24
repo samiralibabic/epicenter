@@ -11,13 +11,10 @@
  */
 
 import type { Result } from 'wellcrafted/result';
-import type {
-	DispatchError,
-	DispatchRequest,
-	LiveDevice,
-} from '../document/dispatch.js';
+import type { DispatchError, DispatchRequest } from '../document/dispatch.js';
 import type { SyncStatus } from '../document/internal/sync-supervisor.js';
 import type { Collaboration } from '../document/open-collaboration.js';
+import type { PresenceDevice } from '../document/presence-protocol.js';
 import type { ActionRegistry } from '../shared/actions.js';
 import type { MaybePromise } from '../shared/types.js';
 
@@ -30,7 +27,7 @@ type DaemonServedCollaboration<
 > = {
 	actions: TActions;
 	devices: {
-		list(): LiveDevice[];
+		list(): PresenceDevice[];
 	};
 	status: SyncStatus;
 	dispatch(req: DispatchRequest): Promise<Result<unknown, DispatchError>>;

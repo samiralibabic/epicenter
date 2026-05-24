@@ -31,7 +31,7 @@
  * @module
  */
 
-import type { Static, TSchema } from 'typebox';
+import Type, { type Static, type TSchema } from 'typebox';
 import { Err, isResult, Ok, type Result } from 'wellcrafted/result';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -86,6 +86,27 @@ export type ActionMeta<
 	description?: string;
 	input?: TInput;
 };
+
+/**
+ * Wire schema for {@link ActionMeta}. Defines the single source of truth for
+ * the metadata-only projection that crosses the wire (presence frame device
+ * manifests, daemon `/list` route, etc.). The `input` field is `Type.Object()`
+ * with additional properties allowed because the device's local input schema
+ * is itself a TypeBox/JSON Schema object; the wire validator only confirms
+ * shape, not the inner schema's semantics.
+ *
+ * `Static<typeof ActionMetaSchema>` collapses the parameterized in-process
+ * {@link ActionMeta} to its wire form (`input?: object`), which is the shape
+ * the receiver actually sees over the WebSocket.
+ */
+export const ActionMetaSchema = Type.Object({
+	type: Type.Union([Type.Literal('query'), Type.Literal('mutation')]),
+	title: Type.Optional(Type.String()),
+	description: Type.Optional(Type.String()),
+	input: Type.Optional(
+		Type.Object({}, { additionalProperties: Type.Unknown() }),
+	),
+});
 
 /**
  * Flat snake_case key to `ActionMeta` map. The metadata-only projection of an

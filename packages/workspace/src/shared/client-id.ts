@@ -7,11 +7,15 @@
  * a fresh random clientID per process, leaving one StructStore entry per
  * invocation in the daemon's state vector.
  *
- * `hashClientId(path)` derives a stable 53-bit positive integer from a
+ * `hashYDocClientId(path)` derives a stable 53-bit positive integer from a
  * string identity (typically `Bun.main`). Two invocations of the same
- * script reuse the same clientID; their writes merge under Yjs causality.
- * The state vector grows with the count of distinct scripts that mutate,
- * not the count of invocations.
+ * script reuse the same Y.Doc CRDT clientID; their writes merge under Yjs
+ * causality. The state vector grows with the count of distinct scripts
+ * that mutate, not the count of invocations.
+ *
+ * Distinct from the wire-level `installationId: string` the relay routes by:
+ * this is the Y.Doc CRDT identifier (a number Yjs stamps into every
+ * update), not the WebSocket connection identity.
  *
  * Output range: `[1, 2^53 - 1]`. Zero is reserved by Yjs for "no peer";
  * we shift by one to keep the contract clean. Collisions are
@@ -24,12 +28,13 @@ import { createHash } from 'node:crypto';
 const FIFTY_THREE_BIT_MASK = 0x1fffffffffffffn;
 
 /**
- * Derive a stable 53-bit positive integer from a string path.
+ * Derive a stable 53-bit positive integer Y.Doc CRDT `clientID` from a
+ * string path.
  *
  * @param path A stable identity string. Typically `Bun.main`.
  * @returns A positive integer in `[1, Number.MAX_SAFE_INTEGER]`.
  */
-export function hashClientId(path: string): number {
+export function hashYDocClientId(path: string): number {
 	const digest = createHash('sha256').update(path).digest();
 	// Read the first 8 bytes as a big-endian unsigned 64-bit integer, mask
 	// to 53 bits, and add 1 so the result is always > 0 (Yjs reserves

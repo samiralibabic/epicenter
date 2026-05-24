@@ -211,9 +211,9 @@
 		<!-- Gate on browser state seed so child components can read data synchronously -->
 		{#await Promise.all([tabManager.idb.whenLoaded, browserState.whenReady])}
 			<Loading class="flex-1" label="Loading tabs…" />
-		{:then _}
+		{:then}
 			<div class="flex-1 min-h-0"><UnifiedTabList /></div>
-		{:catch _error}
+		{:catch}
 			<Empty.Root class="flex-1 flex items-center justify-center">
 				<Empty.Media>
 					<TriangleAlertIcon class="size-8 text-muted-foreground" />

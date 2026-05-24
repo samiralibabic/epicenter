@@ -14,5 +14,5 @@
 		"@cloudflare/workers-types": "^4.20250803.0",
 		"wrangler": "catalog:"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

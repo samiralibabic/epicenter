@@ -14,7 +14,7 @@
 
 {#await doc.current.idb.whenLoaded}
 	<Loading class="h-full" />
-{:then _}
+{:then}
 	<HoneycripEditor
 		yxmlfragment={doc.current.body.binding}
 		onContentChange={(change) => honeycrisp.state.notes.updateContent(noteId, change)}

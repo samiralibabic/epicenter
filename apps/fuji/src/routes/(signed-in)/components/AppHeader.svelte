@@ -8,8 +8,8 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { goto } from '$app/navigation';
+	import { auth } from '$lib/auth';
 	import { requireFuji } from '$lib/session';
-	import { auth } from '$platform/auth';
 	import BulkAddModal from './BulkAddModal.svelte';
 
 	let { onOpenSearch }: { onOpenSearch: () => void } = $props();

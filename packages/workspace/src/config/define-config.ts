@@ -1,10 +1,13 @@
-import type { DaemonWorkspaceDefinition } from '../daemon/define-daemon-workspace.js';
-import type { DaemonRuntime } from '../daemon/types.js';
+import type { DaemonWorkspaceDefinition } from '../daemon/define-workspace.js';
 
 export const PROJECT_CONFIG_FILENAME = 'epicenter.config.ts';
-export const DEFAULT_PROJECT_CONFIG_SOURCE = `import { defineConfig } from '@epicenter/workspace';
+export const DEFAULT_PROJECT_CONFIG_SOURCE = `import { defineWorkspace } from '@epicenter/workspace';
 
-export default defineConfig({});
+export default defineWorkspace({
+	open(ctx) {
+		throw new Error('epicenter.config.ts: not yet configured.');
+	},
+});
 `;
 
 export type EpicenterConfig = {
@@ -23,31 +26,4 @@ export type EpicenterConfig = {
  */
 export function defineConfig(config: EpicenterConfig): EpicenterConfig {
 	return config;
-}
-
-/**
- * Define a single-workspace project. The returned definition is the
- * project's sole daemon workspace; the loader assigns the route name from
- * the project directory's basename so existing route-addressable code paths
- * (CLI, materializer logs) keep working without explicit registration.
- *
- * For monorepo dev configs that register many workspaces under one project,
- * use `defineConfig({ daemon: { routes: { ... } } })` instead.
- *
- * @example
- * ```ts
- * // <project>/epicenter.config.ts
- * import { defineWorkspace } from '@epicenter/workspace';
- *
- * export default defineWorkspace({
- *   async open({ projectDir, route, openWebSocket, installationId }) {
- *     // build the workspace, attach materializers, return infrastructure
- *   },
- * });
- * ```
- */
-export function defineWorkspace<TRuntime extends DaemonRuntime>(
-	definition: DaemonWorkspaceDefinition<TRuntime>,
-): DaemonWorkspaceDefinition<TRuntime> {
-	return definition;
 }
