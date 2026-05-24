@@ -1,43 +1,45 @@
 import { expect, test } from 'bun:test';
-import type { AuthClient, AuthState, LocalIdentity } from '@epicenter/auth';
+import type { AuthClient, AuthState } from '@epicenter/auth';
 import { Ok } from 'wellcrafted/result';
 import { createSession } from './session.svelte.js';
 
 (globalThis as unknown as { $state: <T>(value: T) => T }).$state = (value) =>
 	value;
 
-const localIdentity = (subject: string): LocalIdentity => ({
-	subject,
-	keyring: [
-		{
-			version: 1,
-			subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
-		},
-	],
-});
+const keyring = [
+	{
+		version: 1,
+		subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+	},
+] as const;
 
-const signedIn = (subject: string): AuthState => ({
+const signedIn = (userId: string): AuthState => ({
 	status: 'signed-in',
-	localIdentity: localIdentity(subject),
+	owner: { kind: 'personal', userId },
+	keyring: [...keyring],
 });
 
-test('signed-out gap disposes old payload before building the next subject', () => {
+const ownerLabel = (state: AuthState) =>
+	state.status === 'signed-out'
+		? 'signed-out'
+		: state.owner.kind === 'personal'
+			? state.owner.userId
+			: 'team';
+
+test('signed-out gap disposes old payload before building the next owner', () => {
 	const { auth, setState } = createAuthHarness(signedIn('alice'));
 	const events: string[] = [];
 
 	const session = createSession({
 		auth,
-		build: () => {
-			const subject =
-				auth.state.status === 'signed-out'
-					? 'signed-out'
-					: auth.state.localIdentity.subject;
-			events.push(`build:${subject}`);
+		build: ({ owner }) => {
+			const label = owner.kind === 'personal' ? owner.userId : 'team';
+			events.push(`build:${label}`);
 
 			return {
-				subject,
+				label,
 				[Symbol.dispose]() {
-					events.push(`dispose:${subject}`);
+					events.push(`dispose:${label}`);
 				},
 			};
 		},
@@ -47,8 +49,30 @@ test('signed-out gap disposes old payload before building the next subject', () 
 	setState(signedIn('bob'));
 
 	expect(events).toEqual(['build:alice', 'dispose:alice', 'build:bob']);
-	expect(session.current?.subject).toBe('bob');
+	expect(session.current?.label).toBe('bob');
 
+	session[Symbol.dispose]();
+});
+
+test('build receives signedIn with owner, keyring callback, and auth client', () => {
+	const { auth } = createAuthHarness(signedIn('alice'));
+
+	const session = createSession({
+		auth,
+		build: (received) => {
+			expect(received.server).toBe('api.test');
+			expect(received.owner).toEqual({ kind: 'personal', userId: 'alice' });
+			expect(typeof received.keyring).toBe('function');
+			expect(received.keyring()).toEqual([...keyring]);
+			expect(received.auth).toBe(auth);
+			expect(ownerLabel(auth.state)).toBe('alice');
+			return {
+				[Symbol.dispose]() {},
+			};
+		},
+	});
+
+	expect(session.current).not.toBeNull();
 	session[Symbol.dispose]();
 });
 
@@ -59,6 +83,7 @@ function createAuthHarness(initial: AuthState) {
 		get state() {
 			return state;
 		},
+		baseURL: 'https://api.test',
 		onStateChange(fn) {
 			listeners.add(fn);
 			return () => {

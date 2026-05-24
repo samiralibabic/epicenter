@@ -6,26 +6,24 @@
  * return the started runtimes or dispose the successfully opened ones if any
  * sibling failed.
  *
- * The host owns auth. It refuses to start when machine auth is signed-out,
- * then builds a per-route `DaemonWorkspaceContext` where
- * `attachEncryption` and `openWebSocket` already carry the auth bindings.
- * Daemon code never touches the auth client directly: it consumes the
- * capabilities in the context and composes a runtime.
+ * The host owns auth lifecycle. It refuses to start when machine auth is
+ * signed-out, then builds a per-route `DaemonWorkspaceContext` carrying the
+ * lazy `keyring` reader (with a sign-out guard) plus the auth client itself
+ * for `openCollaboration({ auth })`.
  */
 
 import { resolve } from 'node:path';
-import type { AuthClient } from '@epicenter/auth';
+import type { AuthClient, Owner } from '@epicenter/auth';
+import type { SubjectKeyring } from '@epicenter/encryption';
 import { Err, Ok, type Result } from 'wellcrafted/result';
-import type * as Y from 'yjs';
 
 import type {
 	DaemonWorkspaceContext,
 	DaemonWorkspaceDefinition,
-} from '../daemon/define-daemon-workspace.js';
+} from '../daemon/define-workspace.js';
 import type { StartedDaemonRoute } from '../daemon/index.js';
 import { validateDaemonRouteNames } from '../daemon/route-validation.js';
-import { attachEncryption } from '../document/attach-encryption.js';
-import { hashClientId } from '../shared/client-id.js';
+import { hashYDocClientId } from '../shared/client-id.js';
 import type { ProjectDir } from '../shared/types.js';
 import { WorkspaceAppError } from './errors.js';
 
@@ -59,9 +57,14 @@ export async function startDaemonWorkspaceApps(
 		return WorkspaceAppError.WorkspaceRouteRejected(routeIssue);
 	}
 
+	// Sign-out is guarded above, so `auth.state.owner` is stable here. Pin it
+	// to each route's context so daemons build URLs without re-reading auth
+	// state.
+	const owner = auth.state.owner;
+
 	const settled = await Promise.allSettled(
 		routeEntries.map(([route, definition]) =>
-			openOneDaemonRoute({ route, definition, projectDir, auth }),
+			openOneDaemonRoute({ route, definition, projectDir, auth, owner }),
 		),
 	);
 
@@ -99,22 +102,26 @@ async function openOneDaemonRoute({
 	definition,
 	projectDir,
 	auth,
+	owner,
 }: {
 	route: string;
 	definition: DaemonWorkspaceDefinition;
 	projectDir: ProjectDir;
 	auth: AuthClient;
+	owner: Owner;
 }): Promise<Result<StartedDaemonRoute, WorkspaceAppError>> {
 	const ctx: DaemonWorkspaceContext = {
 		projectDir,
 		route,
-		clientId: hashClientId(projectDir),
+		yDocClientId: hashYDocClientId(projectDir),
 		installationId: `${route}-daemon`,
-		attachEncryption: createDaemonAttachEncryption({
-			auth,
-			route,
-		}),
+		owner,
+		keyring: createDaemonKeyringReader({ auth, route }),
+		// `auth.openWebSocket` / `auth.onStateChange` are closure-based on
+		// the auth client and do not read `this`, so passing the method
+		// reference directly is safe (no `.bind(auth)` needed).
 		openWebSocket: auth.openWebSocket,
+		onReconnectSignal: auth.onStateChange,
 	};
 	try {
 		const runtime = await definition.open(ctx);
@@ -128,26 +135,24 @@ async function openOneDaemonRoute({
 }
 
 /**
- * Build the encryption attacher the daemon ctx hands to routes. The
- * keyring closure reads `auth.state` lazily so a late sign-out throws at the
- * next encryption call instead of the host having to re-check on every open.
+ * Build the lazy keyring reader the daemon ctx hands to routes. Reads
+ * `auth.state` on every call so a late sign-out throws at the next encrypted
+ * write or registration site instead of the host having to re-check on every
+ * open.
  */
-function createDaemonAttachEncryption({
+function createDaemonKeyringReader({
 	auth,
 	route,
 }: {
 	auth: AuthClient;
 	route: string;
-}) {
-	return (ydoc: Y.Doc) =>
-		attachEncryption(ydoc, {
-			keyring: () => {
-				if (auth.state.status === 'signed-out') {
-					throw new Error(`[${route}-daemon] auth signed-out.`);
-				}
-				return auth.state.localIdentity.keyring;
-			},
-		});
+}): () => SubjectKeyring {
+	return () => {
+		if (auth.state.status === 'signed-out') {
+			throw new Error(`[${route}-daemon] auth signed-out.`);
+		}
+		return auth.state.keyring;
+	};
 }
 
 async function disposeOpenedRuntimes(

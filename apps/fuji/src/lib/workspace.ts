@@ -1,12 +1,17 @@
 /**
- * Fuji workspace contract: schema, branded IDs, shared opener, and CLI/script
- * action factory.
+ * Fuji workspace schema: id, branded types, tables, actions, and per-row
+ * derived guids. Pure data. No Y.Doc, no encryption, no openers.
  *
  * Distribution: `apps/fuji/package.json` exports this file as the
- * `@epicenter/fuji` package root. Browser code imports this module through
- * `$lib` or relative paths so Vite serves it from the app source tree. The
- * table shapes here are the wire contract for sync; forking a column shape
- * breaks sync compatibility with peers running the canonical schema.
+ * `@epicenter/fuji` package root. Browser code, daemon code, and tests all
+ * import from here. The table shapes here are the wire contract for sync;
+ * forking a column shape breaks sync compatibility with peers running the
+ * canonical schema.
+ *
+ * Composition lives elsewhere:
+ *  - `apps/fuji/src/lib/browser.ts`  → `openFujiBrowser({ signedIn, installationId })`
+ *  - `apps/fuji/daemon.ts`           → `openFujiDaemon(ctx)`
+ *  - `examples/fuji/epicenter.config.ts` → canonical project layout composition
  */
 
 import {
@@ -18,15 +23,13 @@ import {
 	docGuid,
 	generateId,
 	type InferTableRow,
-	type LocalOwner,
 	type Tables,
 } from '@epicenter/workspace';
 import { type } from 'arktype';
 import Type from 'typebox';
 import type { Brand } from 'wellcrafted/brand';
-import * as Y from 'yjs';
 
-export const FUJI_WORKSPACE_ID = 'epicenter.fuji';
+export const FUJI_ID = 'epicenter.fuji';
 
 export type EntryId = string & Brand<'EntryId'>;
 export const EntryId = type('string').pipe((s): EntryId => s as EntryId);
@@ -65,88 +68,20 @@ export type Entry = InferTableRow<typeof entriesTable>;
 
 export const fujiTables = { entries: entriesTable };
 export type FujiTables = Tables<typeof fujiTables>;
-type AttachFujiEncryption = LocalOwner['attachEncryption'];
 
 /**
- * Compute the deterministic guid of an entry's rich-text content sub-doc.
- * Browser editors, daemon materializers, and wipe paths reach this through
- * the `workspace.entryContentDocGuid(entryId)` method so every layer points
- * at the same Y.Doc identity.
+ * Deterministic guid of an entry's rich-text content sub-doc.
  *
- * Kept private so callers go through the workspace bundle (which already
- * knows its own `ydoc.guid`) rather than re-deriving `workspaceId` by hand.
+ * Browser editors, daemon materializers, and wipe paths reach this same
+ * function so every layer points at the same Y.Doc identity.
  */
-function entryContentDocGuid({
-	workspaceId,
-	entryId,
-}: {
-	workspaceId: string;
-	entryId: EntryId;
-}): string {
+export function entryContentDocGuid(entryId: EntryId): string {
 	return docGuid({
-		workspaceId,
+		workspaceId: FUJI_ID,
 		collection: 'entries',
 		rowId: entryId,
 		field: 'content',
 	});
-}
-
-/**
- * Open the canonical Fuji workspace: a Y.Doc keyed by `FUJI_WORKSPACE_ID`
- * with encrypted Fuji tables and kv attached.
- *
- * Browser code composes browser-only attachments (IndexedDB, BroadcastChannel,
- * collaboration) around `workspace.ydoc`. Daemon code composes daemon-only
- * attachments (Yjs log, SQLite, Markdown materializers, collaboration) around
- * the same `workspace.ydoc`.
- *
- * Pass `clientId` to pin the Y.Doc clientID; daemons hash `projectDir` so two
- * daemons in different project directories produce distinct update streams.
- */
-export function openFujiWorkspace(
-	attachEncryption: AttachFujiEncryption,
-	options: { clientId?: number } = {},
-) {
-	const ydoc = new Y.Doc({ guid: FUJI_WORKSPACE_ID, gc: true });
-	if (options.clientId !== undefined) {
-		ydoc.clientID = options.clientId;
-	}
-	return attachFujiWorkspace(ydoc, attachEncryption);
-}
-
-export type FujiWorkspace = ReturnType<typeof openFujiWorkspace>;
-
-function attachFujiWorkspace(
-	ydoc: Y.Doc,
-	attachEncryption: AttachFujiEncryption,
-) {
-	const encryption = attachEncryption(ydoc);
-	const tables = encryption.attachTables(fujiTables);
-	const kv = encryption.attachKv({});
-	/**
-	 * Single source of truth for the Fuji action surface. Browser and daemon
-	 * both pass this directly to `openCollaboration({ actions })`, so the
-	 * action handlers (and their inputs/outputs) are guaranteed identical
-	 * across layers without a second `createFujiActions(tables)` call.
-	 */
-	const actions = createFujiActions(tables);
-
-	return {
-		ydoc,
-		encryption,
-		tables,
-		kv,
-		actions,
-		batch: (fn: () => void) => ydoc.transact(fn),
-		touchEntry(entryId: EntryId) {
-			tables.entries.update(entryId, {
-				updatedAt: DateTimeString.now(),
-			});
-		},
-		entryContentDocGuid(entryId: EntryId) {
-			return entryContentDocGuid({ workspaceId: ydoc.guid, entryId });
-		},
-	};
 }
 
 export function createFujiActions(tables: FujiTables) {

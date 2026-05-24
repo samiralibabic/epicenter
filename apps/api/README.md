@@ -64,7 +64,7 @@ For the full argument:
 Cloudflare Workers
 ├── Hono app (src/app.ts)
 │   ├── /auth/*          Better Auth (email/password, Google OAuth, OAuth provider)
-│   ├── /ai/chat         AI streaming (OpenAI, Anthropic via @tanstack/ai)
+│   ├── /ai/chat         AI streaming (OpenAI and Gemini via @tanstack/ai)
 │   ├── /rooms/:room     Cloud doc sync (WebSocket upgrade or HTTP)
 │   └── /rooms/:room/dispatch
 │                        Cross-device dispatch (HTTP POST)

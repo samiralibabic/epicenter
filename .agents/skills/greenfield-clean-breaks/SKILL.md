@@ -7,6 +7,12 @@ description: Greenfield clean-break review for refusing compatibility, finding i
 
 Use this skill when the user explicitly removes compatibility pressure or asks whether the current shape would survive if designed today.
 
+## References
+
+Load on demand:
+
+- For a thin `/goal` template that invokes this skill, read [references/goal-template.md](references/goal-template.md).
+
 Examples:
 
 ```txt

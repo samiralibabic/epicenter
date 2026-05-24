@@ -6,9 +6,11 @@ export {
 	type AuthState,
 	AuthUser,
 	type CreateOAuthAppAuthConfig,
-	type LocalIdentity,
 	type OAuthSignInLauncher,
 	type OAuthTokenGrant,
+	Owner,
+	type OwnerKind,
+	ownerId,
 	PersistedAuth,
 	type PersistedAuthStorage,
 } from '@epicenter/auth';

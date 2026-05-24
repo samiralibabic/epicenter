@@ -34,7 +34,12 @@
 			"!**/.gitignore",
 			"!.DS_Store",
 			"!docs/articles",
-			"!**/*.md"
+			"!**/*.md",
+			// svelte-check owns .svelte files. Biome's HTML/Svelte parser
+			// rejects valid Svelte 5 syntax (e.g. value-less `{:then}`),
+			// and the rules it can apply to script blocks duplicate what
+			// svelte-check already enforces via TypeScript.
+			"!**/*.svelte"
 		]
 	},
 	"formatter": {
@@ -69,42 +74,31 @@
 	},
 	"overrides": [
 		{
-			// Biome's HTML-ish language support can lint <script> blocks but can't see template usage
-			"includes": ["**/*.svelte", "**/*.astro"],
+			// Biome can lint <script> blocks in .astro components but can't see
+			// template usage, so imports and handlers used only in templates
+			// appear unused. (.svelte files are excluded from Biome entirely;
+			// svelte-check owns them.)
+			"includes": ["**/*.astro"],
 			"linter": {
 				"rules": {
 					"correctness": {
-						// Biome can't see template usage, so namespace imports appear unused
 						"noUnusedImports": "off",
-						// Biome can't see template usage, so template handlers look unused
 						"noUnusedVariables": "off"
 					},
 					"style": {
-						// Svelte runes are flagged as "const"-able
-						"useConst": "off",
-						// Biome flags imports as "type-only"-able when it can't see template usage
 						"useImportType": "off",
-						// Non-null assertions are sometimes needed for Svelte reactive bindings
 						"noNonNullAssertion": "off"
 					},
-					"complexity": {
-						// Svelte 5 bind:value getter/setter syntax uses commas that Biome misreads
-						"noCommaOperator": "off"
-					},
 					"suspicious": {
-						// `() => void | Promise<T>` is valid for callback props
 						"noConfusingVoidType": "off",
-						// Template expressions in Svelte can be false positives
 						"noTemplateCurlyInString": "off",
-						// Svelte template iterators don't always need explicit returns
 						"useIterableCallbackReturn": "off",
-						// Svelte components sometimes use `any` for template bindings
 						"noExplicitAny": "off"
 					},
 					"a11y": {
 						// SVG icons in components don't always need <title>
 						"noSvgWithoutTitle": "off",
-						// Svelte components often omit button type in templates
+						// Astro components often omit button type in templates
 						"useButtonType": "off",
 						// autofocus is intentional UX in dialogs and forms
 						"noAutofocus": "off",

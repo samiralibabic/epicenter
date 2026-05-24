@@ -68,7 +68,7 @@
 	{/each}
 
 	<Button
-		href={APP_URLS.DASHBOARD}
+		href={`${APP_URLS.API}/dashboard`}
 		target="_blank"
 		variant="ghost"
 		class="relative justify-start text-left font-normal text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"

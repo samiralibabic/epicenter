@@ -5,11 +5,12 @@ This page only makes claims visible in the current code:
 - `packages/encryption/src/index.ts`
 - `packages/workspace/src/shared/y-keyvalue/y-keyvalue-lww-encrypted.ts`
 - `packages/workspace/src/document/attach-encryption.ts`
-- `packages/workspace/src/document/attach-encrypted.ts`
+- `packages/workspace/src/document/attach-local-storage.ts`
+- `packages/workspace/src/document/wipe-local-storage.ts`
+- `packages/workspace/src/document/attach-encrypted-indexed-db.ts`
 - `apps/api/src/auth/encryption.ts`
 - `apps/api/src/auth/create-auth.ts`
-- `packages/svelte-utils/src/auth/create-auth.svelte.ts`
-- `packages/workspace/src/document/attach-indexed-db.ts`
+- `packages/svelte-utils/src/session.svelte.ts`
 - `apps/api/src/room.ts`
 If something is not visible there, it is not presented as fact here.
 
@@ -47,7 +48,7 @@ encrypted CRDT value
 ```
 On the server, `apps/api/src/auth/encryption.ts` reads `ENCRYPTION_SECRETS` from the worker env and calls `@epicenter/encryption` to parse the root keyring and derive per-subject keys.
 It returns one `{ version, subjectKeyBase64 }` entry per configured root keyring version.
-On the client, the encryption coordinator (`attachEncryption(ydoc, { keyring })`) reads `keyring()` synchronously at every `attachTable` / `attachKv` / `attachIndexedDb` site, decodes each `subjectKeyBase64`, runs `deriveWorkspaceKey(subjectKey, workspaceId)`, and gets a 32-byte workspace key with `info = workspace:{workspaceId}`.
+On the client, the encryption coordinator (`attachEncryption(ydoc, { keyring })`) reads `keyring()` synchronously at every `attachTable` / `attachTables` / `attachKv` site, decodes each `subjectKeyBase64`, runs `deriveWorkspaceKey(subjectKey, workspaceId)`, and gets a 32-byte workspace key with `info = workspace:{workspaceId}`.
 The highest version becomes the current key for new writes.
 
 ## How keys reach the client
@@ -55,51 +56,79 @@ Keys come through `/api/session`.
 `apps/api/src/app.ts` mounts `GET /api/session` behind cookie-or-bearer authentication. A valid Better Auth cookie session or a valid API-audience bearer token for the user can fetch `{ user: { id, email }, localIdentity: { subject, keyring } }`.
 `@epicenter/auth` calls `/api/session` at sign-in and at cold-boot when online, persists `{ subject, keyring }` as the `localIdentity` section of the cell, and exposes it through `auth.state.localIdentity.keyring` whenever the auth state is not `signed-out`.
 Cold-boot offline keeps the cached `localIdentity` so the workspace can decrypt local Yjs data without a network roundtrip; the bearer is not attached to outbound requests until `/api/session` re-confirms the cell in this runtime.
-The workspace does not hold an independently mutable copy of the keys. `attachEncryption` takes a `keyring` callback and calls it when an encrypted table, KV store, or IndexedDB provider attaches. Each attached store keeps the keyring derived at that attachment boundary. Browser app session modules usually receive a `LocalOwner` from `createSession`; that owner carries the lazy keyring reader:
+The workspace does not hold an independently mutable copy of the keys. `attachEncryption` takes a `keyring` callback and calls it when an encrypted table or KV store attaches; `attachLocalStorage` takes the same callback and calls it on every persisted update. Each attached store keeps the keyring derived at that attachment boundary. Browser app session modules receive a flat `SignedIn` payload from `createSession`; that payload carries the lazy keyring reader and the stable owner:
 ```ts
+import { createSession, type SignedIn } from '@epicenter/svelte';
+
 export const session = createSession({
 	auth,
-	build: ({ owner }) =>
+	build: (signedIn: SignedIn) =>
 		openMyApp({
-			owner,
+			signedIn,
 			installationId: createInstallationId({ storage: localStorage }),
-			openWebSocket: auth.openWebSocket,
 		}),
 });
 ```
-Same-subject identity updates do not remount the workspace. Auth callbacks read `auth.state` at the boundary that asks for them: sync can see refreshed bearer tokens on connection attempts, while encrypted stores keep the keyring they derived when they were attached. There is no mutation hook on the workspace.
+`SignedIn` is `{ server: string; owner: Owner; keyring: () => SubjectKeyring; auth: AuthClient }`. `owner` is derived from the auth signed-in state and stays stable for the lifetime of a single `SignedIn` payload. `keyring` is a callback that reads the current `localIdentity.keyring` from `auth.state`, so same-owner rotations (e.g. `reauth-required` -> identity-bearing) are picked up on the next call without rebuilding the payload. `auth` is the live `AuthClient`; `openCollaboration({ openWebSocket, onReconnectSignal })` uses `auth.openWebSocket` to open the relay socket and subscribes to `auth.onStateChange` to drive reconnect, so per-app openers do not write reconnect glue. A different-owner sign-in publishes a `signed-out` gap first, which disposes the payload and rebuilds with the new owner.
+
+Same-subject identity updates do not remount the workspace. Auth callbacks read `auth.state` at the boundary that asks for them: sync can see refreshed bearer tokens on connection attempts, encrypted-store registrations re-derive on each new `attachTable` / `attachKv` call, and `attachLocalStorage`'s IDB writes pick up rotated keys on the next persisted update. Already-attached encrypted tables and KVs keep the keyring they derived when they were attached.
+
+Daemon-side openers receive the same shape via `DaemonWorkspaceContext`: `{ projectDir, route, yDocClientId, installationId, owner, keyring: () => SubjectKeyring, openWebSocket, onReconnectSignal }`. The host's `keyring` closure throws when auth is signed-out, so a late sign-out becomes a thrown error at the next encrypted-write or registration site rather than silent ciphertext loss. The `openWebSocket` and `onReconnectSignal` refs flow through to `attachDaemonInfrastructure({ openWebSocket, onReconnectSignal })` for cloud sync.
 
 ## Browser local persistence
-Authenticated browser workspaces open local IndexedDB only after auth has settled into a signed-in state. The session module guarantees that boundary: it builds the workspace lazily once `auth.state.status === 'signed-in'` and disposes it on sign-out.
-Two inputs flow into the workspace:
-- `owner: LocalOwner` scopes local IndexedDB and BroadcastChannel names to the owner. `createSession` builds it from `localIdentity.subject` once at session mount because IDB and BroadcastChannel keys are immutable for the lifetime of the workspace.
-- The owner also carries a `keyring: () => SubjectKeyring` callback. The encryption coordinator invokes it when an encrypted store is attached. Already-attached stores keep their derived keyring; same-subject key rotation needs a re-attach to affect those stores.
+Authenticated browser workspaces open local IndexedDB only after auth has settled into an identity-bearing state. The session module guarantees that boundary: it builds the workspace lazily once auth produces a `SignedIn` payload and disposes it on sign-out.
 
-The browser factory shape is:
+Two attachments cover the local-data surface and they read directly off the same `SignedIn` payload:
+- `attachEncryption(ydoc, { keyring })` binds the per-workspace HKDF keyring across `attachTable(s)` and `attachKv` calls. The coordinator does not own local storage: it only derives keys and activates the encrypted CRDT wrappers.
+- `attachLocalStorage(ydoc, { server, owner, keyring })` opens `(server, owner)`-scoped encrypted IndexedDB persistence and pairs it with a matching `BroadcastChannel` under the same name. The `server` and `owner` are snapshotted at attach time (stable for the attachment lifetime), and `keyring` is a callback so the IDB layer picks up rotated keys on the next persisted update.
+
+The browser factory shape is (from `apps/fuji/src/lib/browser.ts`):
 ```ts
-export function openMyApp({
-	owner,
+export function openFujiBrowser({
+	signedIn,
 	installationId,
-	openWebSocket,
 }: {
-	owner: LocalOwner;
+	signedIn: SignedIn;
 	installationId: string;
-	openWebSocket?: OpenWebSocket;
 }) {
-	const doc = openMyAppDoc({ owner });
+	const ydoc = new Y.Doc({ guid: FUJI_ID, gc: true });
+	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
+	const tables = encryption.attachTables(fujiTables);
+	const kv = encryption.attachKv({});
 
-	const idb = owner.attachIndexedDb(doc.ydoc);
-	owner.attachBroadcastChannel(doc.ydoc);
+	const idb = attachLocalStorage(ydoc, {
+		server: signedIn.server,
+		owner: signedIn.owner,
+		keyring: signedIn.keyring,
+	});
+	const collaboration = openCollaboration(ydoc, {
+		url: roomWsUrl({
+			baseURL: signedIn.auth.baseURL,
+			owner: signedIn.owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
+		openWebSocket: signedIn.auth.openWebSocket,
+		onReconnectSignal: signedIn.auth.onStateChange,
+		waitFor: idb.whenLoaded,
+		actions,
+	});
 	// ...
 }
 ```
 
+`attachLocalStorage` reads exactly `{ server, owner, keyring }` from the explicit options object. The call site destructures `signedIn` so the dependency is visible in the code, not implied by structural typing.
+
 The storage name is derived inside `@epicenter/workspace` as:
 ```text
-epicenter.owner.{ownerId}.yjs.{ydocGuid}
+epicenter/{server}/users/{userId}/{ydocGuid}      personal
+epicenter/{server}/{ydocGuid}                     team
 ```
 
-App code should not build that string. Device cleanup uses `owner.wipeLocalYjsData(ydocGuids)`, which deletes known document databases and also sweeps enumerable IndexedDB names with the same owner prefix when the browser exposes `indexedDB.databases()`.
+App code does not build that string. Device cleanup uses the free function `wipeLocalStorage({ server, owner })`, which enumerates `indexedDB.databases()` and deletes every entry whose name starts with the durable `(server, owner)` prefix `epicenter/<server>/users/<userId>/` (personal) or `epicenter/<server>/` (team). It no-ops gracefully when `indexedDB.databases()` is unavailable. A typical sign-out or "delete my local data" path looks like:
+```ts
+await wipeLocalStorage({ server: signedIn.server, owner: signedIn.owner });
+```
 
 ## Key lifecycle in the current code
 Keys are definitely loaded on login.
@@ -108,34 +137,26 @@ Sign-out disposes the live workspace after the auth session changes.
 It does not wipe local IndexedDB data.
 The reviewed code still does not show an explicit in-memory key wipe inside `createEncryptedYkvLww`; workspace disposal is the current key-drop boundary for `createSession` apps.
 The closest Bitwarden analogy is lock, not logout: Bitwarden documents unlock as using encrypted data already stored on disk and lock as deleting decrypted vault data and the account encryption key from memory. Bitwarden separately documents that logout wipes PIN settings. See [Understand Log In vs. Unlock](https://bitwarden.com/help/understand-log-in-vs-unlock/) and [Unlock With PIN](https://bitwarden.com/help/unlock-with-pin/).
-The logout path is owned by the per-app session module. `createSession` reconciles `auth.state` against the live workspace: sign-out disposes the workspace, and same-subject updates are a no-op at the session boundary. A different subject from `/api/session` is rejected by auth before the workspace is reused:
+The logout path is owned by the per-app session module. `createSession` reconciles `auth.state` against the live workspace: sign-out disposes the workspace, and same-owner updates are a no-op at the session boundary. A different owner publishes a `signed-out` gap first, which disposes the current payload before the new owner mounts:
 ```ts
-import { createSession, type InferSignedIn } from '@epicenter/svelte';
+import { createSession, type SignedIn } from '@epicenter/svelte';
 
 export const session = createSession({
 	auth,
-	build: ({ owner }) => {
-		const workspace = openMyApp({
-			owner,
+	build: (signedIn: SignedIn) =>
+		openFujiBrowser({
+			signedIn,
 			installationId: createInstallationId({ storage: localStorage }),
-			openWebSocket: auth.openWebSocket,
-		});
-		return {
-			workspace,
-			[Symbol.dispose]() {
-				workspace[Symbol.dispose]();
-			},
-		};
-	},
+		}),
 });
-
-export type MyAppSignedIn = InferSignedIn<typeof session>;
 ```
+The returned workspace bundle's `Symbol.dispose` tears down the root and any cached child Y.Docs. Local IDB data is not wiped on sign-out by default; an app that wants "delete my local data on logout" calls `wipeLocalStorage({ server: signedIn.server, owner: signedIn.owner })` explicitly (Fuji exposes this through `bundle.wipe()`).
+
 So these points are implemented and verifiable:
 - keys are loaded on login
 - sign-out disposes the live workspace
 - a different `/api/session` subject wipes the persisted auth cell and publishes `signed-out`
-- owner-scoped IndexedDB data remains available for the same authenticated owner after reload
+- subject-scoped IndexedDB data remains available for the same authenticated subject after reload
 This point is not visible as an explicit step in the reviewed code:
 - clearing the in-memory encryption state after logout
 That gap matters because the encrypted wrapper exposes `activateEncryption()` but no `deactivateEncryption()`.
@@ -225,7 +246,7 @@ Before activation, the wrapper is a passthrough store and `set()` writes plainte
 After activation, `set()` always encrypts.
 The active state holds the full keyring, the current key, and the current key version.
 Calling `activateEncryption()` again updates that state to a new keyring, but it does not switch the store back to plaintext mode.
-The document builder reinforces that shape: `attachEncryption(ydoc, { encryptionKeys })` returns a coordinator whose `encryption.attachTables(defs)` / `encryption.attachKv(defs)` methods register every table and KV store as encrypted wrappers from the start. The coordinator calls `encryptionKeys()` synchronously at each registration site, derives the keyring for that store, and activates the store before handing it back. There is no separate `applyKeys` mutation step: key read, registration, and activation happen in one call.
+The document builder reinforces that shape: `attachEncryption(ydoc, { keyring })` returns a coordinator whose `encryption.attachTable(name, def)` / `encryption.attachTables(defs)` / `encryption.attachKv(defs)` methods register every table and KV store as encrypted wrappers from the start. The coordinator calls `keyring()` synchronously at each registration site, derives the per-workspace keyring with `deriveWorkspaceKeyring(subjectKeyring, ydoc.guid)`, and activates the store before handing it back. There is no separate `applyKeys` mutation step: key read, registration, and activation happen in one call.
 
 ## What activation re-encrypts
 Activation rewrites every decryptable entry that is not already stored under the current key version.

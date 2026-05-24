@@ -1,35 +1,49 @@
 /**
- * Opensidian daemon extension entrypoint.
+ * Opensidian daemon library default.
  *
- * Opens the shared Opensidian workspace in a node runtime and adds daemon
- * infrastructure (Yjs log + sync). Daemon-side `actions: {}` is intentional:
- * Opensidian's file and shell actions need browser services and stay in the
- * app runtime.
+ * `openOpensidianDaemon(ctx)` composes the daemon-side mount that any
+ * Opensidian-consuming project can use directly when they want library-default
+ * paths.
+ *
+ * What this does:
+ *   1. workspace root doc (encrypted tables + KV via attachEncryption)
+ *   2. infrastructure: Yjs log persistence + cloud sync via
+ *      `attachDaemonInfrastructure`
+ *
+ * Daemon-side `actions: {}` is intentional: Opensidian's file and shell
+ * actions need browser services (Yjs filesystem, in-browser SQLite, just-bash)
+ * and stay in the app runtime.
  */
 
-import { defineDaemonWorkspace } from '@epicenter/workspace/daemon';
+import { attachEncryption } from '@epicenter/workspace';
+import type { DaemonWorkspaceContext } from '@epicenter/workspace/daemon';
 import { attachDaemonInfrastructure } from '@epicenter/workspace/node';
-import { openOpensidianWorkspace } from './workspace.js';
+import * as Y from 'yjs';
+import { OPENSIDIAN_ID, opensidianTables } from './workspace.js';
 
-export function defineOpensidianDaemon() {
-	return defineDaemonWorkspace({
-		async open({
-			projectDir,
-			clientId,
-			installationId,
-			attachEncryption,
-			openWebSocket,
-		}) {
-			const workspace = openOpensidianWorkspace(attachEncryption, { clientId });
-			const infra = attachDaemonInfrastructure(workspace.ydoc, {
-				projectDir,
-				openWebSocket,
-				installationId,
-				actions: {},
-			});
-			return { ...workspace, ...infra };
-		},
+export function openOpensidianDaemon({
+	projectDir,
+	yDocClientId,
+	installationId,
+	owner,
+	keyring,
+	openWebSocket,
+	onReconnectSignal,
+}: DaemonWorkspaceContext) {
+	const ydoc = new Y.Doc({ guid: OPENSIDIAN_ID, gc: true });
+	ydoc.clientID = yDocClientId;
+	const encryption = attachEncryption(ydoc, { keyring });
+	encryption.attachTables(opensidianTables);
+	encryption.attachKv({});
+
+	return attachDaemonInfrastructure(ydoc, {
+		projectDir,
+		owner,
+		installationId,
+		openWebSocket,
+		onReconnectSignal,
+		actions: {},
 	});
 }
 
-export default defineOpensidianDaemon();
+export type OpensidianDaemon = ReturnType<typeof openOpensidianDaemon>;

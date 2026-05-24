@@ -7,8 +7,11 @@
  * CLI paths are `demo.counter_{get,increment,set}`.
  */
 
-import { defineMutation, defineQuery } from '@epicenter/workspace';
-import { defineDaemonWorkspace } from '@epicenter/workspace/daemon';
+import {
+	defineMutation,
+	defineQuery,
+	defineWorkspace,
+} from '@epicenter/workspace';
 import Type from 'typebox';
 import * as Y from 'yjs';
 
@@ -68,6 +71,6 @@ export const demo = {
 	ydoc,
 };
 
-export default defineDaemonWorkspace({
+export default defineWorkspace({
 	open: () => demo,
 });

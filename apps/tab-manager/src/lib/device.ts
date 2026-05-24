@@ -3,8 +3,8 @@
  *
  * The extension publishes an `installationId` in presence (install-stable id)
  * and seeds a row in the local `devices` table with a human-readable name.
- * Installation id is the wire concept; the device row is the app's product
- * concept (display name, last seen, browser kind).
+ * The installation id is the wire concept; the device row is the app's
+ * product concept (display name, last seen, browser kind).
  */
 
 import { createInstallationIdAsync } from '@epicenter/workspace';

@@ -12,12 +12,12 @@ import {
 	findProjectRoot,
 	openWorkspaceSqlite,
 } from '@epicenter/workspace/node';
-import { FUJI_WORKSPACE_ID, type FujiActions } from '@epicenter/fuji';
+import { FUJI_ID, type FujiActions } from '@epicenter/fuji';
 
 const projectDir = findProjectRoot();
 
 // reads: open the materializer read-only
-const db = openWorkspaceSqlite(projectDir, FUJI_WORKSPACE_ID);
+const db = openWorkspaceSqlite(projectDir, FUJI_ID);
 const urgent = db.query('SELECT * FROM entries WHERE tag = ?').all('urgent');
 
 // writes: typed proxy over unix socket to the daemon

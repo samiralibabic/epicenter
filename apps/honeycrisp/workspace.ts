@@ -1,13 +1,16 @@
 /**
- * Honeycrisp workspace contract: schema, branded IDs, shared opener, and
- * cross-table action factory.
+ * Honeycrisp workspace schema: id, branded types, tables, actions, and per-row
+ * derived guids. Pure data. No Y.Doc, no encryption, no openers.
  *
- * Distribution: this file is the `@epicenter/honeycrisp` package root export.
- * It stays browser-safe because the SPA, daemon, and scripts all import it.
- * The table shapes here are the wire contract for sync; forking a column
- * shape breaks sync compatibility with peers running the canonical schema.
- * Recipes (browser.ts, daemon.ts) compose around this opener and are yours
- * to edit freely.
+ * Distribution: `apps/honeycrisp/package.json` exports this file as the
+ * `@epicenter/honeycrisp` package root. Browser code, daemon code, and tests
+ * all import from here. The table shapes here are the wire contract for sync;
+ * forking a column shape breaks sync compatibility with peers running the
+ * canonical schema.
+ *
+ * Composition lives elsewhere:
+ *  - `apps/honeycrisp/browser.ts`  -> `openHoneycrispBrowser({ signedIn, installationId })`
+ *  - `apps/honeycrisp/daemon.ts`   -> `openHoneycrispDaemon(ctx)`
  */
 
 import {
@@ -17,15 +20,13 @@ import {
 	defineTable,
 	docGuid,
 	type InferTableRow,
-	type LocalOwner,
 	type Tables,
 } from '@epicenter/workspace';
 import { type } from 'arktype';
 import Type from 'typebox';
 import type { Brand } from 'wellcrafted/brand';
-import * as Y from 'yjs';
 
-export const HONEYCRISP_WORKSPACE_ID = 'epicenter.honeycrisp';
+export const HONEYCRISP_ID = 'epicenter.honeycrisp';
 
 // ─── Branded IDs ──────────────────────────────────────────────────────────────
 
@@ -87,8 +88,7 @@ const noteBase = type({
  * (computed on each editor update, `undefined` for legacy notes).
  *
  * The Y.XmlFragment document (`body`) lives in a separate Y.Doc per note.
- * The browser workspace setup constructs it and bumps `updatedAt` via
- * `onLocalUpdate`.
+ * The browser opener constructs it and bumps `updatedAt` via `onLocalUpdate`.
  */
 const notesTable = defineTable(
 	noteBase.merge({
@@ -113,83 +113,20 @@ export type Note = InferTableRow<typeof notesTable>;
 
 export const honeycrispTables = { folders: foldersTable, notes: notesTable };
 export type HoneycrispTables = Tables<typeof honeycrispTables>;
-type AttachHoneycrispEncryption = LocalOwner['attachEncryption'];
 
 /**
- * Compute the deterministic guid of a note's rich-text body sub-doc.
- * Browser editors, daemon materializers, and wipe paths reach this through
- * the `workspace.noteBodyDocGuid(noteId)` method so every layer points at
- * the same Y.Doc identity.
+ * Deterministic guid of a note's rich-text body sub-doc.
  *
- * Kept private so callers go through the workspace bundle (which already
- * knows its own `ydoc.guid`) rather than re-deriving `workspaceId` by hand.
+ * Browser editors, daemon materializers, and wipe paths reach this same
+ * function so every layer points at the same Y.Doc identity.
  */
-function noteBodyDocGuid({
-	workspaceId,
-	noteId,
-}: {
-	workspaceId: string;
-	noteId: NoteId;
-}): string {
+export function noteBodyDocGuid(noteId: NoteId): string {
 	return docGuid({
-		workspaceId,
+		workspaceId: HONEYCRISP_ID,
 		collection: 'notes',
 		rowId: noteId,
 		field: 'body',
 	});
-}
-
-/**
- * Open the canonical Honeycrisp workspace: a Y.Doc keyed by
- * `HONEYCRISP_WORKSPACE_ID` with encrypted Honeycrisp tables and kv attached.
- *
- * Browser code composes browser-only attachments (IndexedDB, BroadcastChannel,
- * collaboration) around `workspace.ydoc`. Daemon code composes daemon-only
- * attachments (Yjs log, SQLite, Markdown materializers, collaboration) around
- * the same `workspace.ydoc`.
- *
- * Pass `clientId` to pin the Y.Doc clientID; daemons hash `projectDir` so two
- * daemons in different project directories produce distinct update streams.
- */
-export function openHoneycrispWorkspace(
-	attachEncryption: AttachHoneycrispEncryption,
-	options: { clientId?: number } = {},
-) {
-	const ydoc = new Y.Doc({ guid: HONEYCRISP_WORKSPACE_ID, gc: true });
-	if (options.clientId !== undefined) {
-		ydoc.clientID = options.clientId;
-	}
-	return attachHoneycrispWorkspace(ydoc, attachEncryption);
-}
-
-export type HoneycrispWorkspace = ReturnType<typeof openHoneycrispWorkspace>;
-
-function attachHoneycrispWorkspace(
-	ydoc: Y.Doc,
-	attachEncryption: AttachHoneycrispEncryption,
-) {
-	const encryption = attachEncryption(ydoc);
-	const tables = encryption.attachTables(honeycrispTables);
-	const kv = encryption.attachKv({});
-	/**
-	 * Single source of truth for the Honeycrisp action surface. Browser and
-	 * daemon both pass this directly to `openCollaboration({ actions })`, so
-	 * the action handlers (and their inputs/outputs) are guaranteed identical
-	 * across layers without a second `createHoneycrispActions(tables)` call.
-	 */
-	const actions = createHoneycrispActions(tables);
-
-	return {
-		ydoc,
-		encryption,
-		tables,
-		kv,
-		actions,
-		batch: (fn: () => void) => ydoc.transact(fn),
-		noteBodyDocGuid(noteId: NoteId) {
-			return noteBodyDocGuid({ workspaceId: ydoc.guid, noteId });
-		},
-	};
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────

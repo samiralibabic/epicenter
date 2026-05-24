@@ -52,7 +52,9 @@ function createTestClient() {
 	});
 	const tables = encryption.attachTables(opensidianTables);
 	const kv = encryption.attachKv({});
-	const persistence = attachYjsLog(ydoc, { filePath: dbPath(WORKSPACE_ID) });
+	const persistence = attachYjsLog(ydoc, {
+		filePath: dbPath(WORKSPACE_ID),
+	});
 
 	const contentDocs = createDisposableCache(
 		(fileId: FileId) => {

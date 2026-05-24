@@ -61,5 +61,5 @@
 		"y-prosemirror": "^1.3.7",
 		"yjs": "catalog:"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

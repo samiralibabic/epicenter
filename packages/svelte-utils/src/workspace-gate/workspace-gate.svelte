@@ -104,7 +104,7 @@
 	{:else}
 		<Loading class="h-dvh" />
 	{/if}
-{:then _}
+{:then}
 	{@render children()}
 {:catch err}
 	{#if error}

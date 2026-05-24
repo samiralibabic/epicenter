@@ -274,7 +274,7 @@ Use the **same key name** in both environments. Let your secrets manager (Infisi
 
 For Cloudflare Workers: `wrangler secret put AUTUMN_SECRET_KEY`
 
-For local dev with Infisical: secrets are auto-injected via `infisical run --path=/api -- wrangler dev`
+For local dev with Infisical: secrets are auto-injected via `infisical run --env=dev --path=/api -- wrangler dev`
 
 ---
 

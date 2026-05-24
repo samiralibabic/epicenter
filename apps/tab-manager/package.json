@@ -61,5 +61,5 @@
 		"vite": "catalog:",
 		"wxt": "^0.20.8"
 	},
-	"license": "MIT"
+	"license": "AGPL-3.0-or-later"
 }

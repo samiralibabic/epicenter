@@ -5,11 +5,11 @@
 	"version": "0.0.1",
 	"type": "module",
 	"exports": {
-		".": "./src/app.ts",
+		".": "./src/index.ts",
 		"./billing-contract": "./src/billing-contract.ts",
 		"./billing-plans": "./src/billing-plans.ts"
 	},
-	"license": "AGPL-3.0",
+	"license": "AGPL-3.0-or-later",
 	"scripts": {
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
@@ -17,13 +17,13 @@
 		"dev:dashboard": "bun run --cwd ../dashboard build && bun scripts/dev.ts",
 		"deploy": "bun run --cwd ../dashboard build && wrangler deploy",
 		"typegen": "wrangler types",
-		"auth:generate": "infisical run --env=prod --path=/api -- bun x @better-auth/cli generate --yes --config ./better-auth.config.ts --output ./src/db/schema/auth.ts",
+		"auth:generate": "infisical run --env=prod --path=/ops --path=/api -- bun x @better-auth/cli generate --yes --config ./better-auth.config.ts --output ./src/db/schema/auth.ts",
 		"db:generate": "drizzle-kit generate",
 		"db:drop": "drizzle-kit drop",
 		"db:push:local": "drizzle-kit push",
-		"db:migrate:remote": "infisical run --env=prod --path=/api -- drizzle-kit migrate",
+		"db:migrate:remote": "infisical run --env=prod --path=/ops -- drizzle-kit migrate",
 		"db:studio:local": "drizzle-kit studio",
-		"db:studio:remote": "infisical run --env=prod --path=/api -- drizzle-kit studio"
+		"db:studio:remote": "infisical run --env=prod --path=/ops -- drizzle-kit studio"
 	},
 	"dependencies": {
 		"@better-auth/drizzle-adapter": "catalog:",
@@ -31,14 +31,13 @@
 		"@epicenter/auth": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/encryption": "workspace:*",
+		"@epicenter/server": "workspace:*",
 		"@epicenter/sync": "workspace:*",
 		"@epicenter/workspace": "workspace:*",
 		"@hono/standard-validator": "catalog:",
 		"@tanstack/ai": "catalog:",
-		"@tanstack/ai-anthropic": "catalog:",
 		"@tanstack/ai-openai": "catalog:",
 		"@tanstack/ai-gemini": "catalog:",
-		"@tanstack/ai-grok": "catalog:",
 		"arktype": "catalog:",
 		"autumn-js": "^1.0.7",
 		"better-auth": "catalog:",

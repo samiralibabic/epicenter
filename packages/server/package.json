@@ -1,0 +1,46 @@
+{
+	"name": "@epicenter/server",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Shared Hono server for Epicenter cloud and self-hosted team deployments.",
+	"exports": {
+		".": "./src/index.ts",
+		"./schema": "./src/db/schema/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@better-auth/drizzle-adapter": "catalog:",
+		"@better-auth/oauth-provider": "catalog:",
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/constants": "workspace:*",
+		"@epicenter/encryption": "workspace:*",
+		"@epicenter/sync": "workspace:*",
+		"@epicenter/workspace": "workspace:*",
+		"@hono/standard-validator": "catalog:",
+		"@tanstack/ai": "catalog:",
+		"@tanstack/ai-openai": "catalog:",
+		"@tanstack/ai-gemini": "catalog:",
+		"arktype": "catalog:",
+		"better-auth": "catalog:",
+		"drizzle-orm": "catalog:",
+		"hono": "catalog:",
+		"hono-openapi": "catalog:",
+		"lib0": "catalog:",
+		"nanoid": "catalog:",
+		"pg": "^8.20.0",
+		"wellcrafted": "catalog:",
+		"y-protocols": "catalog:",
+		"yjs": "catalog:"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260405.1",
+		"@types/bun": "catalog:",
+		"@types/pg": "^8.18.0",
+		"typescript": "catalog:"
+	},
+	"license": "AGPL-3.0"
+}

@@ -187,10 +187,12 @@ Also in the repo: [Fuji](apps/fuji) (personal CMS), [Zhongwen](apps/zhongwen) (M
 | [`@epicenter/ui`](packages/ui) | shadcn-svelte component library shared across all apps. | MIT |
 | [`@epicenter/svelte`](packages/svelte-utils) | Svelte 5 integration: persisted state, auth, workspace gate, TanStack Query helpers. | MIT |
 | [`@epicenter/filesystem`](packages/filesystem) | POSIX-style virtual filesystem over Yjs workspace tables. `mkdir`, `mv`, `rm`, `stat`. | MIT |
-| [`@epicenter/skills`](packages/skills) | Skill and reference tables for AI-enhanced workspace apps. | MIT |
-| [`@epicenter/ai`](packages/ai) | Bridges workspace actions with LLM tool calling. | MIT |
+| [`@epicenter/skills`](packages/skills) | Skill and reference tables for AI-enhanced workspace apps. | AGPL-3.0 |
+| [`@epicenter/ai`](packages/ai) | Bridges workspace actions with LLM tool calling. | AGPL-3.0 |
 | [`@epicenter/cli`](packages/cli) | The `epicenter` command. TypeBox schemas become CLI flags automatically. | MIT |
-| [`@epicenter/constants`](packages/constants) | Shared URLs, ports, and version info across the monorepo. | MIT |
+| [`@epicenter/constants`](packages/constants) | Shared URLs, ports, and version info across the monorepo. | AGPL-3.0 |
+| [`@epicenter/auth`](packages/auth) | Framework-agnostic auth core. Imperative subscription API over better-auth. | AGPL-3.0 |
+| [`@epicenter/auth-svelte`](packages/auth-svelte) | Svelte 5 reactive wrapper around `@epicenter/auth`. | AGPL-3.0 |
 
 ## For Developers
 
@@ -336,9 +338,15 @@ All 112 implemented specs live in [`specs/`](specs/).
 
 ## License
 
-Most packages and all apps are [MIT](licenses/LICENSE-MIT). Use them however you want, no strings attached. The sync server (`apps/api`) and sync protocol (`packages/sync`) are [AGPL-3.0](licenses/LICENSE-AGPL-3.0), which means anyone hosting a modified version shares their changes. This follows the same pattern as Yjs (MIT core, AGPL y-redis), Liveblocks (Apache clients, AGPL server), and Bitwarden (GPL clients, AGPL server).
+Epicenter uses a sharp two-tier split:
 
-See [FINANCIAL_SUSTAINABILITY.md](FINANCIAL_SUSTAINABILITY.md) for the full reasoning behind the split.
+- **[MIT](licenses/LICENSE-MIT)** for the local-first-on-Yjs developer toolkit: `@epicenter/workspace`, `@epicenter/ui`, `@epicenter/svelte`, `@epicenter/filesystem`, `@epicenter/cli`. An external developer can `npm install` any of these and embed them in a closed-source product.
+- **[AGPL-3.0](licenses/LICENSE-AGPL-3.0)** for everything else Epicenter ships: all 12 apps, the sync protocol (`@epicenter/sync`), and the Epicenter-internal packages. Anyone hosting or distributing a modified version must share their changes.
+- **Proprietary (deferred, empty)** as an escape hatch only. Revenue comes from hosting Epicenter Cloud, not from selling licenses, so this tier is intended to stay empty.
+
+This follows the same pattern as [Plausible](https://github.com/plausible/analytics) and [PostHog](https://github.com/PostHog/posthog) (AGPL apps and servers, hosted SaaS as revenue), and [Yjs](https://github.com/yjs/yjs) (MIT core library, AGPL `y-redis` server).
+
+See the root [LICENSE](LICENSE) for the full index, [FINANCIAL_SUSTAINABILITY.md](FINANCIAL_SUSTAINABILITY.md) for the narrative, and [specs/20260428T120000-licensing-strategy.md](specs/20260428T120000-licensing-strategy.md) for the threat model and decision procedure.
 
 ---
 

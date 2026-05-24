@@ -31,9 +31,10 @@ if (auth.exitCode !== 0 || !auth.stdout.toString().trim()) {
 	process.exit(1);
 }
 
-const wrangler = await Bun.$`infisical run --silent --path=/api -- wrangler dev`
-	.cwd(apiRoot)
-	.env({ ...Bun.env, CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true' })
-	.nothrow();
+const wrangler =
+	await Bun.$`infisical run --silent --env=dev --path=/api -- wrangler dev`
+		.cwd(apiRoot)
+		.env({ ...Bun.env, CLOUDFLARE_INCLUDE_PROCESS_ENV: 'true' })
+		.nothrow();
 
 process.exit(wrangler.exitCode);

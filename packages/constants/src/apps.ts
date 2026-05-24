@@ -10,10 +10,11 @@
  */
 
 /**
- * Canonical production origin for the Epicenter API. Used by both the `API`
- * entry and the `DASHBOARD` entry (the dashboard SPA is mounted at
- * `/dashboard/*` on the API origin), and as the fallback for
- * {@link EPICENTER_API_URL}.
+ * Canonical production origin for the Epicenter API. Used by the `API` entry
+ * and as the fallback for {@link EPICENTER_API_URL}. The dashboard SPA is
+ * served at `api.epicenter.so/dashboard` (same origin as the API) so it does
+ * not get its own APPS entry; its dev port lives inline in
+ * `apps/dashboard/vite.config.ts`.
  */
 const PRODUCTION_API_URL = 'https://api.epicenter.so';
 
@@ -28,7 +29,6 @@ export const APPS = {
 		urls: ['https://opensidian.com', 'https://opensidian.epicenter.so'],
 	},
 	ZHONGWEN: { port: 8888, urls: ['https://zhongwen.epicenter.so'] },
-	DASHBOARD: { port: 5178, urls: [PRODUCTION_API_URL] },
 } as const;
 
 export type AppId = keyof typeof APPS;
