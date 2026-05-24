@@ -6,11 +6,10 @@ import { createHoneycrispState } from '../routes/(signed-in)/state';
 
 export const session = createSession({
 	auth,
-	build: ({ owner }) => {
+	build: (signedIn) => {
 		const honeycrisp = openHoneycrispBrowser({
-			owner,
+			signedIn,
 			installationId: createInstallationId({ storage: localStorage }),
-			auth,
 		});
 		const state = createHoneycrispState(honeycrisp);
 		return {

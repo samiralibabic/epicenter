@@ -11,11 +11,12 @@
 
 import { tabManagerTables } from '@epicenter/tab-manager';
 import {
+	attachEncryption,
 	defineActions,
+	defineWorkspace,
 	openCollaboration,
 	roomWsUrl,
 } from '@epicenter/workspace';
-import { defineDaemonWorkspace } from '@epicenter/workspace/daemon';
 import {
 	attachMarkdownMaterializer,
 	slugFilename,
@@ -26,10 +27,19 @@ import * as Y from 'yjs';
 const SERVER_URL = 'https://api.epicenter.so';
 const WORKSPACE_ID = 'epicenter.tab-manager';
 
-export default defineDaemonWorkspace({
-	async open({ installationId, attachEncryption, openWebSocket, projectDir }) {
+export default defineWorkspace({
+	async open({
+		projectDir,
+		yDocClientId,
+		installationId,
+		owner,
+		keyring,
+		openWebSocket,
+		onReconnectSignal,
+	}) {
 		const ydoc = new Y.Doc({ guid: WORKSPACE_ID, gc: true });
-		const encryption = attachEncryption(ydoc);
+		ydoc.clientID = yDocClientId;
+		const encryption = attachEncryption(ydoc, { keyring });
 		const tables = encryption.attachTables(tabManagerTables);
 		const kv = encryption.attachKv({});
 
@@ -40,9 +50,14 @@ export default defineDaemonWorkspace({
 		const actions = defineActions({});
 
 		const collaboration = openCollaboration(ydoc, {
-			url: roomWsUrl(SERVER_URL, ydoc.guid),
+			url: roomWsUrl({
+				baseURL: SERVER_URL,
+				owner,
+				guid: ydoc.guid,
+				installationId,
+			}),
 			openWebSocket,
-			installationId,
+			onReconnectSignal,
 			actions,
 		});
 
@@ -69,7 +84,6 @@ export default defineDaemonWorkspace({
 			ydoc,
 			tables,
 			kv,
-			encryption,
 			persistence,
 			markdown,
 		};

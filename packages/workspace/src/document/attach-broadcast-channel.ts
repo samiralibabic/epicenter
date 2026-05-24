@@ -7,8 +7,9 @@ import * as Y from 'yjs';
  * Broadcasts every local `updateV2` to same-origin tabs and applies incoming
  * updates from other tabs. Defaults the channel key to `ydoc.guid` so only
  * docs for the same local workspace communicate. Authenticated browser
- * workspaces should pass an owner-scoped key (via `LocalOwner`) so two
- * signed-in subjects in the same browser profile cannot exchange plaintext.
+ * workspaces should pass an owner-scoped key (`attachLocalStorage` derives one
+ * from the subject) so two signed-in subjects in the same browser profile
+ * cannot exchange plaintext.
  *
  * Skips re-broadcasting updates that arrived from BroadcastChannel itself
  * (via `BC_ORIGIN`) and updates that arrived from WebSocket sync. Without

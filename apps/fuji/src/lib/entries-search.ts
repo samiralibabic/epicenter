@@ -1,3 +1,5 @@
+import type { Entry } from './workspace';
+
 /**
  * Test whether an entry matches a search query.
  *
@@ -5,15 +7,8 @@
  * case-insensitive substring match. Returns true if any field
  * contains the query.
  */
-type EntrySearchInput = {
-	title: string;
-	subtitle: string;
-	tags: readonly string[];
-	type: readonly string[];
-};
-
 export function matchesEntrySearch(
-	entry: EntrySearchInput,
+	entry: Pick<Entry, 'title' | 'subtitle' | 'tags' | 'type'>,
 	query: string,
 ): boolean {
 	const normalizedQuery = query.trim().toLowerCase();

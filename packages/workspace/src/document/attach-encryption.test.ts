@@ -3,8 +3,9 @@
  * at every registration site (table, kv). Plaintext mode does not exist:
  * registration always activates encryption.
  *
- * Encrypted IndexedDB and owner-scoped behavior live on `createLocalOwner`;
- * see `local-owner.test.ts` for those round-trip tests.
+ * Encrypted IndexedDB and subject-scoped BroadcastChannel behavior live on
+ * `attachLocalStorage`; see `attach-local-storage.test.ts` for those
+ * round-trip tests.
  */
 
 import { describe, expect, test } from 'bun:test';

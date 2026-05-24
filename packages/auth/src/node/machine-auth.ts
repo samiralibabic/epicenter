@@ -39,6 +39,7 @@ import {
 	type AuthFetch,
 	createOAuthAppAuth,
 } from '../create-oauth-app-auth.js';
+import { ownerId } from '../owner.js';
 import { createOobOAuthLauncher } from './oob-launcher.js';
 
 /**
@@ -290,7 +291,8 @@ export async function loginWithOob({
 
 	const cell: PersistedAuth = {
 		grant,
-		localIdentity: session.localIdentity,
+		owner: session.owner,
+		keyring: session.keyring,
 	};
 	const saved = await saveMachineTokens(cell, { filePath: authFilePath });
 	if (saved.error) return Err(saved.error);
@@ -298,7 +300,7 @@ export async function loginWithOob({
 	return Ok({
 		identity: {
 			user: { id: session.user.id, email: session.user.email },
-			keyring: session.localIdentity.keyring,
+			keyring: session.keyring,
 		},
 	});
 }
@@ -326,7 +328,7 @@ export async function status({
 	});
 	if (loaded.error) return Err(loaded.error);
 	if (!loaded.data) return Ok({ status: 'signedOut' as const });
-	const cachedLocalIdentity = loaded.data.localIdentity;
+	const cachedCell = loaded.data;
 
 	const clientResult = await createMachineAuthClient({
 		baseURL,
@@ -347,8 +349,8 @@ export async function status({
 		return Ok({
 			status: 'unverified' as const,
 			identity: {
-				user: { id: cachedLocalIdentity.subject, email: '' },
-				keyring: cachedLocalIdentity.keyring,
+				user: { id: ownerId(cachedCell.owner), email: '' },
+				keyring: cachedCell.keyring,
 			},
 		});
 	}
@@ -370,19 +372,19 @@ export async function status({
 			status: 'valid' as const,
 			identity: {
 				user: { id: session.user.id, email: session.user.email },
-				keyring: session.localIdentity.keyring,
+				keyring: session.keyring,
 			},
 		});
 	}
 
 	// Network or auth failure. Cell may still be valid for local decrypt; the
-	// underlying auth client will have wiped it on same-subject mismatch or
+	// underlying auth client will have wiped it on same-owner mismatch or
 	// reauth-required already. Email is unknown without /api/session.
 	return Ok({
 		status: 'unverified' as const,
 		identity: {
-			user: { id: cachedLocalIdentity.subject, email: '' },
-			keyring: cachedLocalIdentity.keyring,
+			user: { id: ownerId(cachedCell.owner), email: '' },
+			keyring: cachedCell.keyring,
 		},
 	});
 }

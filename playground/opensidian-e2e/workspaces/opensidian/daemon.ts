@@ -14,17 +14,16 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileContentDocGuid } from '@epicenter/filesystem';
 import {
+	attachEncryption,
 	attachTimeline,
 	createDisposableCache,
 	defineActions,
 	defineMutation,
+	defineWorkspace,
 	openCollaboration,
 	roomWsUrl,
 } from '@epicenter/workspace';
-import {
-	type DaemonWorkspaceContext,
-	defineDaemonWorkspace,
-} from '@epicenter/workspace/daemon';
+import type { DaemonWorkspaceContext } from '@epicenter/workspace/daemon';
 import { attachMarkdownMaterializer } from '@epicenter/workspace/document/materializer/markdown';
 import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
 import { toSlugFilename } from '@epicenter/workspace/markdown';
@@ -43,13 +42,17 @@ const SERVER_URL = process.env.EPICENTER_SERVER ?? 'https://api.epicenter.so';
 const WORKSPACE_ID = 'opensidian';
 
 async function openOpensidianPlayground({
-	installationId,
-	attachEncryption,
-	openWebSocket,
 	projectDir,
+	yDocClientId,
+	installationId,
+	owner,
+	keyring,
+	openWebSocket,
+	onReconnectSignal,
 }: DaemonWorkspaceContext) {
 	const ydoc = new Y.Doc({ guid: WORKSPACE_ID, gc: true });
-	const encryption = attachEncryption(ydoc);
+	ydoc.clientID = yDocClientId;
+	const encryption = attachEncryption(ydoc, { keyring });
 	const tables = encryption.attachTables(opensidianTables);
 	const kv = encryption.attachKv({});
 
@@ -97,9 +100,14 @@ async function openOpensidianPlayground({
 	});
 
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl(SERVER_URL, ydoc.guid),
+		url: roomWsUrl({
+			baseURL: SERVER_URL,
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		openWebSocket,
-		installationId,
+		onReconnectSignal,
 		actions,
 	});
 
@@ -161,7 +169,6 @@ async function openOpensidianPlayground({
 		ydoc,
 		tables,
 		kv,
-		encryption,
 		persistence,
 		fileContentDocs,
 		markdown,
@@ -173,6 +180,6 @@ export type OpensidianPlaygroundRuntime = Awaited<
 	ReturnType<typeof openOpensidianPlayground>
 >;
 
-export default defineDaemonWorkspace({
+export default defineWorkspace({
 	open: openOpensidianPlayground,
 });

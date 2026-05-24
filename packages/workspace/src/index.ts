@@ -21,27 +21,27 @@
  *   openCollaboration,
  *   roomWsUrl,
  * } from '@epicenter/workspace';
- * import type { AuthClient } from '@epicenter/auth';
+ * import type { AuthClient, Owner } from '@epicenter/auth';
  * import { type } from 'arktype';
  * import * as Y from 'yjs';
  *
  * const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
  * declare const auth: AuthClient;
+ * declare const owner: Owner;
  *
- * const apiUrl = 'https://api.example.com';
  * const installationId = createInstallationId({ storage: localStorage });
  *
  * // A cloud doc is owned by the authenticated subject and addressed by its
- * // Y.Doc guid: `roomWsUrl(apiUrl, ydoc.guid)` resolves to the room
- * // `subject:${userId}:rooms:${ydoc.guid}` server-side.
+ * // Y.Doc guid: `roomWsUrl({ baseURL, owner, guid, installationId })` builds the
+ * // partitioned room URL the server expects.
  * const ydoc = new Y.Doc({ guid: 'notes' });
  * const tables = attachTables(ydoc, { posts });
  * const idb = attachIndexedDb(ydoc);
  * const collaboration = openCollaboration(ydoc, {
- *   url: roomWsUrl(apiUrl, ydoc.guid),
+ *   url: roomWsUrl({ baseURL: auth.baseURL, owner, guid: ydoc.guid, installationId }),
  *   openWebSocket: auth.openWebSocket,
+ *   onReconnectSignal: auth.onStateChange,
  *   waitFor: idb.whenLoaded,
- *   installationId,
  *   actions: {},
  * });
  *
@@ -60,10 +60,15 @@
  *     });
  *     const bodyIdb = attachIndexedDb(bodyYdoc);
  *     const bodySync = openCollaboration(bodyYdoc, {
- *       url: roomWsUrl(apiUrl, bodyYdoc.guid),
+ *       url: roomWsUrl({
+ *         baseURL: auth.baseURL,
+ *         owner,
+ *         guid: bodyYdoc.guid,
+ *         installationId,
+ *       }),
  *       openWebSocket: auth.openWebSocket,
+ *       onReconnectSignal: auth.onStateChange,
  *       waitFor: bodyIdb.whenLoaded,
- *       installationId,
  *       actions: {},
  *     });
  *     return {
@@ -87,7 +92,7 @@
 // ACTION SYSTEM
 // ════════════════════════════════════════════════════════════════════════════
 
-export type { Action, ActionManifest } from './shared/actions';
+export type { ActionManifest } from './shared/actions';
 export {
 	defineActions,
 	defineMutation,
@@ -117,10 +122,8 @@ export {
 export {
 	DEFAULT_PROJECT_CONFIG_SOURCE,
 	defineConfig,
-	defineWorkspace,
-	type EpicenterConfig,
-	PROJECT_CONFIG_FILENAME,
 } from './config/define-config.js';
+export { defineWorkspace } from './daemon/define-workspace.js';
 export type { ProjectDir } from './shared/types';
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -141,7 +144,11 @@ export {
 } from './cache/disposable-cache.js';
 
 export { attachBroadcastChannel } from './document/attach-broadcast-channel.js';
-export { attachEncryption } from './document/attach-encryption.js';
+export {
+	type AttachEncryptionOptions,
+	attachEncryption,
+	type EncryptionAttachment,
+} from './document/attach-encryption.js';
 export { attachIndexedDb } from './document/attach-indexed-db.js';
 export {
 	attachKv,
@@ -149,6 +156,7 @@ export {
 	type Kv,
 	type KvDefinitions,
 } from './document/attach-kv.js';
+export { attachLocalStorage } from './document/attach-local-storage.js';
 export { attachPlainText } from './document/attach-plain-text.js';
 export { attachRichText } from './document/attach-rich-text.js';
 export {
@@ -162,33 +170,22 @@ export {
 export { attachTimeline } from './document/attach-timeline/index.js';
 export { defineKv } from './document/define-kv.js';
 export { defineTable } from './document/define-table.js';
-export {
-	type ActionInput,
-	type ActionOutput,
-	DispatchError,
-	type DispatchRequest,
-	type LiveDevice,
-	type TypedDispatch,
-	typedDispatch,
-} from './document/dispatch.js';
+export { DispatchError } from './document/dispatch.js';
 export { docGuid } from './document/doc-guid.js';
-export type {
-	OpenWebSocket,
-	SyncStatus,
-} from './document/internal/sync-supervisor.js';
-export {
-	createLocalOwner,
-	type LocalOwner,
-} from './document/local-owner.js';
+export type { SyncStatus } from './document/internal/sync-supervisor.js';
 export { onLocalUpdate } from './document/on-local-update.js';
 export {
 	type Collaboration,
+	type OnReconnectSignal,
+	type OpenCollaborationConfig,
+	type OpenWebSocketFn,
 	openCollaboration,
 } from './document/open-collaboration.js';
 // Transport URL builder.
 //
-// `roomWsUrl(apiUrl, ydoc.guid)` builds the WebSocket URL for `/rooms/:room`.
-// A cloud doc is owned by the authenticated subject; the room id is the
-// Y.Doc guid and the server resolves it to `subject:${userId}:rooms:${room}`.
-// Both browser apps and the daemon use this one builder.
-export { roomWsUrl } from './document/transport.js';
+// `roomWsUrl({ baseURL, owner, guid, installationId })` builds the WebSocket URL
+// for the partitioned `/api/users/:userId/rooms/:roomId` (personal) or
+// `/api/rooms/:roomId` (team) endpoint. Both browser apps and the daemon
+// use this one builder.
+export { type RoomWsUrlOptions, roomWsUrl } from './document/transport.js';
+export { wipeLocalStorage } from './document/wipe-local-storage.js';

@@ -118,6 +118,8 @@
 		"bump-version": "bun run scripts/bump-version.ts",
 		"clean": "bun run scripts/clean.ts",
 		"nuke": "bun run scripts/clean.ts --nuke",
+		"cf:plan": "infisical run --env=prod --path=/ops -- bun run scripts/cf/apply.ts --plan",
+		"cf:apply": "infisical run --env=prod --path=/ops -- bun run scripts/cf/apply.ts",
 		"cli": "bun packages/cli/src/bin.ts",
 		"cli:local": "EPICENTER_API_URL=http://localhost:8787 bun packages/cli/src/bin.ts",
 		"epicenter": "EPICENTER_SERVER=http://localhost:8787 bun run --bun epicenter",
@@ -130,6 +132,7 @@
 		"jsrepo": "^3.6.2"
 	},
 	"dependencies": {
+		"@epicenter/constants": "workspace:*",
 		"tinyexec": "^1.0.4"
 	},
 	"patchedDependencies": {

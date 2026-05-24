@@ -16,8 +16,7 @@
 
 	/**
 	 * Extract provider from model name heuristic.
-	 * Models starting with 'gpt'/'o' are OpenAI, 'claude' is Anthropic,
-	 * 'gemini' is Google, 'grok' is xAI.
+	 * Models starting with 'gpt'/'o' are OpenAI, 'gemini' is Google, 'grok' is xAI.
 	 */
 	function getProvider(model: string): string {
 		if (
@@ -30,7 +29,6 @@
 			model.startsWith('codex')
 		)
 			return 'OpenAI';
-		if (model.startsWith('claude')) return 'Anthropic';
 		if (model.startsWith('gemini')) return 'Google';
 		if (model.startsWith('grok')) return 'xAI';
 		return 'Unknown';

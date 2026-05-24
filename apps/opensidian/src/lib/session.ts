@@ -13,11 +13,10 @@ import { createSampleDataLoader } from './utils/load-sample-data.svelte';
 
 export const session = createSession({
 	auth,
-	build: ({ owner }) => {
+	build: (signedIn) => {
 		const opensidian = openOpensidianBrowser({
-			owner,
+			signedIn,
 			installationId: createInstallationId({ storage: localStorage }),
-			auth,
 		});
 		const editor = createEditorState();
 		const files = createFilesState({ binding: opensidian });

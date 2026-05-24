@@ -16,12 +16,11 @@ import type { SubjectKeyring } from '@epicenter/encryption';
 import { Ok, type Result } from 'wellcrafted/result';
 import type {
 	AuthClient,
-	LocalIdentity,
 	OAuthTokenGrant,
 	PersistedAuth,
 	PersistedAuthStorage,
 } from './index.js';
-import { createOAuthAppAuth } from './index.js';
+import { createOAuthAppAuth, ownerId } from './index.js';
 
 const now = 1_000_000;
 
@@ -49,7 +48,8 @@ function cell({
 } = {}): PersistedAuth {
 	return {
 		grant: g,
-		localIdentity: { subject, keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: subject },
+		keyring: [...keyring],
 	};
 }
 
@@ -101,7 +101,8 @@ function oauthTokenResponse({
 function apiSessionBody(subject = 'user-1') {
 	return {
 		user: { id: subject, email: `${subject}@example.com` },
-		localIdentity: { subject, keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: subject },
+		keyring: [...keyring],
 	};
 }
 
@@ -142,7 +143,8 @@ test('cold-boot signed-in exposes localIdentity immediately without profile data
 
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'user-1', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: [...keyring],
 	});
 	expect('email' in auth.state).toBe(false);
 	auth[Symbol.dispose]();
@@ -179,7 +181,8 @@ test('startSignIn calls /api/session and writes both sections', async () => {
 			refreshToken: 'sign-in-refresh',
 			accessTokenExpiresAt: now + 3_600_000,
 		},
-		localIdentity: { subject: 'user-1', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: [...keyring],
 	});
 	expect(auth.state).toMatchObject({
 		status: 'signed-in',
@@ -210,14 +213,14 @@ test('startSignIn publishes signed-out before installing a different subject', a
 		states.push(
 			state.status === 'signed-out'
 				? 'signed-out'
-				: `${state.status}:${state.localIdentity.subject}`,
+				: `${state.status}:${ownerId(state.owner)}`,
 		);
 	});
 
 	const result = await auth.startSignIn();
 
 	expect(result).toEqual(Ok(undefined));
-	expect(states).toEqual(['signed-out', 'signed-in:bob']);
+	expect(states).toEqual(['signed-out', 'signed-in:users/bob']);
 	expect(setup.saved).toEqual([
 		null,
 		{
@@ -226,12 +229,14 @@ test('startSignIn publishes signed-out before installing a different subject', a
 				refreshToken: 'bob-refresh',
 				accessTokenExpiresAt: now + 3_600_000,
 			},
-			localIdentity: { subject: 'bob', keyring: [...keyring] },
+			owner: { kind: 'personal' as const, userId: 'bob' },
+			keyring: [...keyring],
 		},
 	]);
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 	auth[Symbol.dispose]();
 });
@@ -334,7 +339,8 @@ test('concurrent startSignIn shares one launcher flight', async () => {
 	expect(apiSessionCalls).toBe(1);
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 	expect(setup.current).toEqual({
 		grant: {
@@ -342,7 +348,8 @@ test('concurrent startSignIn shares one launcher flight', async () => {
 			refreshToken: 'bob-refresh',
 			accessTokenExpiresAt: now + 3_600_000,
 		},
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 	auth[Symbol.dispose]();
 });
@@ -372,7 +379,8 @@ for (const status of [401, 403] as const) {
 		expect(resourceAuths).toEqual([null]);
 		expect(auth.state).toEqual({
 			status: 'reauth-required',
-			localIdentity: { subject: 'user-1', keyring: [...keyring] },
+			owner: { kind: 'personal' as const, userId: 'user-1' },
+			keyring: [...keyring],
 		});
 		expect(setup.current).toEqual(cell());
 		auth[Symbol.dispose]();
@@ -403,7 +411,8 @@ test('/api/session 503 leaves local auth signed-in without attaching a bearer', 
 	expect(resourceAuths).toEqual([null]);
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'user-1', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: [...keyring],
 	});
 	expect(setup.current).toEqual(cell());
 	auth[Symbol.dispose]();
@@ -447,7 +456,8 @@ test('stale /api/session verification after subject-switch sign-in cannot replac
 	expect(result).toEqual(Ok(undefined));
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 
 	resolveOldApiSession(json(apiSessionBody('alice')));
@@ -459,11 +469,13 @@ test('stale /api/session verification after subject-switch sign-in cannot replac
 			refreshToken: 'bob-refresh',
 			accessTokenExpiresAt: now + 3_600_000,
 		},
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'bob', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'bob' },
+		keyring: [...keyring],
 	});
 	auth[Symbol.dispose]();
 });
@@ -489,7 +501,8 @@ test('refresh writes ONLY the grant section; localIdentity byte-identical', asyn
 
 	await auth.fetch('http://localhost:8787/resource');
 	const last = setup.saved.at(-1);
-	expect(last?.localIdentity).toEqual(initial.localIdentity);
+	expect(last?.owner).toEqual(initial.owner);
+	expect(last?.keyring).toEqual(initial.keyring);
 	expect(last?.grant).toEqual({
 		accessToken: 'new-access',
 		refreshToken: 'new-refresh',
@@ -590,7 +603,8 @@ test('keyring rotation updates persisted localIdentity', async () => {
 			if (String(input).endsWith('/api/session')) {
 				return json({
 					user: { id: 'user-1', email: 'user-1@example.com' },
-					localIdentity: { subject: 'user-1', keyring: rotated },
+					owner: { kind: 'personal' as const, userId: 'user-1' },
+					keyring: rotated,
 				});
 			}
 			return new Response(null, { status: 204 });
@@ -599,11 +613,13 @@ test('keyring rotation updates persisted localIdentity', async () => {
 
 	await auth.fetch('http://localhost:8787/resource');
 	const last = setup.saved.at(-1);
-	expect(last?.localIdentity).toEqual({ subject: 'user-1', keyring: rotated });
+	expect(last?.owner).toEqual({ kind: 'personal', userId: 'user-1' });
+	expect(last?.keyring).toEqual(rotated);
 	expect(last?.grant).toEqual(cell().grant);
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'user-1', keyring: rotated },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: rotated,
 	});
 	auth[Symbol.dispose]();
 });
@@ -723,10 +739,8 @@ test('cold-boot offline keeps signed-in with localIdentity and no profile field'
 		status: 'signed-in',
 	});
 	expect('email' in auth.state).toBe(false);
-	expect(
-		(auth.state as { localIdentity: LocalIdentity }).localIdentity,
-	).toEqual({
-		subject: 'user-1',
+	expect(auth.state).toMatchObject({
+		owner: { kind: 'personal', userId: 'user-1' },
 		keyring: [...keyring],
 	});
 	auth[Symbol.dispose]();
@@ -771,7 +785,8 @@ test('signOut clears cell and network pause even when revoke fails', async () =>
 		await auth.fetch('http://localhost:8787/resource');
 		expect(auth.state).toEqual({
 			status: 'reauth-required',
-			localIdentity: { subject: 'user-1', keyring: [...keyring] },
+			owner: { kind: 'personal' as const, userId: 'user-1' },
+			keyring: [...keyring],
 		});
 		expect('email' in auth.state).toBe(false);
 
@@ -835,7 +850,8 @@ test('network verification clears on grant refresh until /api/session confirms n
 	await secondApiSessionRequested;
 	expect(auth.state).toEqual({
 		status: 'signed-in',
-		localIdentity: { subject: 'user-1', keyring: [...keyring] },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: [...keyring],
 	});
 	expect('email' in auth.state).toBe(false);
 	expect(resourceAuths).toEqual(['Bearer access-token', 'Bearer access-token']);
@@ -1042,14 +1058,16 @@ test('/api/session key update after signOut is discarded without writing localId
 	resolveApiSession(
 		json({
 			user: { id: 'user-1', email: 'user-1@example.com' },
-			localIdentity: { subject: 'user-1', keyring: rotated },
+			owner: { kind: 'personal' as const, userId: 'user-1' },
+			keyring: rotated,
 		}),
 	);
 	await fetchPromise;
 	expect(setup.current).toBeNull();
 	expect(setup.saved).not.toContainEqual({
 		grant: grant(),
-		localIdentity: { subject: 'user-1', keyring: rotated },
+		owner: { kind: 'personal' as const, userId: 'user-1' },
+		keyring: rotated,
 	});
 	expect(auth.state).toEqual({ status: 'signed-out' });
 	auth[Symbol.dispose]();

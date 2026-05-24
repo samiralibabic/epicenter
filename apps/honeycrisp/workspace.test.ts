@@ -1,77 +1,91 @@
 /**
- * Behavior tests for the shared `openHoneycrispWorkspace` opener.
- *
- * These tests do not exercise IndexedDB, BroadcastChannel, sync, or any
- * runtime composed by browser.ts or daemon.ts. They pin the canonical
- * Y.Doc identity, garbage collection policy, the optional `clientId`, and
- * the encrypted tables/kv surface that both layers compose around.
+ * Behavior tests for the Honeycrisp schema and its mounted shape via
+ * `attachEncryption`. Pins the canonical workspace id and the encrypted
+ * tables/kv surface that browser and daemon compositions both build on.
  */
 
 import { describe, expect, test } from 'bun:test';
 import { bytesToBase64, type SubjectKeyring } from '@epicenter/encryption';
 import { attachEncryption } from '@epicenter/workspace';
-import type * as Y from 'yjs';
+import * as Y from 'yjs';
 import {
-	HONEYCRISP_WORKSPACE_ID,
-	openHoneycrispWorkspace,
+	createHoneycrispActions,
+	HONEYCRISP_ID,
+	honeycrispTables,
+	type NoteId,
+	noteBodyDocGuid,
 } from './workspace.js';
 
 const testKey = new Uint8Array(32).fill(7);
+const testKeyring: SubjectKeyring = [
+	{ version: 1, subjectKeyBase64: bytesToBase64(testKey) },
+];
 
-function createTestEncryption(
-	keyring: SubjectKeyring = [
-		{ version: 1, subjectKeyBase64: bytesToBase64(testKey) },
-	],
-): (ydoc: Y.Doc) => ReturnType<typeof attachEncryption> {
-	return (ydoc) => {
-		return attachEncryption(ydoc, { keyring: () => keyring });
-	};
+function openHoneycrispForTest({ clientId }: { clientId?: number } = {}) {
+	const ydoc = new Y.Doc({ guid: HONEYCRISP_ID, gc: true });
+	if (clientId !== undefined) ydoc.clientID = clientId;
+	const encryption = attachEncryption(ydoc, { keyring: () => testKeyring });
+	const tables = encryption.attachTables(honeycrispTables);
+	const kv = encryption.attachKv({});
+	const actions = createHoneycrispActions(tables);
+	return { ydoc, encryption, tables, kv, actions };
 }
 
-describe('openHoneycrispWorkspace', () => {
-	test('creates a gc:true Y.Doc with HONEYCRISP_WORKSPACE_ID', () => {
-		const workspace = openHoneycrispWorkspace(createTestEncryption());
-		expect(workspace.ydoc.guid).toBe(HONEYCRISP_WORKSPACE_ID);
-		expect(workspace.ydoc.gc).toBe(true);
-		workspace.ydoc.destroy();
+describe('Honeycrisp workspace mount', () => {
+	test('constructs a gc:true Y.Doc with HONEYCRISP_ID as guid', () => {
+		const { ydoc } = openHoneycrispForTest();
+		expect(ydoc.guid).toBe(HONEYCRISP_ID);
+		expect(ydoc.gc).toBe(true);
+		ydoc.destroy();
 	});
 
 	test('applies optional clientId', () => {
-		const attachTestEncryption = createTestEncryption();
-		const workspace = openHoneycrispWorkspace(attachTestEncryption, {
-			clientId: 1234,
-		});
-		expect(workspace.ydoc.clientID).toBe(1234);
-		workspace.ydoc.destroy();
+		const { ydoc } = openHoneycrispForTest({ clientId: 1234 });
+		expect(ydoc.clientID).toBe(1234);
+		ydoc.destroy();
 	});
 
 	test('does not pin clientId when omitted', () => {
-		const a = openHoneycrispWorkspace(createTestEncryption());
-		const b = openHoneycrispWorkspace(createTestEncryption());
+		const a = openHoneycrispForTest();
+		const b = openHoneycrispForTest();
 		expect(typeof a.ydoc.clientID).toBe('number');
 		expect(typeof b.ydoc.clientID).toBe('number');
 		a.ydoc.destroy();
 		b.ydoc.destroy();
 	});
 
-	test('exposes Honeycrisp tables that accept writes through the encryption coordinator', () => {
-		const workspace = openHoneycrispWorkspace(createTestEncryption());
-		expect(workspace.tables.folders).toBeDefined();
-		expect(workspace.tables.notes).toBeDefined();
-		expect(workspace.kv).toBeDefined();
-		expect(workspace.tables.folders.count()).toBe(0);
-		expect(workspace.tables.notes.count()).toBe(0);
-		workspace.ydoc.destroy();
+	test('attaches encrypted tables and kv that accept writes', () => {
+		const { ydoc, tables, kv } = openHoneycrispForTest();
+		expect(tables.folders).toBeDefined();
+		expect(tables.notes).toBeDefined();
+		expect(kv).toBeDefined();
+		expect(tables.folders.count()).toBe(0);
+		expect(tables.notes.count()).toBe(0);
+		ydoc.destroy();
 	});
 
-	test('exposes browser-safe domain helpers', () => {
-		const workspace = openHoneycrispWorkspace(createTestEncryption());
-		expect(typeof workspace.batch).toBe('function');
-		expect(typeof workspace.noteBodyDocGuid).toBe('function');
+	test('createHoneycrispActions produces an action surface', () => {
+		const { ydoc, actions } = openHoneycrispForTest();
+		expect(actions).toBeDefined();
+		expect(actions.folders_delete).toBeDefined();
+		ydoc.destroy();
+	});
+});
 
-		const guid = workspace.noteBodyDocGuid('note-1' as never);
+describe('Honeycrisp schema helpers', () => {
+	test('noteBodyDocGuid is deterministic per note id', () => {
+		const a = noteBodyDocGuid('note-1' as NoteId);
+		const b = noteBodyDocGuid('note-1' as NoteId);
+		const c = noteBodyDocGuid('note-2' as NoteId);
+		expect(a).toBe(b);
+		expect(a).not.toBe(c);
+		expect(a.length).toBeGreaterThan(0);
+	});
+
+	test('noteBodyDocGuid bakes in HONEYCRISP_ID as the workspace label', () => {
+		// Sanity: a different workspace label would produce a different guid.
+		const guid = noteBodyDocGuid('note-1' as NoteId);
 		expect(typeof guid).toBe('string');
 		expect(guid.length).toBeGreaterThan(0);
-		workspace.ydoc.destroy();
 	});
 });

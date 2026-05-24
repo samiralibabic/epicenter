@@ -120,43 +120,51 @@ Both variants ship from this package. Plaintext (`attachTable`, `attachTables`, 
 
 Don't mix plaintext and encrypted wrappers on the same slot name: Yjs hands both calls the same underlying `Y.Array` and you get a silent plaintext-over-ciphertext race. The verb (`encryption.attachTable` vs plain `attachTable`) is the primary defense; review call sites accordingly. One slot name, one attach site, one intent.
 
-Minimal encrypted browser workspace: encryption + IndexedDB + cross-tab + collaboration (sync + presence + dispatch) wired together:
+Minimal encrypted browser workspace: encryption + subject-scoped IndexedDB + cross-tab + collaboration (sync + presence + dispatch) wired together:
 
 ```typescript
 import {
+	attachEncryption,
+	attachLocalStorage,
 	createInstallationId,
-	type LocalOwner,
-	type OpenWebSocket,
 	openCollaboration,
 	roomWsUrl,
+	wipeLocalStorage,
 } from '@epicenter/workspace';
-import { createSession } from '@epicenter/svelte';
+import { createSession, type SignedIn } from '@epicenter/svelte';
 import * as Y from 'yjs';
 import { auth } from '$lib/auth';
 import { appTables } from '$lib/workspace/definition';
 
 export function openApp({
-	owner,
+	signedIn,
 	installationId,
-	openWebSocket,
 }: {
-	owner: LocalOwner;
+	signedIn: SignedIn;
 	installationId: string;
-	openWebSocket?: OpenWebSocket;
 }) {
 	const ydoc = new Y.Doc({ guid: 'epicenter.my-app', gc: true });
 
-	const encryption = owner.attachEncryption(ydoc);
+	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
 	const tables = encryption.attachTables(appTables);
 
-	const idb = owner.attachIndexedDb(ydoc);
-	owner.attachBroadcastChannel(ydoc);
+	// Server + owner scoped encrypted IDB + cross-tab BroadcastChannel in one call.
+	const idb = attachLocalStorage(ydoc, {
+		server: signedIn.server,
+		owner: signedIn.owner,
+		keyring: signedIn.keyring,
+	});
 
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl('https://api.epicenter.so', ydoc.guid),
+		url: roomWsUrl({
+			baseURL: signedIn.auth.baseURL,
+			owner: signedIn.owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		waitFor: idb.whenLoaded,
-		openWebSocket,
-		installationId,
+		openWebSocket: signedIn.auth.openWebSocket,
+		onReconnectSignal: signedIn.auth.onStateChange,
 		actions: {},
 	});
 
@@ -170,6 +178,14 @@ export function openApp({
 		idb,
 		collaboration,
 		batch: (fn: () => void) => ydoc.transact(fn),
+		async wipe() {
+			ydoc.destroy();
+			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
+			await wipeLocalStorage({
+				server: signedIn.server,
+				owner: signedIn.owner,
+			});
+		},
 		[Symbol.dispose]() {
 			ydoc.destroy();
 		},
@@ -178,18 +194,19 @@ export function openApp({
 
 export const session = createSession({
 	auth,
-	build: ({ owner }) =>
+	build: ({ signedIn }) =>
 		openApp({
-			owner,
+			signedIn,
 			installationId: createInstallationId({ storage: localStorage }),
-			openWebSocket: auth.openWebSocket,
 		}),
 });
 ```
 
+`attachLocalStorage(ydoc, { server, owner, keyring })` pairs the encrypted IndexedDB store with an owner-scoped BroadcastChannel: two tabs of the same owner share both persisted state and live updates, while two different owners on the same browser profile never see each other's data. On sign-out, call `wipeLocalStorage({ server, owner })` to delete every owner-scoped local database.
+
 `openCollaboration` is the workspace primitive: it wraps the sync supervisor, mirrors the relay's server-owned presence channel as `collaboration.devices`, and runs inbound dispatch frames against the local action registry. Find an online install with `workspace.collaboration.devices.list().find((d) => d.installationId === installationId)`, then call it with `workspace.collaboration.dispatch(...)`. Content documents use the same primitive with `actions: {}`. See [SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
 
-The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin. Cloud sync targets the single route `/rooms/:room`: build the URL with `roomWsUrl(apiUrl, ydoc.guid)`. A cloud doc is owned by the authenticated subject, so the server resolves the DO name `subject:${userId}:rooms:${room}` from the auth token with no workspace lookup.
+The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin. Cloud sync targets `/api/users/:userId/rooms/:roomId` (personal) or `/api/rooms/:roomId` (team): build the URL with `roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId })`. A cloud doc is owned by the authenticated `owner`, so the server resolves the DO name `users/${userId}/rooms/${room}` (personal) or `rooms/${room}` (team) from the auth token, with no workspace lookup.
 
 For production-shaped browser wiring, see `apps/fuji/src/lib/browser.ts`. For auth session transitions, see `apps/fuji/src/lib/session.ts`.
 
@@ -222,7 +239,8 @@ function openBlog() {
 	const collaboration = openCollaboration(ydoc, {
 		url,
 		waitFor: idb.whenLoaded,
-		installationId,
+		openWebSocket,
+		onReconnectSignal,
 		actions: {},
 	});
 	return {
@@ -789,14 +807,15 @@ import { attachYjsLog } from '@epicenter/workspace/node';
 
 ### Persistence
 
-Browser apps use `attachIndexedDb(ydoc)`. Bun/Node daemons use `attachYjsLog(ydoc, { filePath })`. Both bind to the Y.Doc and tear down on `ydoc.destroy()`.
+Browser apps use `attachIndexedDb(ydoc)` for unauthenticated docs, or `attachLocalStorage(ydoc, { server, owner, keyring })` for an authenticated workspace that needs encrypted persistence plus cross-tab pairing. Bun/Node daemons use `attachYjsLog(ydoc, { filePath })`. All bind to the Y.Doc and tear down on `ydoc.destroy()`.
 
 | Primitive | Runtime | Barrier | Other | Purpose |
 |---|---|---|---|---|
 | `attachIndexedDb(ydoc)` | browser | `whenLoaded`, `whenDisposed` | `clearLocal()` | Local Yjs persistence via `y-indexeddb` |
+| `attachLocalStorage(ydoc, { server, owner, keyring })` | browser | `whenLoaded`, `whenDisposed` | paired BroadcastChannel | Owner-scoped encrypted IDB plus cross-tab pairing |
 | `attachYjsLog(ydoc, { filePath })` | Bun/Node | `whenDisposed` (sync replay; no `whenLoaded` needed) | `clearLocal()` | Append-log SQLite file the daemon writes |
 
-Authenticated browser workspaces usually receive a `LocalOwner` from `createSession`. Call `owner.wipeLocalYjsData(ydocGuids)` after disposal to delete owner-scoped local Yjs databases.
+For authenticated apps, call `await wipeLocalStorage({ server, owner })` after disposing the bundle to delete every owner-scoped encrypted IDB database on the current browser profile (sign-out, "delete my local data", account switch).
 
 `attachSqliteMaterializer` and `attachMarkdownMaterializer` are not persistence: they project workspace rows into queryable SQLite tables or `.md` files. See the materializer subsections below.
 
@@ -830,7 +849,7 @@ void openNotes;
 
 ### Sync
 
-One primitive wraps the WebSocket transport: `openCollaboration`. The workspace document passes a real `actions` registry; content documents that only need bytes-on-the-wire pass `actions: {}`. Compose it with `attachBroadcastChannel(ydoc)` for local-only documents, or `owner.attachBroadcastChannel(ydoc)` for authenticated browser workspaces opened through `createSession`.
+One primitive wraps the WebSocket transport: `openCollaboration`. The workspace document passes a real `actions` registry; content documents that only need bytes-on-the-wire pass `actions: {}`. Compose it with `attachBroadcastChannel(ydoc)` for unauthenticated local-only documents. Authenticated browser workspaces use `attachLocalStorage(ydoc, { server, owner, keyring })`, which pairs encrypted IDB with an owner-scoped BroadcastChannel in one call.
 
 ```typescript
 import * as Y from 'yjs';
@@ -843,19 +862,35 @@ import {
 	openCollaboration,
 	roomWsUrl,
 } from '@epicenter/workspace';
+import type { AuthClient, Owner } from '@epicenter/auth';
 import { type } from 'arktype';
 
 const tabs = defineTable(type({ id: 'string', url: 'string', _v: '1' }));
 
-function openTabs() {
+function openTabs({
+	owner,
+	openWebSocket,
+	onReconnectSignal,
+}: {
+	owner: Owner;
+	openWebSocket: AuthClient['openWebSocket'];
+	onReconnectSignal: AuthClient['onStateChange'];
+}) {
 	const ydoc = new Y.Doc({ guid: 'epicenter.tabs' });
 	const tables = attachTables(ydoc, { tabs });
 	const idb = attachIndexedDb(ydoc);
 	attachBroadcastChannel(ydoc);
+	const installationId = createInstallationId({ storage: localStorage });
 	const collaboration = openCollaboration(ydoc, {
-		url: roomWsUrl('https://api.epicenter.so', ydoc.guid),
+		url: roomWsUrl({
+			baseURL: 'https://api.epicenter.so',
+			owner,
+			guid: ydoc.guid,
+			installationId,
+		}),
 		waitFor: idb.whenLoaded,
-		installationId: createInstallationId({ storage: localStorage }),
+		openWebSocket,
+		onReconnectSignal,
 		actions: {},
 	});
 
@@ -1264,7 +1299,8 @@ Two composition shapes, one builder contract.
 │   const tables        = attachTables(ydoc, { ... });     │
 │   const idb           = attachIndexedDb(ydoc);            │
 │   const collaboration = openCollaboration(ydoc, {         │
-│     waitFor: idb.whenLoaded, installationId, actions: { ... },│
+│     waitFor: idb.whenLoaded, openWebSocket, onReconnectSignal, │
+│     actions: { ... },                                     │
 │   });                                                     │
 │   return { ydoc, tables, idb, collaboration,              │
 │            [Symbol.dispose]() { ydoc.destroy(); } };     │
@@ -1523,7 +1559,7 @@ import {
 } from '@epicenter/workspace';
 ```
 
-`openCollaboration` returns a `Collaboration`. Online installs:
+`openCollaboration` returns a `Collaboration`. Online devices (relay-owned presence, with each device's `installationId`, `connectedAt`, and published `actions` manifest):
 
 - `collaboration.devices.list()`: `LiveDevice[]`, the local install excluded
 - `collaboration.devices.subscribe(fn)`: returns an unsubscribe function

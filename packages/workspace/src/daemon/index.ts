@@ -6,6 +6,6 @@ export {
 export {
 	type DaemonWorkspaceContext,
 	type DaemonWorkspaceDefinition,
-	defineDaemonWorkspace,
-} from './define-daemon-workspace.js';
-export { type DaemonRuntime, type StartedDaemonRoute } from './types.js';
+	defineWorkspace,
+} from './define-workspace.js';
+export type { DaemonRuntime, StartedDaemonRoute } from './types.js';

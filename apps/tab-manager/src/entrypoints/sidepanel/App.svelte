@@ -26,13 +26,13 @@
 
 {#await tabManagerSession.whenReady}
 	<Loading class="h-full" label="Loading tabs…" />
-{:then _}
+{:then}
 	{#if tabManagerSession.current}
 		{#await tabManagerSession.current.idb.whenLoaded}
 			<Loading class="h-full" label="Loading tabs…" />
-		{:then _}
+		{:then}
 			<SignedInApp />
-		{:catch _error}
+		{:catch}
 			<Empty.Root class="h-full border-0">
 				<Empty.Media>
 					<TriangleAlertIcon class="size-8 text-muted-foreground" />
@@ -68,7 +68,7 @@
 			</Button>
 		</main>
 	{/if}
-{:catch _error}
+{:catch}
 	<Empty.Root class="h-full border-0">
 		<Empty.Media>
 			<TriangleAlertIcon class="size-8 text-muted-foreground" />

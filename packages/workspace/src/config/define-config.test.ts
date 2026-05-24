@@ -1,15 +1,26 @@
-import type { DaemonWorkspaceDefinition } from '../daemon/define-daemon-workspace.js';
-import type { DaemonRuntime } from '../daemon/types.js';
-import {
-	defineConfig,
-	defineWorkspace,
-	type EpicenterConfig,
-} from './define-config.js';
+import { defineWorkspace } from '../daemon/define-workspace.js';
+import { defineConfig, type EpicenterConfig } from './define-config.js';
 
-// `defineConfig` and `defineWorkspace` are both `(x) => x`. The contract worth
-// pinning is type inference, asserted via @ts-expect-error and the Equal
-// type-level test. Runtime identity is JS-trivial and covered indirectly by
-// load-project-config.test.ts.
+// Both `defineConfig` and `defineWorkspace` are `(x) => x`. The contract worth
+// pinning lives at the type level. Runtime identity is JS-trivial and covered
+// indirectly by load-project-config.test.ts.
+//
+// We pin two distinct properties:
+//
+// 1. `defineConfig` widens an empty object literal to `EpicenterConfig`.
+//    The Equal check below catches a regression where the signature loses
+//    its annotation and the return becomes `{}` instead of the named type.
+//
+// 2. Both functions refuse wrong-shape inputs. The `@ts-expect-error` lines
+//    fail compilation if the constraint stops catching misuse.
+//
+// We intentionally do NOT add an Equal check for `defineWorkspace`'s return.
+// The function is generic and identity-preserving (`<T>(d: Def<T>) => Def<T>`);
+// asserting `typeof result === Def<T>` is tautological and only works after
+// inventing a fake runtime value (the `return undefined as unknown as
+// DaemonRuntime` smell). The constraint failures below already prove the
+// type rejection; preservation through identity is a TypeScript invariant
+// we don't need to re-verify.
 
 type Expect<TValue extends true> = TValue;
 type Equal<TActual, TExpected> =
@@ -35,19 +46,6 @@ defineConfig({ daemon: { routes: [] } });
 
 // @ts-expect-error top-level routes are no longer accepted.
 defineConfig({ routes: [] });
-
-// `defineWorkspace` takes a `DaemonWorkspaceDefinition` directly and returns
-// it. The inferred type preserves the runtime generic; declaring the return
-// type of `open()` as `DaemonRuntime` pins TRuntime concretely so the Equal
-// check below compares against the default-typed definition.
-const workspace = defineWorkspace({
-	async open(): Promise<DaemonRuntime> {
-		return undefined as unknown as DaemonRuntime;
-	},
-});
-export type InferredWorkspaceIsDefinition = Expect<
-	Equal<typeof workspace, DaemonWorkspaceDefinition<DaemonRuntime>>
->;
 
 // @ts-expect-error a workspace definition must expose open().
 defineWorkspace({});

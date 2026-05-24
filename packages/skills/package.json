@@ -20,7 +20,7 @@
 		".": "./src/index.ts",
 		"./node": "./src/node.ts"
 	},
-	"license": "MIT",
+	"license": "AGPL-3.0-or-later",
 	"scripts": {
 		"typecheck": "tsc --noEmit"
 	},

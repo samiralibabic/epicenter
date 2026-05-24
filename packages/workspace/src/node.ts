@@ -88,7 +88,7 @@ export {
 	sqlitePath,
 	yjsPath,
 } from './document/workspace-paths.js';
-export { hashClientId } from './shared/client-id.js';
+export { hashYDocClientId } from './shared/client-id.js';
 export { WorkspaceAppError } from './workspace-apps/errors.js';
 export {
 	type StartDaemonWorkspaceAppsOptions,

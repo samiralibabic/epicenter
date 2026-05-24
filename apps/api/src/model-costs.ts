@@ -1,10 +1,8 @@
-import type { ANTHROPIC_MODELS } from '@tanstack/ai-anthropic';
 import type { GeminiTextModels } from '@tanstack/ai-gemini';
 import type { OPENAI_CHAT_MODELS } from '@tanstack/ai-openai';
 
 type SupportedModel =
 	| (typeof OPENAI_CHAT_MODELS)[number]
-	| (typeof ANTHROPIC_MODELS)[number]
 	| (typeof GeminiTextModels)[number];
 
 /**
@@ -89,20 +87,4 @@ export const MODEL_CREDITS: Partial<Record<SupportedModel, number>> = {
 	'gemini-3.1-pro-preview': 5, // $1.25/$10
 	'gemini-3-pro-preview': 5, // $1.25/$10
 	'gemini-2.5-pro': 5, // $1.25/$10
-
-	// ── Anthropic: Haiku (1–2 credits) ───────────────────────────
-	'claude-3-haiku': 1, // $0.25/$1
-	'claude-3-5-haiku': 2, // $0.80/$4
-	'claude-haiku-4-5': 2, // $1/$5
-
-	// ── Anthropic: Sonnet (5 credits) ────────────────────────────
-	'claude-3-7-sonnet': 5, // $3/$15
-	'claude-sonnet-4': 5, // $3/$15
-	'claude-sonnet-4-5': 5, // $3/$15
-
-	// ── Anthropic: Opus (10–30 credits) ──────────────────────────
-	'claude-opus-4-6': 10, // $5/$25
-	'claude-opus-4': 30, // $15/$75
-	'claude-opus-4-1': 30, // $15/$75
-	'claude-opus-4-5': 30, // $15/$75
 };

@@ -20,28 +20,20 @@
 
 import { defineErrors, type InferErrors } from 'wellcrafted/error';
 import { Err, Ok, type Result } from 'wellcrafted/result';
+import { type ActionRegistry, invokeAction } from '../shared/actions.js';
 import {
-	ACTION_KEY_PATTERN,
-	type ActionRegistry,
-	invokeAction,
-} from '../shared/actions.js';
-import type {
-	DispatchErrorWire,
-	DispatchInboundFrame,
-	DispatchResponseFrame,
+	checkDispatchErrorWire,
+	checkDispatchInboundFrame,
+	type DispatchErrorWire,
+	type DispatchResponseFrame,
 } from './dispatch-protocol.js';
 
 // ════════════════════════════════════════════════════════════════════════════
 // PUBLIC TYPES
 // ════════════════════════════════════════════════════════════════════════════
 
-/**
- * The wire shape of "an online device" is exactly one field. The relay
- * carries `installationId` and nothing else; product-level concerns like
- * display name or capability list live in app-owned state (see
- * `tab-manager`'s `devices` table for an example).
- */
-export type LiveDevice = { installationId: string };
+// `LiveDevice` is now `PresenceDevice` from `./presence-protocol.js`: the
+// wire schema is the single source of truth for the type. See that module.
 
 /**
  * Per-call options. Required: `to`, `action`. Optional: `input` (omit
@@ -239,63 +231,24 @@ export function interpretDispatchResult(
 	const { data, error } = body;
 	if (error === null) return Ok(data);
 
-	// Validate the untrusted error into a known `DispatchErrorWire`, then
-	// hand the narrowed variant straight to its local factory: each factory
-	// reads only its own fields and ignores the extra `name`.
-	const wireError = asDispatchWireError(error);
-	if (!wireError) {
+	// Validate the untrusted error against the TypeBox-compiled wire schema.
+	// On match, hand the narrowed variant straight to its local factory: each
+	// factory reads only its own fields and ignores the extra `name`.
+	if (!checkDispatchErrorWire.Check(error)) {
 		return DispatchError.NetworkFailed({
 			cause: new Error(
 				`Dispatch error was not a recognized wire variant: ${JSON.stringify(error)}`,
 			),
 		});
 	}
-	switch (wireError.name) {
+	switch (error.name) {
 		case 'RecipientOffline':
-			return DispatchError.RecipientOffline(wireError);
+			return DispatchError.RecipientOffline(error);
 		case 'ActionNotFound':
-			return DispatchError.ActionNotFound(wireError);
+			return DispatchError.ActionNotFound(error);
 		case 'ActionFailed':
-			return DispatchError.ActionFailed(wireError);
+			return DispatchError.ActionFailed(error);
 	}
-}
-
-/**
- * Boundary guard: an untrusted JSON value -> a known `DispatchErrorWire`,
- * or `null` if it matches no variant. Every `return` is an object literal
- * checked against `DispatchErrorWire`, so this function cannot drift from
- * the wire contract: add a field there and the matching `return` stops
- * compiling. `typeof`/`in` narrowing carries `value` from `unknown` to
- * typed fields with no `as` cast.
- */
-function asDispatchWireError(value: unknown): DispatchErrorWire | null {
-	if (typeof value !== 'object' || value === null || !('name' in value)) {
-		return null;
-	}
-	if (
-		value.name === 'RecipientOffline' &&
-		'to' in value &&
-		typeof value.to === 'string'
-	) {
-		return { name: 'RecipientOffline', to: value.to };
-	}
-	if (
-		value.name === 'ActionNotFound' &&
-		'action' in value &&
-		typeof value.action === 'string'
-	) {
-		return { name: 'ActionNotFound', action: value.action };
-	}
-	if (
-		value.name === 'ActionFailed' &&
-		'action' in value &&
-		typeof value.action === 'string' &&
-		'cause' in value &&
-		typeof value.cause === 'string'
-	) {
-		return { name: 'ActionFailed', action: value.action, cause: value.cause };
-	}
-	return null;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -323,7 +276,7 @@ export async function runInboundDispatch({
 		return null;
 	}
 
-	if (!isDispatchInbound(parsed)) return null;
+	if (!checkDispatchInboundFrame.Check(parsed)) return null;
 
 	const { id, action, input } = parsed;
 
@@ -371,15 +324,4 @@ function extractCauseString(cause: unknown): string {
 	} catch {
 		return String(cause);
 	}
-}
-
-function isDispatchInbound(value: unknown): value is DispatchInboundFrame {
-	if (!value || typeof value !== 'object') return false;
-	const v = value as Record<string, unknown>;
-	return (
-		v.type === 'dispatch_inbound' &&
-		typeof v.id === 'string' &&
-		typeof v.action === 'string' &&
-		ACTION_KEY_PATTERN.test(v.action)
-	);
 }

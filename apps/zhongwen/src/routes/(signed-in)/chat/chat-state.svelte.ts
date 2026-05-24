@@ -294,7 +294,7 @@ export function createChatState() {
 		const msgs = zhongwen.tables.chatMessages
 			.getAllValid()
 			.filter((m) => m.conversationId === conversationId);
-		zhongwen.batch(() => {
+		zhongwen.ydoc.transact(() => {
 			for (const m of msgs) {
 				zhongwen.tables.chatMessages.delete(m.id);
 			}
