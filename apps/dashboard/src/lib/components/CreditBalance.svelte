@@ -1,60 +1,36 @@
 <script lang="ts">
-	import { FEATURE_IDS } from '@epicenter/api/billing-plans';
 	import { Badge } from '@epicenter/ui/badge';
 	import * as Card from '@epicenter/ui/card';
 	import { Progress } from '@epicenter/ui/progress';
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { billing } from '$lib/query/billing';
-	import { capitalize } from '$lib/utils';
+	import { billing } from '$lib/billing/queries';
 
-	const balance = createQuery(() => billing.balance.options);
+	const overview = createQuery(() => billing.overview.options);
 
-	/** The ai_credits balance object from the customer response. */
-	const creditBalance = $derived(
-		balance.data?.balances?.[FEATURE_IDS.aiCredits] ?? null,
-	);
-	const currentBalance = $derived(creditBalance?.remaining ?? 0);
-	const totalGranted = $derived(creditBalance?.granted ?? 0);
+	const credits = $derived(overview.data?.credits ?? null);
+	const trial = $derived(overview.data?.trial ?? null);
+	const planDisplayName = $derived(overview.data?.planDisplayName ?? 'Free');
+
 	const usagePercent = $derived(
-		totalGranted > 0
-			? Math.min(100, Math.round((currentBalance / totalGranted) * 100))
+		credits && credits.granted > 0
+			? Math.min(100, Math.round((credits.remaining / credits.granted) * 100))
 			: 0,
 	);
 
-	/** Find the monthly breakdown entry for the reset countdown. */
-	const monthlyEntry = $derived(
-		creditBalance?.breakdown?.find((e) => e.reset?.interval === 'month') ??
-			null,
-	);
-	const rolloverEntry = $derived(creditBalance?.rollovers?.[0] ?? null);
-
-	/** resetsAt is epoch ms from the Balance level, not breakdown. */
-	const resetTimestamp = $derived(creditBalance?.nextResetAt ?? null);
 	const daysUntilReset = $derived(
-		resetTimestamp !== null
-			? Math.max(0, Math.ceil((resetTimestamp - Date.now()) / 86_400_000))
+		credits?.nextResetAtMs != null
+			? Math.max(
+					0,
+					Math.ceil((credits.nextResetAtMs - Date.now()) / 86_400_000),
+				)
 			: null,
 	);
 
-	/** Find the active non-addOn subscription to check for trial status. */
-	const subscription = $derived(
-		balance.data?.subscriptions?.find((s) => !s.addOn) ?? null,
-	);
-	const trialEndsAt = $derived(subscription?.trialEndsAt ?? null);
-	const trialDaysLeft = $derived(
-		trialEndsAt !== null
-			? Math.max(0, Math.ceil((trialEndsAt - Date.now()) / 86_400_000))
-			: null,
-	);
-	const trialPlanName = $derived(
-		subscription?.plan?.name ??
-			(subscription?.planId ? capitalize(subscription.planId) : 'Free'),
-	);
-	const trialIsUrgent = $derived(trialDaysLeft !== null && trialDaysLeft <= 3);
+	const trialIsUrgent = $derived(trial !== null && trial.daysLeft <= 3);
 </script>
 
-{#if balance.isPending}
+{#if overview.isPending}
 	<Card.Root class="mb-8">
 		<Card.Header> <Skeleton class="h-6 w-20" /> </Card.Header>
 		<Card.Content>
@@ -62,7 +38,7 @@
 			<Skeleton class="h-2 w-full" />
 		</Card.Content>
 	</Card.Root>
-{:else if balance.isError}
+{:else if overview.isError}
 	<Card.Root class="mb-8 border-destructive">
 		<Card.Content class="pt-6">
 			<p class="text-sm text-destructive">
@@ -70,7 +46,7 @@
 			</p>
 		</Card.Content>
 	</Card.Root>
-{:else}
+{:else if credits}
 	<Card.Root class="mb-8">
 		<Card.Header class="flex-row items-center justify-between space-y-0 pb-2">
 			<Card.Title class="text-sm font-medium">Credits</Card.Title>
@@ -79,15 +55,15 @@
 					Resets in {daysUntilReset} day{daysUntilReset === 1 ? '' : 's'}
 				</Badge>
 			{/if}
-			{#if trialDaysLeft !== null}
+			{#if trial}
 				<Badge
 					variant={trialIsUrgent ? 'destructive' : 'outline'}
 					class={trialIsUrgent
 						? ''
 						: 'border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400'}
 				>
-					{trialPlanName}
-					Trial — {trialDaysLeft} day{trialDaysLeft === 1 ? '' : 's'}
+					{planDisplayName}
+					Trial: {trial.daysLeft} day{trial.daysLeft === 1 ? '' : 's'}
 					left
 				</Badge>
 			{/if}
@@ -95,21 +71,19 @@
 		<Card.Content>
 			<div class="flex items-baseline gap-2 mb-3">
 				<span class="text-3xl font-bold tabular-nums">
-					{currentBalance.toLocaleString()}
+					{credits.remaining.toLocaleString()}
 				</span>
 				<span class="text-sm text-muted-foreground">
-					of {totalGranted.toLocaleString()} included
+					of {credits.granted.toLocaleString()} included
 				</span>
 			</div>
 
 			<Progress value={usagePercent} class="h-2 mb-3" />
 
-			{#if rolloverEntry && rolloverEntry.balance > 0}
+			{#if credits.rolloverRemaining > 0}
 				<div class="flex gap-4 text-xs text-muted-foreground">
-					<span>
-						Monthly: {(monthlyEntry?.remaining ?? 0).toLocaleString()}
-					</span>
-					<span>Rollover: {rolloverEntry.balance.toLocaleString()}</span>
+					<span>Monthly: {credits.monthlyRemaining.toLocaleString()}</span>
+					<span>Rollover: {credits.rolloverRemaining.toLocaleString()}</span>
 				</div>
 			{/if}
 		</Card.Content>

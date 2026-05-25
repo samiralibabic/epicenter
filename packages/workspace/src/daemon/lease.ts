@@ -19,10 +19,7 @@ import { Ok, type Result } from 'wellcrafted/result';
 import { bestEffortSync } from './best-effort.js';
 import { readMetadata } from './metadata.js';
 import { leasePathFor, socketPathFor } from './paths.js';
-import {
-	StartupError,
-	type StartupError as StartupErrorType,
-} from './startup-errors.js';
+import { StartupError } from './startup-errors.js';
 
 export type DaemonLease = {
 	/** Filesystem-resolved absolute path that scopes this daemon. */
@@ -37,7 +34,7 @@ export type DaemonLease = {
 
 export function claimDaemonLease(
 	projectDir: string,
-): Result<DaemonLease, StartupErrorType> {
+): Result<DaemonLease, StartupError> {
 	const leasePath = leasePathFor(projectDir);
 
 	let db: Database | undefined;

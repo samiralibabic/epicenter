@@ -1,21 +1,35 @@
+import { defineErrors, type InferErrors } from 'wellcrafted/error';
+import { Ok, type Result } from 'wellcrafted/result';
 import type { OAuthTokenGrant } from './auth-types.js';
 
-type OAuthTokenResponseIssue =
-	| 'missing_access_token'
-	| 'missing_refresh_token'
-	| 'missing_expires_in'
-	| 'invalid_token_type'
-	| 'invalid_response';
+/**
+ * Shape-level failures rejecting an OAuth token endpoint payload before it
+ * becomes a persisted grant. Each variant maps to one invariant in
+ * {@link parseOAuthTokenGrant}: missing or non-string fields, a wrong
+ * `token_type`, or a non-object payload.
+ */
+export const OAuthTokenResponseError = defineErrors({
+	InvalidResponse: () => ({
+		message: 'Expected OAuth token response to be an object.',
+	}),
+	InvalidTokenType: ({ tokenType }: { tokenType: unknown }) => ({
+		message: `Expected token_type to be bearer, got ${JSON.stringify(tokenType)}.`,
+		tokenType,
+	}),
+	MissingAccessToken: () => ({
+		message: 'Expected access_token to be a string.',
+	}),
+	MissingRefreshToken: () => ({
+		message: 'Expected refresh_token to be a string.',
+	}),
+	MissingExpiresIn: () => ({
+		message: 'Expected expires_in to be a positive finite number.',
+	}),
+});
 
-export class OAuthTokenResponseError extends Error {
-	constructor(
-		readonly issue: OAuthTokenResponseIssue,
-		message: string,
-	) {
-		super(message);
-		this.name = 'OAuthTokenResponseError';
-	}
-}
+export type OAuthTokenResponseError = InferErrors<
+	typeof OAuthTokenResponseError
+>;
 
 /**
  * Normalize an OAuth token endpoint payload into Epicenter's persisted grant.
@@ -35,46 +49,31 @@ export function parseOAuthTokenGrant(
 		now: () => number;
 		fallbackRefreshToken?: string;
 	},
-): OAuthTokenGrant {
+): Result<OAuthTokenGrant, OAuthTokenResponseError> {
 	if (
 		payload === null ||
 		typeof payload !== 'object' ||
 		Array.isArray(payload)
 	) {
-		throw new OAuthTokenResponseError(
-			'invalid_response',
-			'Expected OAuth token response to be an object.',
-		);
+		return OAuthTokenResponseError.InvalidResponse();
 	}
 	const record = payload as Record<string, unknown>;
 	const tokenType = record['token_type'];
 	if (typeof tokenType !== 'string' || tokenType.toLowerCase() !== 'bearer') {
-		throw new OAuthTokenResponseError(
-			'invalid_token_type',
-			`Expected token_type to be bearer, got ${JSON.stringify(tokenType)}.`,
-		);
+		return OAuthTokenResponseError.InvalidTokenType({ tokenType });
 	}
 
 	const accessToken = record['access_token'];
 	if (typeof accessToken !== 'string') {
-		throw new OAuthTokenResponseError(
-			'missing_access_token',
-			'Expected access_token to be a string.',
-		);
+		return OAuthTokenResponseError.MissingAccessToken();
 	}
 
 	const refreshToken = record['refresh_token'];
 	if (refreshToken != null && typeof refreshToken !== 'string') {
-		throw new OAuthTokenResponseError(
-			'missing_refresh_token',
-			'Expected refresh_token to be a string.',
-		);
+		return OAuthTokenResponseError.MissingRefreshToken();
 	}
 	if (refreshToken == null && fallbackRefreshToken === undefined) {
-		throw new OAuthTokenResponseError(
-			'missing_refresh_token',
-			'Expected refresh_token to be a string.',
-		);
+		return OAuthTokenResponseError.MissingRefreshToken();
 	}
 
 	const expiresIn = record['expires_in'];
@@ -83,15 +82,12 @@ export function parseOAuthTokenGrant(
 		!Number.isFinite(expiresIn) ||
 		expiresIn <= 0
 	) {
-		throw new OAuthTokenResponseError(
-			'missing_expires_in',
-			'Expected expires_in to be a positive finite number.',
-		);
+		return OAuthTokenResponseError.MissingExpiresIn();
 	}
 
-	return {
+	return Ok({
 		accessToken,
 		refreshToken: refreshToken ?? fallbackRefreshToken!,
 		accessTokenExpiresAt: now() + expiresIn * 1000,
-	};
+	});
 }

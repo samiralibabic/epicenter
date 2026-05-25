@@ -1,8 +1,8 @@
 /**
  * `epicenter peers`: live-device view of who's connected right now.
  *
- * Shows the installation id needed to target a peer with `run --peer`.
- * The relay carries only `installationId` on the wire; product-level
+ * Shows the device id needed to target a peer with `run --peer`.
+ * The relay carries only `deviceId` on the wire; product-level
  * display names live in app-owned state and are out of scope here.
  *
  * `epicenter peers` requires a running daemon for the discovered project.
@@ -70,8 +70,8 @@ function emit(rows: PeerSnapshot[], format: OutputFormat | undefined): void {
 		console.log(route);
 		console.table(
 			group
-				.map((snap) => ({ installationId: snap.installationId }))
-				.sort((a, b) => a.installationId.localeCompare(b.installationId)),
+				.map((snap) => ({ deviceId: snap.deviceId }))
+				.sort((a, b) => a.deviceId.localeCompare(b.deviceId)),
 		);
 		i++;
 	}

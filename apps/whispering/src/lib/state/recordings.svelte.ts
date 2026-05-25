@@ -36,7 +36,8 @@ function createRecordings() {
 	const sorted = $derived(
 		[...map.values()].sort(
 			(a, b) =>
-				new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime(),
+				new Date(b.recordedAt as string).getTime() -
+				new Date(a.recordedAt as string).getTime(),
 		),
 	);
 
@@ -84,7 +85,7 @@ function createRecordings() {
 		 * No manual cache invalidation needed—the observer handles UI updates.
 		 */
 		set(recording: Omit<Recording, '_v'>) {
-			whispering.tables.recordings.set({ ...recording, _v: 2 } as Recording);
+			whispering.tables.recordings.set({ ...recording } as Recording);
 		},
 
 		/**

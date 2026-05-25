@@ -5,6 +5,10 @@
 Read before auditing a test file you suspect is padded, before reviewing
 green tests that "feel" hollow, or whenever you add a fake/mock/stub.
 
+If the job is to delete low-value tests across a file or package, read
+[test-deletion-grill.md](test-deletion-grill.md) first. It defines the
+deletion taxonomy, commit discipline, and final report shape.
+
 The pattern: a green test is not proof of value. A test only earns its
 line count if it can fail for a real reason, and a fake only earns its
 line count if some assertion path actually drives it.

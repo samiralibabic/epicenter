@@ -18,10 +18,11 @@
 
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
+import { API_ROUTES } from '@epicenter/constants/api-routes';
 import { EPICENTER_API_URL } from '@epicenter/constants/apps';
-import { epicenterEnv } from '@epicenter/constants/node';
 import { EPICENTER_CLI_OAUTH_CLIENT_ID } from '@epicenter/constants/oauth';
-import type { SubjectKeyring } from '@epicenter/encryption';
+import type { Keyring } from '@epicenter/encryption';
+import envPaths from 'env-paths';
 import {
 	defineErrors,
 	extractErrorMessage,
@@ -33,14 +34,23 @@ import type { AuthClient } from '../auth-contract.js';
 import {
 	ApiSessionResponse,
 	PersistedAuth,
-	type PersistedAuth as PersistedAuthType,
+	type UserId,
 } from '../auth-types.js';
 import {
 	type AuthFetch,
 	createOAuthAppAuth,
 } from '../create-oauth-app-auth.js';
-import { ownerId } from '../owner.js';
 import { createOobOAuthLauncher } from './oob-launcher.js';
+
+/**
+ * Auth's per-user data directory. Honors `EPICENTER_DATA_DIR` first, then
+ * falls back to the env-paths platform data directory (e.g.
+ * `~/Library/Application Support/epicenter` on macOS,
+ * `~/.local/share/epicenter` on Linux). Resolved once at module load:
+ * production env vars don't change mid-process.
+ */
+const DEFAULT_DATA_DIR =
+	process.env.EPICENTER_DATA_DIR ?? envPaths('epicenter', { suffix: '' }).data;
 
 /**
  * The on-disk machine auth file for a given API target.
@@ -52,14 +62,12 @@ import { createOobOAuthLauncher } from './oob-launcher.js';
  * `<dataDir>/auth/localhost_8787.json`. Different targets cannot trample
  * each other.
  *
- * `dataDir` defaults to `epicenterEnv.dataDir` (which honours
- * `EPICENTER_DATA_DIR` and falls back to the env-paths data directory)
- * and exists only as an override for tests; production callers should
- * never pass it.
+ * `dataDir` defaults to {@link DEFAULT_DATA_DIR} and exists as an override
+ * for tests; production callers should never pass it.
  */
 export function machineAuthFilePath({
 	baseURL = EPICENTER_API_URL,
-	dataDir = epicenterEnv.dataDir,
+	dataDir = DEFAULT_DATA_DIR,
 }: {
 	baseURL?: string;
 	dataDir?: string;
@@ -130,7 +138,7 @@ async function loadMachineTokens({
 }: {
 	filePath: string;
 	log: Logger;
-}): Promise<Result<PersistedAuthType | null, MachineAuthStorageError>> {
+}): Promise<Result<PersistedAuth | null, MachineAuthStorageError>> {
 	const stat = await tryAsync({
 		try: () => fs.stat(filePath),
 		catch: (cause) => MachineAuthStorageError.StorageFailed({ cause }),
@@ -175,7 +183,7 @@ async function loadMachineTokens({
  * crash mid-write never leaves a half-written file. Private to this module.
  */
 async function saveMachineTokens(
-	value: PersistedAuthType | null,
+	value: PersistedAuth | null,
 	{ filePath }: { filePath: string },
 ): Promise<Result<undefined, MachineAuthStorageError>> {
 	return tryAsync({
@@ -208,8 +216,8 @@ async function saveMachineTokens(
  * machine is offline during `status`.
  */
 export type MachineIdentity = {
-	user: { id: string; email: string };
-	keyring: SubjectKeyring;
+	user: { id: UserId; email: string };
+	keyring: Keyring;
 };
 
 type CommonConfig = {
@@ -289,11 +297,12 @@ export async function loginWithOob({
 	if (sessionResult.error) return Err(sessionResult.error);
 	const session = sessionResult.data;
 
-	const cell: PersistedAuth = {
+	const cell = {
 		grant,
-		owner: session.owner,
+		userId: session.user.id,
+		ownerId: session.ownerId,
 		keyring: session.keyring,
-	};
+	} satisfies PersistedAuth;
 	const saved = await saveMachineTokens(cell, { filePath: authFilePath });
 	if (saved.error) return Err(saved.error);
 
@@ -308,7 +317,7 @@ export async function loginWithOob({
 /**
  * Load the persisted cell and verify it by hitting `/api/session` through a
  * regular `createOAuthAppAuth` client (so refresh-on-401 fires automatically
- * and the same-subject guard wipes the cell on mismatch). Returns `unverified`
+ * and the same-owner guard wipes the cell on mismatch). Returns `unverified`
  * on network failures so the CLI can still report the cached identity.
  */
 export async function status({
@@ -343,13 +352,12 @@ export async function status({
 
 	let response: Response;
 	try {
-		response = await client.fetch('/api/session');
-	} catch (cause) {
-		void cause;
+		response = await client.fetch(API_ROUTES.session.pattern);
+	} catch {
 		return Ok({
 			status: 'unverified' as const,
 			identity: {
-				user: { id: ownerId(cachedCell.owner), email: '' },
+				user: { id: cachedCell.userId, email: '' },
 				keyring: cachedCell.keyring,
 			},
 		});
@@ -383,7 +391,7 @@ export async function status({
 	return Ok({
 		status: 'unverified' as const,
 		identity: {
-			user: { id: ownerId(cachedCell.owner), email: '' },
+			user: { id: cachedCell.userId, email: '' },
 			keyring: cachedCell.keyring,
 		},
 	});
@@ -489,7 +497,7 @@ async function fetchApiSession(
 ): Promise<Result<ApiSessionResponse, MachineAuthRequestError>> {
 	let response: Response;
 	try {
-		response = await fetch(`${baseURL}/api/session`, {
+		response = await fetch(API_ROUTES.session.url(baseURL), {
 			headers: { Authorization: `Bearer ${accessToken}` },
 			credentials: 'omit',
 		});
@@ -499,7 +507,9 @@ async function fetchApiSession(
 	if (response.status !== 200) {
 		return Err(
 			MachineAuthRequestError.RequestFailed({
-				cause: new Error(`/api/session returned ${response.status}.`),
+				cause: new Error(
+					`${API_ROUTES.session.pattern} returned ${response.status}.`,
+				),
 			}).error,
 		);
 	}

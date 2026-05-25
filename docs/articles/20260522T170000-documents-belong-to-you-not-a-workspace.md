@@ -35,7 +35,7 @@ if (workspaceId == null) {
 
 The only way that check fails is if the system itself broke. I was paying a database round-trip, on every document open, to confirm that I am myself. And the id I was looking up, `ws_${sha256(userId)}`, was just my user id run through a hash. It held no information my user id did not already hold. It was a second name for a thing I was already carrying.
 
-That is what workspace-first does when there is only one person in the room. The "workspace" becomes a costume the user wears so the rest of the system has something to talk to. The funny part is that I had already written the right answer down. Before all of this, there was a comment in the codebase explaining why Epicenter used subject-scoped names and not org-scoped ones, and it ended with the line "org tables and Better Auth organization plugin are unnecessary overhead." Past me knew. Then I built the overhead anyway.
+That is what workspace-first does when there is only one person in the room. The "workspace" becomes a costume the user wears so the rest of the system has something to talk to. The funny part is that I had already written the right answer down. Before all of this, there was a comment in the codebase explaining why Epicenter used owner-scoped names and not org-scoped ones, and it ended with the line "org tables and Better Auth organization plugin are unnecessary overhead." Past me knew. Then I built the overhead anyway.
 
 ## Google already solved this, and it solved it twice
 
@@ -47,13 +47,13 @@ Google Workspace is the paid product: a domain like `acme.com`, an admin console
 
 Notion fuses those two layers into the workspace. Google keeps them apart. I had copied the fused version, and the personal-workspace-of-one was the bill for it.
 
-So Epicenter went to the Google Docs model. A document is owned by a subject, and the subject is just the user:
+So Epicenter went to the Google Docs model. A document is owned by an owner, and for a personal account that owner is just the user:
 
 ```
-subject:${userId}:rooms:${ydoc.guid}
+owners/${userId}/rooms/${ydoc.guid}
 ```
 
-No workspace. No membership check. The token already says who you are, and for your own documents that is the whole authorization story. Sharing, when it comes, follows the same Google Docs shape: the document keeps its name, and an access list grants other subjects in.
+No workspace. No membership check. The token already says who you are, and for your own documents that is the whole authorization story. Sharing, when it comes, follows the same Google Docs shape: the document keeps its name, and an access list grants other owners in.
 
 ## What about teams? Google answers that one too
 
@@ -66,7 +66,7 @@ That gives Epicenter a clean three-layer plan, and only the first layer ships no
 ```
 Layer 3   tenancy and billing      acme.com, seats, admin       (Google Workspace)
 Layer 2   shared-drive content     docs an org owns             (Google Shared Drives)
-Layer 1   personal content         subject owns the doc + ACL   (Google Docs)
+Layer 1   personal content         owner owns the doc + ACL     (Google Docs)
 ```
 
 Layer 1 is what Epicenter does today: your documents are yours. Layer 2 is org-owned content for the day an enterprise needs work to outlive an employee. Layer 3 is the billing and admin grouping for enterprise seats, and that is where the Better Auth organization plugin comes back, in the job it was actually built for.

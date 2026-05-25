@@ -1,5 +1,5 @@
 import { createSession } from '@epicenter/svelte';
-import { createInstallationId } from '@epicenter/workspace';
+import { createDeviceId } from '@epicenter/workspace';
 import { auth } from '$platform/auth';
 import { createAiChatState } from './chat/chat-state.svelte';
 import { openOpensidianBrowser } from './opensidian/browser';
@@ -16,7 +16,7 @@ export const session = createSession({
 	build: (signedIn) => {
 		const opensidian = openOpensidianBrowser({
 			signedIn,
-			installationId: createInstallationId({ storage: localStorage }),
+			deviceId: createDeviceId({ storage: localStorage }),
 		});
 		const editor = createEditorState();
 		const files = createFilesState({ binding: opensidian });

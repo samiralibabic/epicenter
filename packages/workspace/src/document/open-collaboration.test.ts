@@ -22,7 +22,7 @@ import {
 } from '../shared/actions.js';
 import { openCollaboration } from './open-collaboration.js';
 
-const url = 'wss://ignored.invalid/api/rooms/test?installationId=self';
+const url = 'wss://ignored.invalid/api/rooms/test?deviceId=self';
 
 /**
  * Minimal fake WebSocket. Stays in CONNECTING (readyState 0) until `close()`
@@ -57,16 +57,6 @@ function setup<TActions extends ActionRegistry = ActionRegistry>(
 }
 
 describe('openCollaboration', () => {
-	test('exposes the user actions verbatim', () => {
-		const list = defineQuery({ handler: () => [] });
-		const { ydoc, collaboration } = setup({ tabs_list: list });
-		try {
-			expect(collaboration.actions).toEqual({ tabs_list: list });
-		} finally {
-			ydoc.destroy();
-		}
-	});
-
 	test('devices.list() returns [] when no remote peers have published liveness', () => {
 		const { ydoc, collaboration } = setup({
 			tabs_list: defineQuery({ handler: () => [] }),

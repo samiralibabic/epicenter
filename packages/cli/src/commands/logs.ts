@@ -27,7 +27,7 @@ const DEFAULT_TAIL_LINES = 50;
  * to the daemon log rotation threshold before rotation, so worst-case memory
  * is small and predictable.
  */
-export function tailLines(path: string, n: number): string {
+function tailLines(path: string, n: number): string {
 	if (!existsSync(path)) return '';
 	const buf = readFileSync(path, 'utf8');
 	if (buf.length === 0) return '';

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { AuthClient, AuthState } from '@epicenter/auth';
+import { asOwnerId } from '@epicenter/constants/identity';
 import { Ok } from 'wellcrafted/result';
 import { createSession } from './session.svelte.js';
 
@@ -9,22 +10,18 @@ import { createSession } from './session.svelte.js';
 const keyring = [
 	{
 		version: 1,
-		subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+		keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
 	},
 ] as const;
 
-const signedIn = (userId: string): AuthState => ({
+const signedIn = (id: string): AuthState => ({
 	status: 'signed-in',
-	owner: { kind: 'personal', userId },
+	ownerId: asOwnerId(id),
 	keyring: [...keyring],
 });
 
 const ownerLabel = (state: AuthState) =>
-	state.status === 'signed-out'
-		? 'signed-out'
-		: state.owner.kind === 'personal'
-			? state.owner.userId
-			: 'team';
+	state.status === 'signed-out' ? 'signed-out' : state.ownerId;
 
 test('signed-out gap disposes old payload before building the next owner', () => {
 	const { auth, setState } = createAuthHarness(signedIn('alice'));
@@ -32,14 +29,13 @@ test('signed-out gap disposes old payload before building the next owner', () =>
 
 	const session = createSession({
 		auth,
-		build: ({ owner }) => {
-			const label = owner.kind === 'personal' ? owner.userId : 'team';
-			events.push(`build:${label}`);
+		build: ({ ownerId }) => {
+			events.push(`build:${ownerId}`);
 
 			return {
-				label,
+				label: ownerId,
 				[Symbol.dispose]() {
-					events.push(`dispose:${label}`);
+					events.push(`dispose:${ownerId}`);
 				},
 			};
 		},
@@ -49,23 +45,25 @@ test('signed-out gap disposes old payload before building the next owner', () =>
 	setState(signedIn('bob'));
 
 	expect(events).toEqual(['build:alice', 'dispose:alice', 'build:bob']);
-	expect(session.current?.label).toBe('bob');
+	expect(session.current?.label).toBe(asOwnerId('bob'));
 
 	session[Symbol.dispose]();
 });
 
-test('build receives signedIn with owner, keyring callback, and auth client', () => {
+test('build receives signedIn with projected fields and explicit auth capabilities', () => {
 	const { auth } = createAuthHarness(signedIn('alice'));
 
 	const session = createSession({
 		auth,
 		build: (received) => {
 			expect(received.server).toBe('api.test');
-			expect(received.owner).toEqual({ kind: 'personal', userId: 'alice' });
+			expect(received.baseURL).toBe(auth.baseURL);
+			expect(received.ownerId).toBe(asOwnerId('alice'));
 			expect(typeof received.keyring).toBe('function');
 			expect(received.keyring()).toEqual([...keyring]);
-			expect(received.auth).toBe(auth);
-			expect(ownerLabel(auth.state)).toBe('alice');
+			expect(received.openWebSocket).toBe(auth.openWebSocket);
+			expect(received.onReconnectSignal).toBe(auth.onStateChange);
+			expect(ownerLabel(auth.state)).toBe(asOwnerId('alice'));
 			return {
 				[Symbol.dispose]() {},
 			};

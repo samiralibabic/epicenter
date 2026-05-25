@@ -98,7 +98,7 @@
 	);
 
 	function getDateLabel(dts: string): string {
-		const date = DateTimeString.toDate(dts);
+		const date = new Date(dts);
 		if (isToday(date)) return 'Today';
 		if (isYesterday(date)) return 'Yesterday';
 		return format(date, 'MMMM d');
@@ -199,7 +199,7 @@
 								{item.entry.title || 'Untitled'}
 							</span>
 							<span class="shrink-0 text-xs text-muted-foreground">
-								{format(DateTimeString.toDate(item.entry[groupField]), 'h:mm a')}
+								{format(new Date(item.entry[groupField]), 'h:mm a')}
 							</span>
 						</div>
 						{#if item.entry.subtitle}

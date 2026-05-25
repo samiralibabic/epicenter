@@ -1,6 +1,6 @@
+import type { OAuthError } from '@epicenter/constants/oauth-errors';
 import type { Context } from 'hono';
 import { isWebSocketUpgrade } from '../is-websocket-upgrade.js';
-import type { OAuthError } from './oauth-error.js';
 
 type CreateWebSocketPair = () => InstanceType<typeof WebSocketPair>;
 
@@ -22,11 +22,12 @@ export function createOAuthUnauthorizedResourceResponse(
 	// InvalidToken: missing, malformed, unverifiable, or user-not-found.
 	if (!isUpgrade) {
 		c.header('WWW-Authenticate', 'Bearer error="invalid_token"');
-		return c.json(error, 401);
+		return c.json(error, error.status);
 	}
 	const pair = createWebSocketPair();
 	const [client, server] = [pair[0], pair[1]];
 	server.accept();
-	server.close(4401, JSON.stringify(error));
+	// WebSocket app-close codes are HTTP status + 4000 (so 401 -> 4401).
+	server.close(4000 + error.status, JSON.stringify(error));
 	return new Response(null, { status: 101, webSocket: client });
 }

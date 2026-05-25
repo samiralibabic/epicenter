@@ -8,10 +8,7 @@ import {
 import { Ok, type Result } from 'wellcrafted/result';
 import type { OAuthTokenGrant } from '../auth-types.js';
 import type { AuthFetch } from '../create-oauth-app-auth.js';
-import {
-	OAuthTokenResponseError,
-	parseOAuthTokenGrant,
-} from '../oauth-token-response.js';
+import { parseOAuthTokenGrant } from '../oauth-token-response.js';
 
 export const OAuthClientError = defineErrors({
 	MissingCallbackTransaction: () => ({
@@ -320,22 +317,19 @@ export function createOAuthClient({
 function parseTokenResult(
 	tokenResponse: oauth.TokenEndpointResponse,
 ): Result<OAuthTokenGrant, OAuthClientError> {
-	try {
-		return Ok(parseOAuthTokenGrant(tokenResponse, { now: Date.now }));
-	} catch (cause) {
-		if (cause instanceof OAuthTokenResponseError) {
-			switch (cause.issue) {
-				case 'missing_access_token':
-					return OAuthClientError.MissingAccessToken();
-				case 'missing_refresh_token':
-					return OAuthClientError.MissingRefreshToken();
-				case 'missing_expires_in':
-					return OAuthClientError.MissingExpiresIn();
-				case 'invalid_response':
-				case 'invalid_token_type':
-					return OAuthClientError.TokenExchangeFailed({ cause });
-			}
-		}
-		return OAuthClientError.TokenExchangeFailed({ cause });
+	const { data, error } = parseOAuthTokenGrant(tokenResponse, {
+		now: Date.now,
+	});
+	if (!error) return Ok(data);
+	switch (error.name) {
+		case 'MissingAccessToken':
+			return OAuthClientError.MissingAccessToken();
+		case 'MissingRefreshToken':
+			return OAuthClientError.MissingRefreshToken();
+		case 'MissingExpiresIn':
+			return OAuthClientError.MissingExpiresIn();
+		case 'InvalidResponse':
+		case 'InvalidTokenType':
+			return OAuthClientError.TokenExchangeFailed({ cause: error });
 	}
 }

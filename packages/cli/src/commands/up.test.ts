@@ -28,10 +28,11 @@ import {
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuthClient } from '@epicenter/auth';
 import { MachineAuthStorageError } from '@epicenter/auth/node';
+import { asOwnerId } from '@epicenter/constants/identity';
+import { DEFAULT_PROJECT_CONFIG_SOURCE } from '@epicenter/workspace';
 import {
 	claimDaemonLease,
 	metadataPathFor,
@@ -43,19 +44,18 @@ import { Err, Ok } from 'wellcrafted/result';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 import { runUp } from './up';
 
-const STUB_AUTH: AuthClient = {
+const STUB_AUTH = {
 	state: {
 		status: 'signed-in',
-		localIdentity: {
-			subject: 'user-1',
-			keyring: [
-				{
-					version: 1,
-					subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
-				},
-			],
-		},
+		ownerId: asOwnerId('user-1'),
+		keyring: [
+			{
+				version: 1,
+				keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+			},
+		],
 	},
+	baseURL: 'http://localhost:8787',
 	onStateChange: () => () => {},
 	startSignIn: async () => Ok(undefined),
 	signOut: async () => Ok(undefined),
@@ -64,27 +64,31 @@ const STUB_AUTH: AuthClient = {
 		throw new Error('STUB_AUTH: openWebSocket not implemented');
 	},
 	[Symbol.dispose]: () => {},
-};
+} satisfies AuthClient;
 
 const stubAuthFactory = async () => Ok(STUB_AUTH);
 
-let originalXdg: string | undefined;
+let originalRuntimeDir: string | undefined;
 let runtimeRoot: string;
 let workDir: string;
 
 beforeEach(() => {
-	originalXdg = process.env.XDG_RUNTIME_DIR;
+	originalRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
 
-	runtimeRoot = mkdtempSync(join(tmpdir(), 'ep-up-'));
-	process.env.XDG_RUNTIME_DIR = runtimeRoot;
-	mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
+	// `/tmp/...` is short on every POSIX platform; needed because
+	// socketPathFor enforces a strict path-length guard that macOS's
+	// `os.tmpdir()` would blow.
+	runtimeRoot = mkdtempSync('/tmp/eps-up-rt-');
+	process.env.EPICENTER_RUNTIME_DIR = runtimeRoot;
+	mkdirSync(runtimeRoot, { recursive: true });
 
-	workDir = mkdtempSync(join(tmpdir(), 'ep-dir-'));
+	workDir = mkdtempSync('/tmp/eps-up-dir-');
 });
 
 afterEach(() => {
-	if (originalXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
-	else process.env.XDG_RUNTIME_DIR = originalXdg;
+	if (originalRuntimeDir === undefined)
+		delete process.env.EPICENTER_RUNTIME_DIR;
+	else process.env.EPICENTER_RUNTIME_DIR = originalRuntimeDir;
 
 	rmSync(runtimeRoot, { recursive: true, force: true });
 	rmSync(workDir, { recursive: true, force: true });
@@ -227,7 +231,7 @@ describe('runUp: failure cleanup', () => {
 		try {
 			expect(handle.runtimes).toEqual([]);
 			expect(readFileSync(join(workDir, 'epicenter.config.ts'), 'utf8')).toBe(
-				"import { defineConfig } from '@epicenter/workspace';\n\nexport default defineConfig({});\n",
+				DEFAULT_PROJECT_CONFIG_SOURCE,
 			);
 			expect(
 				readFileSync(join(workDir, '.epicenter', '.gitignore'), 'utf8'),
@@ -423,7 +427,7 @@ describe('runUp: already running', () => {
 describe('runUp: orphan path', () => {
 	test('proceeds cleanly when metadata pid is dead and socket is phantom', async () => {
 		const sockPath = socketPathFor(workDir);
-		mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
+		mkdirSync(runtimeRoot, { recursive: true });
 
 		writeFileSync(sockPath, '');
 		writeMetadata(workDir, {

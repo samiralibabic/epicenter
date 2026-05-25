@@ -13,9 +13,9 @@ When a schema, builder, or configuration is only used once in a test, inline it 
 
 ```typescript
 test('attaches tables to a Y.Doc', () => {
-	const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
+	const posts = defineTable({ id: column.string<PostId>(), title: column.string() });
 
-	const theme = defineKv(type("'light' | 'dark'"), 'light');
+	const theme = defineKv(Type.Union([Type.Literal('light'), Type.Literal('dark')]), () => 'light');
 
 	const ydoc = new Y.Doc({ guid: 'test-app' });
 	const tables = attachTables(ydoc, { posts });
@@ -31,10 +31,13 @@ test('attaches tables to a Y.Doc', () => {
 test('attaches tables to a Y.Doc', () => {
 	const ydoc = new Y.Doc({ guid: 'test-app' });
 	const tables = attachTables(ydoc, {
-		posts: defineTable(type({ id: 'string', title: 'string', _v: '1' })),
+		posts: defineTable({ id: column.string<PostId>(), title: column.string() }),
 	});
 	const kv = attachKv(ydoc, {
-		theme: defineKv(type("'light' | 'dark'"), 'light'),
+		theme: defineKv(
+			Type.Union([Type.Literal('light'), Type.Literal('dark')]),
+			() => 'light',
+		),
 	});
 
 	expect(ydoc.guid).toBe('test-app');
@@ -53,7 +56,7 @@ test('attaches tables to a Y.Doc', () => {
 Extract to a variable when:
 
 - The value is used **multiple times** in the same test
-- You need to call **methods on the result** (e.g., `posts.migrate()`, `posts.versions`)
+- You need to chain methods on the result (e.g., `.migrate()` on a multi-version `defineTable(v1, v2)`)
 - The definition is **shared across multiple tests** in a `beforeEach` or test fixture
 - The inline version would exceed ~15-20 lines and hurt readability
 
@@ -61,7 +64,7 @@ Extract to a variable when:
 
 - `defineTable()`, `defineKv()`, `createDisposableCache()` builders
 - `attachTables()`, `attachKv()` factory calls
-- Schema definitions (arktype, zod, etc.)
+- Schema definitions (TypeBox `column.*` / `Type.*`, arktype, zod, etc.)
 - Configuration objects passed to factories
 - Mock functions used only once
 

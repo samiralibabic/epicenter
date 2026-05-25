@@ -1,4 +1,4 @@
-import type { FileId } from '@epicenter/filesystem';
+import { asFileId } from '@epicenter/filesystem';
 import { createPersistedState } from '@epicenter/svelte';
 import type { CommandPaletteItem } from '@epicenter/ui/command-palette';
 import { debounce } from '@epicenter/util';
@@ -44,7 +44,7 @@ export function createPaletteSearchState({
 						description: parentDir || undefined,
 						icon: getFileIcon(row.name),
 						group: 'Files',
-						onSelect: () => files.selectFile(id as FileId),
+						onSelect: () => files.selectFile(asFileId(id)),
 					},
 					descend: false,
 				};
@@ -76,7 +76,7 @@ export function createPaletteSearchState({
 				snippet: r.snippet,
 				icon: getFileIcon(r.name),
 				group: 'Content Matches',
-				onSelect: () => files.selectFile(r.id as FileId),
+				onSelect: () => files.selectFile(asFileId(r.id)),
 			}));
 		} catch {
 			contentResults = [];

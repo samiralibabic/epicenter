@@ -22,8 +22,8 @@
  * ```
  */
 
-import type { FileId } from '@epicenter/filesystem';
-import type { ConversationId } from 'opensidian';
+import { asFileId, type FileId } from '@epicenter/filesystem';
+import { asConversationId, type ConversationId } from 'opensidian';
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
 
@@ -74,13 +74,14 @@ function createSearchParams() {
 	return {
 		/** Currently active file, or `null` for no selection. */
 		get file(): FileId | null {
-			return (page.url.searchParams.get('file') as FileId) ?? null;
+			const raw = page.url.searchParams.get('file');
+			return raw ? asFileId(raw) : null;
 		},
 
 		/** Currently active chat conversation, or `null` for none. */
 		get chat(): ConversationId | null {
 			const raw = page.url.searchParams.get('chat');
-			return raw ? (raw as ConversationId) : null;
+			return raw ? asConversationId(raw) : null;
 		},
 
 		update,

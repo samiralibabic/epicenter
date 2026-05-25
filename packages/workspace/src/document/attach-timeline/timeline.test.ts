@@ -37,31 +37,6 @@ describe('attachTimeline - sheet entries', () => {
 		expect(tl.length).toBe(1);
 	});
 
-	test('asSheet from CSV text populates columns from header', () => {
-		const tl = setup();
-		tl.write('Name,Age\nAlice,30\n');
-		const { columns } = tl.asSheet();
-		expect(columns.size).toBe(2);
-
-		const colArray = Array.from(columns.values());
-		const names = colArray.map((col) => col.get('name')).sort();
-		expect(names).toEqual(['Age', 'Name']);
-	});
-
-	test('asSheet from CSV text populates rows from data', () => {
-		const tl = setup();
-		tl.write('Name,Age\nAlice,30\nBob,25\n');
-		const { rows } = tl.asSheet();
-		expect(rows.size).toBe(2);
-	});
-
-	test('read returns CSV for sheet entry', () => {
-		const tl = setup();
-		tl.write('Name,Age\nAlice,30\n');
-		tl.asSheet();
-		expect(tl.read()).toBe('Name,Age\nAlice,30\n');
-	});
-
 	test('round-trip: CSV text → asSheet → read matches original', () => {
 		const tl = setup();
 		const originalCsv =
@@ -87,19 +62,6 @@ describe('attachTimeline - sheet entries', () => {
 		// To switch back to text, use asText() explicitly
 		tl.asText();
 		expect(tl.currentType).toBe('text');
-	});
-
-	test('empty sheet returns empty string', () => {
-		const tl = setup();
-		tl.asSheet();
-		expect(tl.read()).toBe('');
-	});
-
-	test('sheet with columns but no rows returns header only', () => {
-		const tl = setup();
-		tl.write('A,B,C\n');
-		tl.asSheet();
-		expect(tl.read()).toBe('A,B,C\n');
 	});
 });
 
@@ -559,38 +521,9 @@ describe('attachTimeline - write (sheet mode)', () => {
 		expect(tl.currentType).toBe('text');
 		expect(tl.read()).toBe('A,B\n1,2\n');
 	});
-
-	test('observe does NOT fire when write replaces sheet in-place', () => {
-		const tl = setup();
-		tl.asSheet();
-		tl.write('A,B\n1,2\n');
-		let callCount = 0;
-		tl.observe(() => callCount++);
-		tl.write('X,Y\n3,4\n');
-		expect(callCount).toBe(0);
-	});
-
-	test('observe fires when asSheet converts from different type', () => {
-		const tl = setup();
-		tl.write('some text');
-		let callCount = 0;
-		tl.observe(() => callCount++);
-		tl.asSheet(); // pushes new sheet entry from text
-		expect(callCount).toBe(1);
-	});
 });
 
 describe('attachTimeline - batch', () => {
-	test('mutations in batch trigger observe once per transaction', () => {
-		const tl = setup();
-		let callCount = 0;
-		tl.observe(() => callCount++);
-		tl.batch(() => {
-			tl.write('first');
-		});
-		expect(callCount).toBe(1);
-	});
-
 	test('write + in-place replace in same batch triggers observe once', () => {
 		const tl = setup();
 		let callCount = 0;

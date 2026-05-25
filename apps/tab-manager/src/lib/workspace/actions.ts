@@ -178,11 +178,10 @@ export function createTabManagerActions({
 						id: generateSavedTabId(),
 						url: tab.url,
 						title: tab.title || 'Untitled',
-						favIconUrl: tab.favIconUrl,
+						favIconUrl: tab.favIconUrl ?? null,
 						pinned: tab.pinned ?? false,
 						sourceDeviceId,
 						savedAt: Date.now(),
-						_v: 1,
 					});
 				}
 				if (close) {
@@ -294,11 +293,10 @@ export function createTabManagerActions({
 					id: generateSavedTabId(),
 					url,
 					title,
-					favIconUrl,
+					favIconUrl: favIconUrl ?? null,
 					pinned,
 					sourceDeviceId,
 					savedAt: Date.now(),
-					_v: 1,
 				});
 				// The save (Y.Doc write) always succeeded by here. The close
 				// is partial-success: surface its own Result so callers can
@@ -398,11 +396,10 @@ export function createTabManagerActions({
 					id: generateBookmarkId(),
 					url,
 					title,
-					favIconUrl,
-					description: undefined,
+					favIconUrl: favIconUrl ?? null,
+					description: null,
 					sourceDeviceId,
 					createdAt: Date.now(),
-					_v: 1,
 				});
 				return { action: 'added' as const, removedCount: 0 };
 			},

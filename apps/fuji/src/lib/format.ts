@@ -5,7 +5,6 @@
  * components don't duplicate formatting logic.
  */
 
-import { DateTimeString } from '@epicenter/workspace';
 import { formatDistanceToNowStrict } from 'date-fns';
 
 /**
@@ -13,7 +12,23 @@ import { formatDistanceToNowStrict } from 'date-fns';
  * "3 minutes ago", "2 days ago".
  */
 export function relativeTime(dts: string): string {
-	return formatDistanceToNowStrict(DateTimeString.toDate(dts), {
+	return formatDistanceToNowStrict(new Date(dts), {
 		addSuffix: true,
 	});
+}
+
+/**
+ * Format a UTC ISO `date` in the given IANA `zone` for display.
+ * Renders the user's local wall-clock time (e.g. "May 25, 2026, 2:30 PM").
+ */
+export function formatInZone(date: string, zone: string): string {
+	return new Intl.DateTimeFormat('en-US', {
+		timeZone: zone,
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit',
+		hour12: true,
+	}).format(new Date(date));
 }

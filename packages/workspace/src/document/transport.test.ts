@@ -4,41 +4,42 @@
  * Verifies cloud sync URL construction for the rooms WebSocket endpoint.
  *
  * Key behaviors:
- * - Personal owners route through `/api/users/<userId>/rooms/<guid>`.
- * - Team owners route through `/api/rooms/<guid>`.
+ * - Single URL form: `/api/owners/<ownerId>/rooms/<guid>` in both modes.
  * - `guid` is `encodeURIComponent`-encoded.
  * - Trailing slashes on `baseURL` are stripped.
  * - `http` origins become `ws`; `https` origins become `wss`.
- * - `installationId` is appended as a query parameter.
+ * - `deviceId` is appended as a query parameter.
  */
 
 import { describe, expect, test } from 'bun:test';
+import { asOwnerId, TEAM_OWNER_ID } from '@epicenter/constants/identity';
+import { asDeviceId } from './device-id.js';
 import { roomWsUrl } from './transport.js';
 
 describe('roomWsUrl', () => {
-	test('personal owners include the userId path partition', () => {
+	test('personal mode owner id partitions the path under /owners/', () => {
 		expect(
 			roomWsUrl({
 				baseURL: 'https://api.example.com',
-				owner: { kind: 'personal', userId: 'alice' },
+				ownerId: asOwnerId('alice'),
 				guid: 'epicenter.fuji',
-				installationId: 'client-1',
+				deviceId: asDeviceId('client-1'),
 			}),
 		).toBe(
-			'wss://api.example.com/api/users/alice/rooms/epicenter.fuji?installationId=client-1',
+			'wss://api.example.com/api/owners/alice/rooms/epicenter.fuji?deviceId=client-1',
 		);
 	});
 
-	test('team owners route through /api/rooms', () => {
+	test("team mode uses the literal 'team' owner id under the same /owners/ partition", () => {
 		expect(
 			roomWsUrl({
 				baseURL: 'https://team.example.com',
-				owner: { kind: 'team' },
+				ownerId: TEAM_OWNER_ID,
 				guid: 'epicenter.fuji',
-				installationId: 'client-1',
+				deviceId: asDeviceId('client-1'),
 			}),
 		).toBe(
-			'wss://team.example.com/api/rooms/epicenter.fuji?installationId=client-1',
+			'wss://team.example.com/api/owners/team/rooms/epicenter.fuji?deviceId=client-1',
 		);
 	});
 
@@ -46,12 +47,12 @@ describe('roomWsUrl', () => {
 		expect(
 			roomWsUrl({
 				baseURL: 'https://api.example.com/',
-				owner: { kind: 'team' },
+				ownerId: TEAM_OWNER_ID,
 				guid: 'a/b?c#d',
-				installationId: 'client-1',
+				deviceId: asDeviceId('client-1'),
 			}),
 		).toBe(
-			'wss://api.example.com/api/rooms/a%2Fb%3Fc%23d?installationId=client-1',
+			'wss://api.example.com/api/owners/team/rooms/a%2Fb%3Fc%23d?deviceId=client-1',
 		);
 	});
 
@@ -59,12 +60,12 @@ describe('roomWsUrl', () => {
 		expect(
 			roomWsUrl({
 				baseURL: 'http://localhost:8787',
-				owner: { kind: 'team' },
+				ownerId: TEAM_OWNER_ID,
 				guid: 'epicenter.fuji',
-				installationId: 'client-1',
+				deviceId: asDeviceId('client-1'),
 			}),
 		).toBe(
-			'ws://localhost:8787/api/rooms/epicenter.fuji?installationId=client-1',
+			'ws://localhost:8787/api/owners/team/rooms/epicenter.fuji?deviceId=client-1',
 		);
 	});
 });

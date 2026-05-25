@@ -202,13 +202,15 @@ No Rust logging crate attaches level to the error type (`thiserror`, `anyhow`, `
 
 ### The `?err` idiom ↔ `tapErr`
 
-`tracing`'s `?err` interpolates a structured error field into the log event. In TS, the Result-flow equivalent is `tapErr`:
+`tracing`'s `?err` interpolates a structured error field into the log event. In TS, the Result-flow equivalent is `tapErr` (from `wellcrafted/result`):
 
 ```rust
 let result = do_thing().inspect_err(|err| tracing::warn!(?err, "do_thing failed"));
 ```
 
 ```ts
+import { tapErr } from 'wellcrafted/result';
+
 const result = await tryAsync({
   try: () => doThing(),
   catch: (cause) => DoThingError.Failed({ cause }),
@@ -216,3 +218,5 @@ const result = await tryAsync({
 ```
 
 Both: pass-through on success, log the structured error on failure.
+
+In practice this shape is rare in epicenter — most call sites need the Ok data locally and so branch on `result.error` and log inside the branch. Reach for `tapErr` only when the Result flows out of the function in a `.then(...)` chain.

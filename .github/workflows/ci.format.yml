@@ -22,9 +22,41 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: 'package.json'
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Lint check
         run: bun run lint:check
       - name: Type check
         run: bun run typecheck
+      # The Biome plugin at scripts/biome/c-json-errors.grit rejects ad-hoc
+      # c.json({ ... }, 4xx/5xx) error literals as part of `bun run lint:check`
+      # above; no separate step is needed. See
+      # specs/20260524T100110-centralize-c-json-error-responses.md.
+      - name: Reject hardcoded API path literals
+        # Every wire URL path Epicenter serves or calls lives in one
+        # place: packages/constants/src/{api,oauth}-routes.ts. Consumers
+        # import patterns + URL builders from there. See
+        # specs/20260524T153612-centralize-route-paths.md.
+        #
+        # Excludes (per spec § Decisions Log):
+        #   - The constants files themselves (they ARE the source of truth).
+        #   - apps/dashboard/src/lib/api.ts (same-origin deployment-internal
+        #     billing paths, scope-deferred).
+        #   - *.test.ts / *.test.tsx (mock URL matchers are allowed to
+        #     reference paths verbatim).
+        #   - JSDoc/comment lines (descriptive prose, not constructions).
+        run: |
+          if grep -rEn --include='*.ts' --include='*.tsx' \
+              --exclude='*.test.ts' --exclude='*.test.tsx' \
+              --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.wrangler --exclude-dir=.next \
+              "['\"\`]/api/(session|owners|ai)([^a-z]|$)|['\"\`]/auth/(oauth2/[a-z]+|cli-callback)" \
+              packages apps \
+              | grep -vE "packages/constants/src/(api|oauth)-routes\.ts|apps/dashboard/src/lib/api\.ts|packages/server/src/auth-pages/scripts/" \
+              | grep -vE "^[^:]+:[0-9]+:[[:space:]]*(\*|//|/\*)" ; then
+            echo "::error::Hardcoded API path literal found. Use API_ROUTES.* from @epicenter/constants/api-routes or OAUTH_ROUTES.* from @epicenter/constants/oauth-routes instead."
+            exit 1
+          fi

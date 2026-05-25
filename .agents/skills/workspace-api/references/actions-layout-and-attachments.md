@@ -1,6 +1,6 @@
 # Workspace Actions, Layout, And Attachments
 
-Detailed guidance for action factories, action return surfaces, JSDoc, workspace file layout, attachment ordering, `connectWorkspace`, and the `_v` convention.
+Detailed guidance for action factories, action return surfaces, JSDoc, workspace file layout, attachment ordering, and `connectWorkspace`.
 
 ## Actions
 
@@ -8,6 +8,7 @@ Actions wrap table operations as `defineMutation` (writes) or `defineQuery` (rea
 
 ```typescript
 import { defineMutation, defineQuery } from '@epicenter/workspace';
+import { Type } from 'typebox';
 
 export function createBlogActions({ tables, batch }) {
 	return {
@@ -20,10 +21,10 @@ export function createBlogActions({ tables, batch }) {
 		 */
 		publish: defineMutation({
 			description: 'Publish a draft post',
-			input: type({ id: PostId }),
+			input: Type.Object({ id: tables.posts.schema.properties.id }),
 			handler: ({ id }) => {
 				batch(() => {
-					tables.posts.update({ id, published: true, publishedAt: Date.now() });
+					tables.posts.update(id, { published: true, publishedAt: Date.now() });
 				});
 			},
 		}),
@@ -34,6 +35,8 @@ export function createBlogActions({ tables, batch }) {
 //   const actions = createBlogActions({ tables, batch });
 //   return { id, ydoc, tables, actions, batch, /* ... */ };
 ```
+
+For full input composition guidance (full-row writes, narrow patches, blanket PATCH, id-only inputs), see [Deriving action input schemas](deriving-action-inputs.md).
 
 ### Return shapes: local vs. remote contract
 
@@ -57,7 +60,7 @@ explicit action surface for that workflow.
 
 For the full matrix (every caller's view of every handler shape, all the
 decision trees, and the normalization boundaries), read
-[references/action-return-shapes.md](references/action-return-shapes.md).
+[Action return shapes](action-return-shapes.md).
 
 ### JSDoc on Action Methods
 
@@ -138,11 +141,11 @@ src/lib/
 import { workspace, auth } from '$lib/client';
 
 // Components that only need types or the definition:
-import { type Note, NoteId } from '$lib/workspace';
+import { type Note, type NoteId, generateNoteId } from '$lib/workspace';
 
 // Other packages in the monorepo:
 import { createHoneycrisp } from '@epicenter/honeycrisp/workspace';
-import { honeycrisp } from '@epicenter/honeycrisp/definition';
+import { honeycrispTables } from '@epicenter/honeycrisp/definition';
 ```
 
 ### Package.json Subpath Exports
@@ -276,11 +279,3 @@ Writes propagate through sync to the daemon, which owns the materializer (markdo
 Use `connectWorkspace` for one-off scripts and agent-written automation. Use `epicenter.config.ts` to register long-running daemon modules and materializers that need persistence and custom workspace-specific extensions. A per-route `daemon.ts` file is a conventional module layout, not a discovery rule.
 
 
-## The `_v` Convention
-
-- `_v` is a **number** discriminant field (`'1'` in arktype = the literal number `1`)
-- **Required for tables**: enforced at the type level via `CombinedStandardSchema<{ id: string; _v: number }>`
-- **Not used by KV stores**: KV has no versioning; `defineKv(schema, defaultValue)` is the only pattern
-- In arktype schemas: `_v: '1'`, `_v: '2'`, `_v: '3'` (number literals)
-- In migration returns: `_v: 2` (TypeScript narrows automatically, `as const` is unnecessary)
-- Convention: `_v` goes last in the object (`{ id, ...fields, _v: '1' }`)

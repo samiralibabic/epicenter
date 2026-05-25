@@ -29,9 +29,9 @@
 		"vite": "catalog:"
 	},
 	"dependencies": {
-		"@epicenter/api": "workspace:*",
 		"@epicenter/auth": "workspace:*",
 		"@epicenter/auth-svelte": "workspace:*",
+		"@epicenter/billing": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/svelte": "workspace:*",
 		"@tanstack/svelte-query": "catalog:",

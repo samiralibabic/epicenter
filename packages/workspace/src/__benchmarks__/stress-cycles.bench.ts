@@ -38,7 +38,6 @@ describe('repeated add/remove cycles', () => {
 						id: generateId(i),
 						title: `Post ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 
@@ -72,7 +71,6 @@ describe('repeated add/remove cycles', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 
@@ -110,7 +108,6 @@ describe('event log stress', () => {
 					name: `action_${i}`,
 					payload: sampleEventPayload,
 					timestamp: Date.now(),
-					_v: 1,
 				});
 			}
 
@@ -145,7 +142,6 @@ describe('event log stress', () => {
 				name: `action_${i}`,
 				payload: sampleEventPayload,
 				timestamp: Date.now(),
-				_v: 1,
 			});
 		}
 

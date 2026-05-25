@@ -15,11 +15,56 @@
  * the edge.
  */
 
+import { oauthProviderResourceClient } from '@better-auth/oauth-provider/resource-client';
 import { AuthUser } from '@epicenter/auth';
+import { OAuthError } from '@epicenter/constants/oauth-errors';
+import { eq } from 'drizzle-orm';
+import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
+import { Ok, type Result } from 'wellcrafted/result';
+import {
+	createOAuthIssuerURL,
+	createOAuthJwksURL,
+} from '../auth/oauth-metadata.js';
 import { createOAuthUnauthorizedResourceResponse } from '../auth/oauth-resource.js';
-import { resolveRequestOAuthUser } from '../auth/resource-boundary.js';
+import { parseBearer } from '../auth/parse-bearer.js';
+import * as schema from '../db/schema/index.js';
 import type { Env } from '../types.js';
+
+// `verifyAccessToken` carries no per-request state (`audience`, `issuer`,
+// `jwksUrl` are passed per call), so resolve it once at module load.
+const verifyAccessToken =
+	oauthProviderResourceClient().getActions().verifyAccessToken;
+
+/**
+ * Resolve the OAuth bearer on the current request to the calling user.
+ *
+ * The API origin (`c.var.authBaseURL`) is the resource audience; the same
+ * origin plus `/auth` is the issuer. Cheap by design: skips owner keyring
+ * derivation, since only the calling user is needed once the token proves
+ * issuer, audience, signature, expiration, and subject.
+ */
+async function resolveRequestOAuthUser(
+	c: Context<Env>,
+): Promise<Result<AuthUser, OAuthError>> {
+	const accessToken = parseBearer(c.req.header('authorization') ?? null);
+	if (!accessToken) return OAuthError.InvalidToken();
+
+	const audience = c.var.authBaseURL;
+	const payload = await verifyAccessToken(accessToken, {
+		verifyOptions: { audience, issuer: createOAuthIssuerURL(audience) },
+		jwksUrl: createOAuthJwksURL(audience),
+	}).catch(() => null);
+	const userId = typeof payload?.sub === 'string' ? payload.sub : null;
+	if (!userId) return OAuthError.InvalidToken();
+
+	const user = await c.var.db.query.user.findFirst({
+		where: eq(schema.user.id, userId),
+	});
+	if (!user) return OAuthError.InvalidToken();
+
+	return Ok(AuthUser.assert(user));
+}
 
 export const requireCookieOrBearerUser = createMiddleware<Env>(
 	async (c, next) => {

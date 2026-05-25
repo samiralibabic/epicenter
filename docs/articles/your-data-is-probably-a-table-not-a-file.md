@@ -9,26 +9,37 @@ The interesting part is that the filesystem isn't a separate storage system—it
 Honeycrisp is an Apple Notes clone. Its data model is two tables and some KV settings:
 
 ```typescript
-const foldersTable = defineTable(type({
-  id: FolderId,
-  name: 'string',
-  sortOrder: 'number',
-  _v: '1',
-}));
+const foldersTable = defineTable({
+  id: column.string<FolderId>(),
+  name: column.string(),
+  sortOrder: column.number(),
+});
 
 const notesTable = defineTable(
-  type({ id: NoteId, folderId: FolderId, title: 'string', preview: 'string', _v: '1' }),
-  type({ id: NoteId, folderId: FolderId, title: 'string', preview: 'string', deletedAt: DateTimeString, _v: '2' }),
-).withDocument('body', { guid: 'id' });
-
-export const honeycrisp = defineWorkspace({
-  id: 'epicenter.honeycrisp',
-  tables: { folders: foldersTable, notes: notesTable },
-  kv: { selectedFolderId: defineKv(...), sortBy: defineKv(...) },
+  {
+    id: column.string<NoteId>(),
+    folderId: column.string<FolderId>(),
+    title: column.string(),
+    preview: column.string(),
+  },
+  {
+    id: column.string<NoteId>(),
+    folderId: column.string<FolderId>(),
+    title: column.string(),
+    preview: column.string(),
+    deletedAt: column.dateTime(),
+  },
+).migrate(({ value, version }) => {
+  switch (version) {
+    case 1: return { ...value, deletedAt: null };
+    case 2: return value;
+  }
 });
+
+export const honeycrispTables = { folders: foldersTable, notes: notesTable };
 ```
 
-Every note has a known shape: `title`, `preview`, `folderId`, timestamps. The UI reads them with `table.getAllValid()`, filters with `table.filter(...)`, and writes with `table.set(...)`. Rich text content lives in per-note Y.Doc documents via `.withDocument('body', ...)`.
+Every note has a known shape: `title`, `preview`, `folderId`, timestamps. The UI reads them with `table.getAllValid()`, filters with `table.filter(...)`, and writes with `table.set(...)`. Rich text content lives in a separate per-note Y.Doc kept in a `createDisposableCache(...)` keyed by note id; the metadata row holds whatever the editor needs to find that content.
 
 No filesystem needed. Notes don't have paths. Users don't `mkdir` or `mv`. The app thinks in "records with fields," and workspace tables express that directly.
 
@@ -39,17 +50,14 @@ Opensidian is a local-first note editor with a built-in bash terminal. Users cre
 ```typescript
 import { filesTable } from '@epicenter/filesystem';
 
-export const opensidianDefinition = defineWorkspace({
-  id: 'opensidian',
-  tables: {
-    files: filesTable,
-    conversations: conversationsTable,
-    chatMessages: chatMessagesTable,
-  },
-});
+export const opensidianTables = {
+  files: filesTable,
+  conversations: conversationsTable,
+  chatMessages: chatMessagesTable,
+};
 ```
 
-The `filesTable` comes from `@epicenter/filesystem`. It defines rows with `name`, `parentId`, `type` (file or folder), `size`, timestamps, and soft-delete state. That table gets plugged into `defineWorkspace()` like any other table—because that's what it is.
+The `filesTable` comes from `@epicenter/filesystem`. It defines rows with `name`, `parentId`, `type` (file or folder), `size`, timestamps, and soft-delete state. That table gets passed to `attachTables(ydoc, ...)` like any other table, because that's what it is.
 
 The filesystem wrapper then turns those table rows into POSIX operations:
 

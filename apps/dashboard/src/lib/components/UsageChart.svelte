@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { FEATURE_IDS } from '@epicenter/api/billing-plans';
 	import * as Card from '@epicenter/ui/card';
 	import * as Chart from '@epicenter/ui/chart';
 	import * as Empty from '@epicenter/ui/empty';
@@ -9,7 +8,7 @@
 	import { scaleUtc } from 'd3-scale';
 	import { curveMonotoneX } from 'd3-shape';
 	import { AreaChart } from 'layerchart';
-	import { billing } from '$lib/query/billing';
+	import { billing } from '$lib/billing/queries';
 
 	type Range = '7d' | '30d' | '90d';
 
@@ -26,14 +25,13 @@
 	];
 
 	let selectedRange = $state<Range>('30d');
-	const featureKey = FEATURE_IDS.aiUsage;
 
 	const usage = createQuery(
 		() =>
 			billing.usage({
 				range: selectedRange,
 				binSize: selectedRange === '7d' ? 'hour' : 'day',
-				groupBy: 'properties.model',
+				groupBy: 'model',
 				maxGroups: 8,
 			}).options,
 	);
@@ -44,18 +42,15 @@
 		{ value: '90d' as const, label: '90 days' },
 	];
 
-	const totalCredits = $derived(usage.data?.total?.ai_usage?.sum ?? 0);
+	const totalCredits = $derived(usage.data?.totalCredits ?? 0);
+	const totalCalls = $derived(usage.data?.totalCalls ?? 0);
 
-	/**
-	 * Discover all model names across the response, sorted by total usage descending.
-	 * These become the chart series keys.
-	 */
+	/** Discover all model names across the response, sorted by total
+	 *  usage descending. These become the chart series keys. */
 	const modelNames = $derived.by(() => {
 		const totals: Record<string, number> = {};
-		for (const period of usage.data?.list ?? []) {
-			for (const [model, count] of Object.entries(
-				period.groupedValues?.[featureKey] ?? {},
-			)) {
+		for (const bucket of usage.data?.buckets ?? []) {
+			for (const [model, count] of Object.entries(bucket.groupedCredits)) {
 				totals[model] = (totals[model] ?? 0) + count;
 			}
 		}
@@ -64,23 +59,19 @@
 			.map(([name]) => name);
 	});
 
-	/**
-	 * Transform Autumn's aggregate response into flat rows for LayerChart.
-	 * Each row: { date: Date, 'claude-sonnet-4': 100, 'gpt-4o-mini': 30, ... }
-	 */
+	/** Flat rows for LayerChart. One row per bucket. */
 	const chartData = $derived(
-		(usage.data?.list ?? []).map((period) => {
+		(usage.data?.buckets ?? []).map((bucket) => {
 			const row: Record<string, unknown> = {
-				date: new Date(period.period),
+				date: new Date(bucket.periodIso),
 			};
 			for (const model of modelNames) {
-				row[model] = period.groupedValues?.[featureKey]?.[model] ?? 0;
+				row[model] = bucket.groupedCredits[model] ?? 0;
 			}
 			return row;
 		}),
 	);
 
-	/** Dynamic chart config: one entry per model with assigned colors. */
 	const chartConfig = $derived(
 		Object.fromEntries(
 			modelNames.map((name, i) => [
@@ -90,7 +81,6 @@
 		) satisfies Chart.ChartConfig,
 	);
 
-	/** Series array for AreaChart. */
 	const series = $derived(
 		modelNames.map((name, i) => ({
 			key: name,
@@ -106,7 +96,9 @@
 		<Select.Root
 			type="single"
 			value={selectedRange}
-			onValueChange={(v) => { if (v) selectedRange = v as Range; }}
+			onValueChange={(v) => {
+				if (v) selectedRange = v as Range;
+			}}
 		>
 			<Select.Trigger class="w-[120px] h-8 text-xs">
 				{rangeOptions.find((o) => o.value === selectedRange)?.label}
@@ -168,11 +160,8 @@
 				class="mt-4 flex items-center justify-between text-xs text-muted-foreground"
 			>
 				<span>Total: {totalCredits.toLocaleString()} credits</span>
-				{#if usage.data?.total?.ai_usage?.count}
-					<span
-						>{usage.data.total.ai_usage.count.toLocaleString()}
-						requests</span
-					>
+				{#if totalCalls > 0}
+					<span>{totalCalls.toLocaleString()} requests</span>
 				{/if}
 			</div>
 		{/if}

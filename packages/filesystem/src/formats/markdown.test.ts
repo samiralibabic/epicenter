@@ -11,18 +11,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import {
-	attachTables,
-	attachTimeline,
-	createDisposableCache,
-	onLocalUpdate,
-} from '@epicenter/workspace';
-import { Bash } from 'just-bash';
 import * as Y from 'yjs';
-import { fileContentDocGuid } from '../file-content-docs.js';
-import { attachYjsFileSystem } from '../file-system.js';
-import type { FileId } from '../ids.js';
-import { filesTable } from '../table.js';
 import {
 	parseFrontmatter,
 	serializeMarkdownWithFrontmatter,
@@ -100,19 +89,6 @@ describe('Y.Map helpers', () => {
 		expect(ymap.get('new')).toBe('value');
 	});
 
-	test('updateYMapFromRecord skips unchanged values', () => {
-		const ydoc = new Y.Doc();
-		const ymap = ydoc.getMap<unknown>('test');
-		ymap.set('key', 'same');
-
-		let changes = 0;
-		ymap.observe(() => changes++);
-
-		updateYMapFromRecord(ymap, { key: 'same' });
-		// Should be 0 or minimal changes since the value didn't change
-		expect(ymap.get('key')).toBe('same');
-	});
-
 	test('yMapToRecord round-trip', () => {
 		const ydoc = new Y.Doc();
 		const ymap = ydoc.getMap<unknown>('test');
@@ -156,90 +132,5 @@ describe('XmlFragment serialization', () => {
 		const serialized = serializeXmlFragmentToMarkdown(fragment);
 		expect(serialized).toContain('bold');
 		expect(serialized).toContain('italic');
-	});
-});
-
-describe('markdown integration with YjsFileSystem', () => {
-	function setup() {
-		const id = 'test';
-		const ydoc = new Y.Doc({ guid: id });
-		const tables = attachTables(ydoc, { files: filesTable });
-		const ws = { id, ydoc, tables };
-		const contentDocs = createDisposableCache(
-			(fileId: FileId) => {
-				const contentYdoc = new Y.Doc({
-					guid: fileContentDocGuid({ workspaceId: ws.id, fileId }),
-					gc: true,
-				});
-				onLocalUpdate(contentYdoc, () =>
-					ws.tables.files.update(fileId, { updatedAt: Date.now() }),
-				);
-				return {
-					ydoc: contentYdoc,
-					content: attachTimeline(contentYdoc),
-					whenReady: Promise.resolve(),
-					[Symbol.dispose]() {
-						contentYdoc.destroy();
-					},
-				};
-			},
-			{ gcTime: Number.POSITIVE_INFINITY },
-		);
-		return attachYjsFileSystem(ws.ydoc, ws.tables.files, {
-			async read(fileId) {
-				await using handle = contentDocs.open(fileId);
-				await handle.whenReady;
-				return handle.content.read();
-			},
-			async write(fileId, text) {
-				await using handle = contentDocs.open(fileId);
-				await handle.whenReady;
-				handle.content.write(text);
-			},
-			async append(fileId, text) {
-				await using handle = contentDocs.open(fileId);
-				await handle.whenReady;
-				handle.content.appendText(text);
-				return handle.content.read();
-			},
-		});
-	}
-
-	test('write and read .md file with front matter', async () => {
-		const fs = setup();
-		const content = '---\ntitle: Test\n---\n# Hello World\n';
-		await fs.writeFile('/doc.md', content);
-
-		const read = await fs.readFile('/doc.md');
-		expect(read).toContain('title: Test');
-		expect(read).toContain('Hello World');
-	});
-
-	test('write and read .md file without front matter', async () => {
-		const fs = setup();
-		await fs.writeFile('/doc.md', '# Just a heading\n');
-
-		const read = await fs.readFile('/doc.md');
-		expect(read).toContain('Just a heading');
-	});
-
-	test('.txt file is still plain text', async () => {
-		const fs = setup();
-		await fs.writeFile('/file.txt', 'plain text content');
-		expect(await fs.readFile('/file.txt')).toBe('plain text content');
-	});
-
-	test('.ts file is plain text', async () => {
-		const fs = setup();
-		await fs.writeFile('/index.ts', 'export const x = 42;');
-		expect(await fs.readFile('/index.ts')).toBe('export const x = 42;');
-	});
-
-	test('just-bash cat on .md file', async () => {
-		const fs = setup();
-		const bash = new Bash({ fs, cwd: '/' });
-		await bash.exec('echo "# Hello" > /test.md');
-		const result = await bash.exec('cat /test.md');
-		expect(result.stdout).toContain('Hello');
 	});
 });

@@ -91,7 +91,7 @@ app.post('/rooms/:room', async (c) => {
   const user = await requireUser(c);
   await requirePlanAllowsSync(user);
 
-  const roomName = `subject:${user.id}:rooms:${c.req.param('room')}`;
+  const roomName = `owners/${user.id}/rooms/${c.req.param('room')}`;
   const result = await sync.handleHttpSync(c.req.raw, { roomName });
 
   await recordUsage({

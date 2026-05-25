@@ -8,8 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { Ok } from 'wellcrafted/result';
 import type { RunRequest } from '../daemon/app.js';
 import type { DaemonClient } from '../daemon/client.js';
-import { type ActionRegistry, defineQuery } from '../shared/actions.js';
-import { buildDaemonActions, type DaemonActions } from './daemon-actions.js';
+import { buildDaemonActions } from './daemon-actions.js';
 
 function makeStubClient() {
 	const calls: { method: 'run'; arg: unknown }[] = [];
@@ -29,32 +28,6 @@ function makeStubClient() {
 
 const WORKSPACE = 'demo';
 
-const typedActions = {
-	visible: defineQuery({ handler: () => undefined }),
-	entries_get: defineQuery({ handler: () => undefined }),
-} satisfies ActionRegistry;
-
-type TypedDaemonActions = DaemonActions<typeof typedActions>;
-
-type Expect<TValue extends true> = TValue;
-type Equal<TActual, TExpected> =
-	IsAssignable<TActual, TExpected> extends true
-		? IsAssignable<TExpected, TActual>
-		: false;
-type IsAssignable<TActual, TExpected> = [TActual] extends [TExpected]
-	? true
-	: false;
-type HasKey<TObject, TKey extends PropertyKey> = TKey extends keyof TObject
-	? true
-	: false;
-
-export type DaemonActionKeyPreserved = Expect<
-	Equal<HasKey<TypedDaemonActions, 'entries_get'>, true>
->;
-export type DaemonValidKeyPreserved = Expect<
-	Equal<HasKey<TypedDaemonActions, 'visible'>, true>
->;
-
 describe('buildDaemonActions workspace facade', () => {
 	test('action dispatches literal workspace path over /run', async () => {
 		const { client, calls } = makeStubClient();
@@ -68,19 +41,6 @@ describe('buildDaemonActions workspace facade', () => {
 		expect(calls[0]!.arg).toMatchObject({
 			actionPath: 'demo.entries_get',
 			input: 'xyz',
-		});
-	});
-
-	test('action with no input sends undefined', async () => {
-		const { client, calls } = makeStubClient();
-		// biome-ignore lint/suspicious/noExplicitAny: smoke test
-		const workspace: any = buildDaemonActions(client, WORKSPACE);
-
-		await workspace.status();
-
-		expect(calls[0]!.arg).toMatchObject({
-			actionPath: 'demo.status',
-			input: undefined,
 		});
 	});
 

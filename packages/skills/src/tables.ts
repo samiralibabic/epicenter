@@ -9,11 +9,10 @@
  * @module
  */
 
-import { defineTable, type InferTableRow } from '@epicenter/workspace';
-import { type } from 'arktype';
+import { column, defineTable, type InferTableRow } from '@epicenter/workspace';
 
 /**
- * Skills table—one row per skill, 1:1 mapping to SKILL.md.
+ * Skills table, one row per skill, 1:1 mapping to SKILL.md.
  *
  * Frontmatter fields map to columns. The markdown instructions live in a
  * per-row Y.Doc opened through the `instructionsDocs` factory, enabling
@@ -23,13 +22,16 @@ import { type } from 'arktype';
  * holds the agentskills.io-compliant slug (lowercase, hyphens, 1-64 chars)
  * and can be renamed without cascading updates to child rows.
  *
+ * Optional frontmatter fields (`license`, `compatibility`, `metadata`,
+ * `allowedTools`) are stored as nullable columns: `null` means "not set".
+ *
  * @example
  * ```typescript
- * // Catalog (tier 1) — which skills exist?
+ * // Catalog (tier 1), which skills exist?
  * const catalog = ws.tables.skills.getAllValid()
  *   .map(s => ({ name: s.name, description: s.description }))
  *
- * // Activate (tier 2) — inject instructions into context
+ * // Activate (tier 2), inject instructions into context
  * const skill = ws.tables.skills.find(s => s.name === 'writing-voice')
  * if (skill) {
  *   using h = instructionsDocs.open(skill.id)
@@ -37,28 +39,25 @@ import { type } from 'arktype';
  *   systemPrompt += h.instructions.read()
  * }
  *
- * // Editor binding — collaborative Y.Text editing
+ * // Editor binding, collaborative Y.Text editing
  * const handle = instructionsDocs.open(skill.id)
  * editor.bind(handle.instructions.binding)
  * // ...on unmount: handle[Symbol.dispose]()
  * ```
  */
-export const skillsTable = defineTable(
-	type({
-		id: 'string',
-		name: 'string',
-		description: 'string',
-		'license?': 'string | undefined',
-		'compatibility?': 'string | undefined',
-		'metadata?': 'string | undefined',
-		'allowedTools?': 'string | undefined',
-		updatedAt: 'number',
-		_v: '1',
-	}),
-);
+export const skillsTable = defineTable({
+	id: column.string(),
+	name: column.string(),
+	description: column.string(),
+	license: column.nullable(column.string()),
+	compatibility: column.nullable(column.string()),
+	metadata: column.nullable(column.string()),
+	allowedTools: column.nullable(column.string()),
+	updatedAt: column.number(),
+});
 
 /**
- * References table—one row per markdown file in a skill's `references/` directory.
+ * References table, one row per markdown file in a skill's `references/` directory.
  *
  * References are additional documentation loaded on demand (tier 3 in the
  * progressive disclosure model). Each reference file gets its own Y.Doc
@@ -80,15 +79,12 @@ export const skillsTable = defineTable(
  * }
  * ```
  */
-export const referencesTable = defineTable(
-	type({
-		id: 'string',
-		skillId: 'string',
-		path: 'string',
-		updatedAt: 'number',
-		_v: '1',
-	}),
-);
+export const referencesTable = defineTable({
+	id: column.string(),
+	skillId: column.string(),
+	path: column.string(),
+	updatedAt: column.number(),
+});
 
 export type Skill = InferTableRow<typeof skillsTable>;
 export type Reference = InferTableRow<typeof referencesTable>;

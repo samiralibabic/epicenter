@@ -39,6 +39,7 @@
 		"mode-watcher": "^1.1.0",
 		"pinyin-pro": "^3.28.0",
 		"svelte-sonner": "catalog:",
+		"typebox": "catalog:",
 		"wellcrafted": "catalog:",
 		"yjs": "catalog:"
 	},

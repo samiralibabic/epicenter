@@ -17,7 +17,7 @@ import {
 } from '@epicenter/workspace';
 
 const collaboration = openCollaboration(ydoc, {
-    url: roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId }),
+    url: roomWsUrl({ baseURL, ownerId, guid: ydoc.guid, deviceId }),
     waitFor: idb.whenLoaded,
     openWebSocket: auth.openWebSocket,
     onReconnectSignal: auth.onStateChange,
@@ -32,10 +32,10 @@ await collaboration.actions.tabs_close({ tabIds: [1, 2] });
 // Remote invocation: pick an online device, dispatch to it over the relay.
 const phone = collaboration.devices
     .list()
-    .find((d) => d.installationId === 'phone');
+    .find((d) => d.deviceId === 'phone');
 if (phone) {
     const { data, error } = await collaboration.dispatch({
-        to: phone.installationId,
+        to: phone.deviceId,
         action: 'tabs_close',
         input: { tabIds: [1, 2] },
         signal: AbortSignal.timeout(5_000),
@@ -61,7 +61,7 @@ Content docs (rich-text bodies, attachments, anything nested that syncs independ
 | `dispatch`        | Fire a cross-device call over the relay socket                     |
 | `[Symbol.dispose]`| Sugar for `ydoc.destroy()`; cascades through every attachment      |
 
-`devices.list()` returns `LiveDevice[]`, where each device carries `{ installationId, connectedAt, actions }`. `actions` is the device's published `ActionManifest` (the metadata-only projection of its `ActionRegistry`), suitable for rendering UI affordances, validating input against schemas, or feeding an AI tool layer.
+`devices.list()` returns `PresenceDevice[]`, where each device carries `{ deviceId, connectedAt, actions }`. `actions` is the device's published `ActionManifest` (the metadata-only projection of its `ActionRegistry`), suitable for rendering UI affordances, validating input against schemas, or feeding an AI tool layer.
 
 ## The wire: one socket, three channels
 
@@ -91,7 +91,7 @@ type PresenceFrame = {
 };
 
 type PresenceDevice = {
-    installationId: string;
+    deviceId: string;
     connectedAt: number;
     actions: ActionManifest;   // Record<string, ActionMeta>
 };
@@ -185,7 +185,7 @@ import type { TabManagerActions } from '@epicenter/tab-manager/actions';
 
 const tabManager = typedDispatch<TabManagerActions>(collaboration.dispatch);
 const { data } = await tabManager({
-    to: phone.installationId,
+    to: phone.deviceId,
     action: 'tabs_close',
     input: { tabIds: [1, 2] },
 });
@@ -197,30 +197,36 @@ The recipient side is `runInboundDispatch`: the supervisor routes inbound text f
 
 ## URLs and routing
 
-A cloud document is owned by the authenticated subject (the user's identity) and addressed by its own `ydoc.guid`. The client builds the URL from `(baseURL, owner, guid, installationId)`:
+A cloud document is owned by the authenticated `OwnerId` and addressed by its own `ydoc.guid`. The client builds the URL from `(baseURL, ownerId, guid, deviceId)`:
 
 ```ts
 roomWsUrl({
     baseURL: 'https://api.epicenter.so',
-    owner: { kind: 'personal', userId },
+    ownerId,
     guid: ydoc.guid,
-    installationId,
+    deviceId,
 });
-// -> wss://api.epicenter.so/api/users/<userId>/rooms/<guid>?installationId=<id>
+// -> wss://api.epicenter.so/api/owners/<ownerId>/rooms/<guid>?deviceId=<id>
 ```
 
-The relay takes the subject from the auth token, validates `:userId === c.var.user.id` in personal mode, and builds the internal Durable Object name `users:${userId}:rooms:${room}`. There is no workspace lookup and no membership check at the relay layer: the route's auth middleware is the whole authorization story, because you cannot fail to be yourself.
+In personal mode `ownerId` equals the signed-in user's id; in team mode it is
+the literal `'team'`. The URL shape is uniform across both modes. The relay
+takes the user from the auth token, resolves the expected owner partition for
+the deployment, verifies the URL `:ownerId` matches that partition, and builds
+the internal Durable Object name `owners/${ownerId}/rooms/${room}`. Personal
+deployments resolve one partition per user. Team deployments resolve one shared
+partition for admitted members.
 
 This is the consumer Google Docs model and the first of three account layers, introduced over time:
 
-- **Layer 1 (this)**: personal content. `users:${userId}` owns the doc.
-- **Layer 1.5 (future)**: sharing. A per-document ACL grants other subjects access; the owner's DO name does not change.
-- **Layer 2 (future)**: shared-drive content. An org owns a namespace so content survives a departing employee.
+- **Layer 1 (this)**: personal content. `owners/${ownerId}` owns the doc, where `ownerId === userId`.
+- **Layer 1.5 (future)**: sharing. A per-document ACL grants other users access; the owner's DO name does not change.
+- **Layer 2 (future)**: shared-drive content. A team deployment uses `ownerId === 'team'` so content survives a departing employee.
 - **Layer 3 (future)**: tenancy and billing. An organization groups user accounts for one invoice and admin policy; it never owns a document.
 
-`installationId` is appended as a query parameter (`?installationId=`) on every connect, including reconnects. It is a routing label stamped on the socket at upgrade, not an auth principal: the relay authorizes the room from the token, and within that room `installationId` only decides which socket dispatch is delivered to.
+`deviceId` is appended as a query parameter (`?deviceId=`) on every connect, including reconnects. It is a routing label stamped on the socket at upgrade, not an auth principal: the relay authorizes the room from the token, and within that room `deviceId` only decides which socket dispatch is delivered to.
 
-`/rooms/:room` (team) and `/users/:userId/rooms/:room` (personal) are the cloud sync routes. Browser apps and the workspace daemon both build their URL with `roomWsUrl`.
+`/owners/:ownerId/rooms/:room` is the single cloud sync route shape (personal: `:ownerId` is the user id; team: `:ownerId === 'team'`). Browser apps and the workspace daemon both build their URL with `roomWsUrl`.
 
 ## Supervisor lifecycle
 

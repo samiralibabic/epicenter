@@ -59,7 +59,6 @@ describe('table row edit overhead (LWW)', () => {
 						tags: ['draft'],
 						createdAt: Date.now(),
 						updatedAt: Date.now(),
-						_v: 1,
 					});
 				}
 
@@ -75,7 +74,6 @@ describe('table row edit overhead (LWW)', () => {
 							tags: edit % 5 === 0 ? ['draft', 'reviewed'] : ['draft'],
 							createdAt: Date.now(),
 							updatedAt: Date.now(),
-							_v: 1,
 						});
 					}
 				}
@@ -101,7 +99,6 @@ describe('table row edit overhead (LWW)', () => {
 						tags: editsPerRow % 5 === 0 ? ['draft', 'reviewed'] : ['draft'],
 						createdAt: Date.now(),
 						updatedAt: Date.now(),
-						_v: 1,
 					});
 				}
 			});
@@ -385,7 +382,6 @@ describe('realistic writing session (table + document)', () => {
 					tags: ['existing'],
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 
 				// Each note gets a content Y.Doc with the base content
@@ -417,7 +413,6 @@ describe('realistic writing session (table + document)', () => {
 					tags: save < 20 ? ['draft'] : ['draft', 'architecture'],
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 			}
 
@@ -441,7 +436,6 @@ describe('realistic writing session (table + document)', () => {
 					tags: ['existing'],
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 			}
 
@@ -456,7 +450,6 @@ describe('realistic writing session (table + document)', () => {
 					tags: save % 4 === 0 ? ['existing', 'important'] : ['existing'],
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 			}
 		});
@@ -517,7 +510,6 @@ describe('realistic writing session (table + document)', () => {
 					tags,
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 
 				// Content doc — written once with final content

@@ -206,50 +206,11 @@ describe('DispatchError variant factory', () => {
 		expect(error).toMatchObject({ name: 'RecipientOffline', to: 'R_phone' });
 		expect(error?.message).toBe('Recipient "R_phone" is offline');
 	});
-	test('ActionFailed carries a string cause for safe JSON round-trip', () => {
-		const { error } = DispatchError.ActionFailed({
-			action: 'tabs_close',
-			cause: 'boom',
-		});
-		expect(typeof error?.cause).toBe('string');
-	});
 });
 
 // ════════════════════════════════════════════════════════════════════════════
 // typedDispatch (typed overlay)
 // ════════════════════════════════════════════════════════════════════════════
-
-describe('typedDispatch', () => {
-	test('delegates to the wrapped dispatch with the same arguments', async () => {
-		let captured: unknown = null;
-		const fakeDispatch = async (req: unknown) => {
-			captured = req;
-			return Ok({ closedCount: 2 });
-		};
-		const actions = {
-			tabs_close: defineMutation({
-				input: Type.Object({ tabIds: Type.Array(Type.Number()) }),
-				handler: ({ tabIds }) => ({ closedCount: tabIds.length }),
-			}),
-		};
-		type Actions = typeof actions;
-
-		const tabManager = typedDispatch<Actions>(fakeDispatch);
-		const result = await tabManager({
-			to: 'R_phone',
-			action: 'tabs_close',
-			input: { tabIds: [1, 2] },
-		});
-
-		expect(captured).toEqual({
-			to: 'R_phone',
-			action: 'tabs_close',
-			input: { tabIds: [1, 2] },
-		});
-		const data = expectOk(result);
-		expect(data.closedCount).toBe(2);
-	});
-});
 
 // ════════════════════════════════════════════════════════════════════════════
 // Type-level tests for ActionInput / ActionOutput

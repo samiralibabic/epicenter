@@ -10,16 +10,11 @@
  */
 
 import { expect, test } from 'bun:test';
-import { BEARER_SUBPROTOCOL_PREFIX as SHARED_PREFIX } from '@epicenter/constants/auth';
 import {
 	BEARER_SUBPROTOCOL_PREFIX,
 	MAIN_SUBPROTOCOL,
 	parseSubprotocols,
 } from './auth-subprotocol.js';
-
-test('bearer prefix re-exports the shared auth constant', () => {
-	expect(BEARER_SUBPROTOCOL_PREFIX).toBe(SHARED_PREFIX);
-});
 
 test('parseSubprotocols splits a comma-separated subprotocol header', () => {
 	const header = `${MAIN_SUBPROTOCOL}, ${BEARER_SUBPROTOCOL_PREFIX}token-1`;

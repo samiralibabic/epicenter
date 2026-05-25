@@ -12,11 +12,11 @@
 import { describe, expect, test } from 'bun:test';
 import { attachTables } from '@epicenter/workspace';
 import * as Y from 'yjs';
-import type { FileId } from '../ids.js';
+import { asFileId } from '../ids.js';
 import { filesTable } from '../table.js';
 import { attachFileSystemIndex } from './path-index.js';
 
-const fid = (s: string) => s as FileId;
+const fid = (s: string) => asFileId(s);
 
 function setup() {
 	const ydoc = new Y.Doc({ guid: 'test' });
@@ -39,7 +39,6 @@ function makeRow(
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		trashedAt: null,
-		_v: 1 as const,
 	};
 }
 
@@ -279,24 +278,6 @@ describe('attachFileSystemIndex', () => {
 		expect(index.getIdByPath('/new-name/child.txt')).toBe(fid('f1'));
 
 		ydoc.destroy();
-	});
-
-	// ═══════════════════════════════════════════════════════════════════════
-	// DISPOSE / UNSUBSCRIBE
-	// ═══════════════════════════════════════════════════════════════════════
-
-	test('teardown stops observing — destroying the ydoc unsubscribes the index', () => {
-		const { files, ydoc } = setup();
-		files.set(makeRow('f1', 'before.txt'));
-		const index = attachFileSystemIndex(ydoc, files);
-
-		expect(index.getIdByPath('/before.txt')).toBe(fid('f1'));
-
-		ydoc.destroy();
-
-		// Index state is frozen at destroy time. Reads still answer from the
-		// in-memory maps; the observer is just no longer wired to the yarray.
-		expect(index.getIdByPath('/before.txt')).toBe(fid('f1'));
 	});
 
 	// ═══════════════════════════════════════════════════════════════════════

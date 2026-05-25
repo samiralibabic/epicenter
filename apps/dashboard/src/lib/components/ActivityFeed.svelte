@@ -2,26 +2,17 @@
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import * as Table from '@epicenter/ui/table';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { billing } from '$lib/query/billing';
+	import { billing } from '$lib/billing/queries';
 
 	const events = createQuery(() => billing.events({ limit: 50 }).options);
 
-	/** Autumn stores timestamp as epoch ms. */
-	function formatTimestamp(ts: number): string {
-		return new Date(ts).toLocaleDateString('en-US', {
+	function formatTimestamp(ms: number): string {
+		return new Date(ms).toLocaleDateString('en-US', {
 			month: 'short',
 			day: 'numeric',
 			hour: 'numeric',
 			minute: '2-digit',
 		});
-	}
-
-	/** Properties are JSONB—model/provider are custom keys we send via autumn.check(). */
-	function prop(
-		event: { properties: Record<string, never> },
-		key: string,
-	): string {
-		return (event.properties as Record<string, string>)[key] ?? '—';
 	}
 </script>
 
@@ -33,7 +24,7 @@
 	</div>
 {:else if events.isError}
 	<p class="text-sm text-destructive">Failed to load activity.</p>
-{:else if !events.data?.list.length}
+{:else if !events.data?.events.length}
 	<p class="text-sm text-muted-foreground py-8 text-center">No activity yet.</p>
 {:else}
 	<Table.Root>
@@ -46,19 +37,19 @@
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
-			{#each events.data.list as event}
+			{#each events.data.events as event (event.id)}
 				<Table.Row>
 					<Table.Cell class="text-xs text-muted-foreground whitespace-nowrap">
-						{formatTimestamp(event.timestamp)}
+						{formatTimestamp(event.timestampMs)}
 					</Table.Cell>
-					<Table.Cell class="font-mono text-xs">
-						{prop(event, 'model')}
-					</Table.Cell>
+					<Table.Cell class="font-mono text-xs"
+						>{event.model ?? '-'}</Table.Cell
+					>
 					<Table.Cell class="text-xs text-muted-foreground">
-						{prop(event, 'provider')}
+						{event.provider ?? '-'}
 					</Table.Cell>
 					<Table.Cell class="text-right tabular-nums">
-						{event.value}
+						{event.credits}
 					</Table.Cell>
 				</Table.Row>
 			{/each}

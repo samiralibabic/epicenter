@@ -1,15 +1,77 @@
 # Column DSL and `defineTable` Refactor
 
 **Date**: 2026-04-29
-**Status**: Draft
+**Status**: Draft (with reconciliation notes from implementation, see below)
 **Author**: AI-assisted (extensive design dialogue)
 **Branch**: `braden-w/column-dsl-spec`
+
+## Reconciliation log (2026-05-24)
+
+Nine decisions diverged from the original draft during implementation and have been retconned in place. The notes here are normative; older passages elsewhere in this file should be read through this lens.
+
+1. **`column.json` signature**: schema is required (no implicit `Type.Any()`), and the static type derives from `Static<S>` instead of an independent generic `<T>`. The old `<T extends JsonValue>` generic let type and runtime drift (e.g. `column.json<string[]>(column.string())` compiled while validating only strings). The new signature `json<S extends TSchema>(schema: S, opts?)` returns `TUnsafe<Static<S>>` gated by `Static<S> extends JsonValue ? Static<S> : ColumnError<...>` so the schema is the single source of truth.
+
+2. **Options surface is TypeBox-native**: the audited `Common` / `StringOpts` / `NumberOpts` types were dropped in favor of TypeBox's `TSchemaOptions` / `TStringOptions` / `TNumberOptions`. Re-audited the originally rejected keys (`default`, `readOnly`, `writeOnly`, `title`, `$id`, `$schema`, `$comment`, `contentEncoding`, `contentMediaType`): all are inert in our pipeline (we don't call `Value.Default`; SQLite materializer doesn't read them; MCP/CLI pass them through as descriptive JSON Schema metadata, which is fine). The lockdown was theoretical and was leaking anyway because raw `Type.X()` is explicitly allowed in table definitions.
+
+3. **DateTime is `column.dateTime()` plus `column.ianaTimeZone()`, not `DateTimeString.schema()`**: the proprietary `<UTC ISO>|<IANA TZ>` pipe format is gone. `column.dateTime()` uses TypeBox's built-in `date-time` format (RFC 3339, brand `DateTimeString`); pair it with `column.ianaTimeZone()` as a separate `<field>Zone` column when origination zone matters (calendar events, reminders). Lex-sort across rows is chronological iff every writer emits the Z form; `new Date().toISOString()` and `Temporal.Now.instant().toString()` both do this.
+
+4. **Version ordering is unordered, matched by `_v` value**: dropped the "unique, ascending, contiguous from 1" runtime guard. The only objective check left is "no duplicate `_v` literal". `parseRow` looks up the schema via `Map<number, TObject>` keyed by `_v` value, so `defineTable(v2, v1)` and `defineTable(v1, v2)` behave identically at read time, and `defineTable(v1, v3)` (skipping v2) is allowed (orphaned stored rows of skipped versions surface as `UnknownVersion` parse errors). The earlier "by value" framing was always the intent; the old guard contradicted it.
+
+5. **`as const` is only required without a contextual sink**: the blanket "every write call site keeps `_v: N as const`" rule overstated the TypeScript requirement. The schema side still requires `column.literal(N)` (that's where the literal type lives). On the *write* side, `as const` is only mandatory when the object literal has no contextual type to infer against. With a contextual sink (`satisfies SomeType`, an assignment to a typed variable, a return from a typed function, or passing into a typed parameter), TS narrows `_v: N` to the literal `N` on its own.
+
+   ```ts
+   // Contextual sink: `_v: 2` is fine, no `as const` needed.
+   tables.notes.set({ id, title, _v: 2 })            // arg of typed parameter
+   const row: NoteRowV2 = { id, title, _v: 2 }       // typed binding
+   function nextNote(): NoteRowV2 { return { id, title, _v: 2 } } // typed return
+
+   // No contextual sink: `as const` is required so the literal survives.
+   const themeDefault = () => ({ mode: 'light' as const })
+   //                                          ^^^^^^^^ without this, mode widens to string
+   defineKv({ schema: ThemeSchema, defaultValue: themeDefault() })
+   ```
+
+   Existing examples in this spec that still write `_v: N as const` are not wrong (extra `as const` is a no-op when the contextual type already narrows), they're just no longer mandatory. Treat the `as const` form as a defensive default for free-standing literals.
+
+6. **`defineKv` accepts vanilla `TSchema`; `column.*` in KV is sugar, not required**: `defineKv<S extends TSchema>` accepts any TypeBox schema, not just `FlatJsonTSchema`. `column.*` helpers continue to work for symmetry with `defineTable`, but they aren't required. KV values serialize through Yjs (not `JSON.stringify`), so the `JsonValue` gate inside `column.json` doesn't perfectly model KV's storage anyway. **Recommendation**: prefer vanilla `Type.X(...)` in new `defineKv` definitions and in docs/examples; the column DSL is most useful inside `defineTable`, where row-flatness and SQLite-storage derivation actually depend on it. Existing `column.*` usage in KV is back-compat; no force-rename.
+
+   ```ts
+   // Preferred for new KV definitions:
+   defineKv({
+     schema: Type.Object({ mode: Type.Union([Type.Literal('light'), Type.Literal('dark')]) }),
+     defaultValue: { mode: 'light' },
+   })
+
+   // Still valid (back-compat):
+   defineKv({
+     schema: Type.Object({ mode: column.enum(['light', 'dark']) }),
+     defaultValue: { mode: 'light' },
+   })
+   ```
+
+7. **Discriminated unions via `column.json` with a discriminant key**: the flat-row constraint from `FlatJsonTSchema` applies to top-level *row* columns, not to schemas embedded inside `column.json(...)`. Status-tagged sub-shapes are expressed as a discriminated union *inside* a single JSON column:
+
+   ```ts
+   result: column.json(Type.Union([
+     Type.Object({ status: Type.Literal('running') }),
+     Type.Object({ status: Type.Literal('completed'), completedAt: column.dateTime(), output: column.string() }),
+     Type.Object({ status: Type.Literal('failed'),    completedAt: column.dateTime(), error:  column.string() }),
+   ]))
+   ```
+
+   Callers narrow with `Extract<Row, { result: { status: 'completed' } }>`. The canonical example lives at `apps/whispering/src/lib/workspace/definition.ts` (`transformationRuns.result`). This pattern is preferred over splitting the discriminant + payload across separate top-level columns when the variant fields only make sense together.
+
+8. **Public error surface: `TableParseError` and `KvError` are exported**: both are part of the public surface. They are returned by `parse`, `get`, `getAll`, `update`, and the matching KV operations, and re-exported from `@epicenter/workspace`. Consumers building custom loggers, toast handlers, or error-routing layers should import them from the barrel rather than reconstructing the shape. Treat their variant names and payload fields as part of the API contract; widening or renaming variants is a breaking change.
+
+9. **Materializer `BaseRow` shape: widened to `Record<string, unknown>`**: the SQLite materializer iterates arbitrary keys on a row to emit `INSERT` columns and bind values. To support that, `BaseRow` (or the materializer's local parameter type) is widened to `{ id: string; _v: number } & Record<string, unknown>`. The strict `JsonObject` framing remains the *spec* of what callers may write, but the materializer's runtime parameter is intentionally looser so it can walk unknown columns generically. Note for future contributors: don't re-narrow this type without auditing `packages/workspace/src/materializer/sqlite/sqlite.ts` first; tightening it will break the materializer's `for (const key in row)` loop.
 
 ## Overview
 
 Replace arktype-as-input in `defineTable` with a small first-party column DSL (`column.string()`, `column.number()`, etc.) that compiles to TypeBox schemas internally. **The "column" is the TypeBox schema**: no wrapper, no metadata extension, no parallel state. Constructors take options objects (no method chaining). Storage class, primary-key designation, and CHECK constraints are all derived from the schema structure at the consumer (e.g. SQLite materializer), not stored as separate fields.
 
 `_v` stays explicit at every schema declaration and at every write call site (no library magic): it is declared as `_v: column.literal(N)` per version and passed as `_v: N as const` on `set()`/`update()`. Delete `ARKTYPE_FALLBACK` and the per-node fallback layer in the standard-schema converter. Drop arktype as a workspace package dependency entirely.
+
+> (See updated reconciliation note 5: `as const` is only required at write sites without a contextual sink; `_v: N` is sufficient when calling `set()`/`update()` because the typed parameter provides the contextual type.)
 
 This preserves the prior "no magic, what you see is what you store" decision documented in `docs/articles/api-design-decisions-definetable-definekv.md`. The change is the schema input format (column DSL replaces raw arktype) and the underlying schema library (TypeBox replaces arktype, internally).
 
@@ -197,16 +259,16 @@ Two prior attempts found in git history, both deleted:
 | Refinement syntax | Options object on each constructor (`column.string({ format: 'email', minLength: 5 })`) | Matches TypeBox's own `Type.X(options)` pattern. Single call site. Restricts to JSON-Schema-encodable refinements only (no morphs, no JS predicates). |
 | Modifier API | None on constructors. `description`/`examples`/`deprecated` are options. Nullability is composition: `column.nullable(inner)` per TypeBox issue #989. | Helper-function nullability matches TypeBox author's explicit guidance and lets the options object stay pure TypeBox passthrough (no `splitOpts` machinery, no facade-vs-native option mixing). |
 | Branded types | `Brand<'Name'>` from `wellcrafted/brand` | Codebase's canonical brand helper. Uses a unique symbol (nominal, invisible at runtime). Composable across hierarchies. Already in use across `packages/workspace/src/shared/{id,types,datetime-string}.ts`. |
-| Allowed JSON Schema keywords | Audited subset: `description`, `examples`, `deprecated` plus per-constructor validation keywords. NOT inherited from `TSchemaOptions`. | TypeBox's `TSchemaOptions` has `[key: string]: any` which would let `default`, `readOnly`, `writeOnly`, `title`, `$id`, `$schema`, `$comment`, `contentEncoding`, `contentMediaType` through. `default` conflicts with our explicit rejection of `.default()`; the rest have no clear consumer in CRDT/SQLite/MCP context. |
+| Allowed JSON Schema keywords | TypeBox-native: `TSchemaOptions` / `TStringOptions` / `TNumberOptions`. See reconciliation note 2: rejected keys (`default`, `readOnly`, `writeOnly`, `title`, `$id`, `$schema`, `$comment`, `contentEncoding`, `contentMediaType`) re-audited as inert in our pipeline. | Wrapping options would have killed TypeBox's JSDoc/overload passthrough and leaked anyway through raw `Type.X()` usage. The "audited subset" was theoretical purity. |
 | Per-column metadata storage | Derived at the consumer from the schema structure; no `'x-epicenter'` extension | Storage class, primary-key designation, CHECK constraints are all derivable from `type`/`anyOf`/`const` plus the field name. Storing them separately invites drift. |
 | DDL generation library | Hand-rolled walker (~30 lines) over the TypeBox schema. Drizzle ORM rejected. | Drizzle's runtime API exposes `getTableConfig` (metadata) but not DDL emission. The actual `CREATE TABLE` generator lives in `drizzle-kit` (the CLI), which isn't a runtime library. Using Drizzle would require building Drizzle-table-from-TypeBox AND a custom DDL emitter on top of `getTableConfig`. More code, plus a dep. |
 | Migration API shape | Keep existing `(v1, v2, ..., vN).migrate(unionRow => currentRow)` | A-style discriminated union. Codebase already uses it. Renames and field-removals favor "any stored version -> current row" framing over per-version arrows. |
-| `_v` management | Explicit at every boundary: `_v: column.literal(N)` per schema, `_v: N as const` at write sites, `row._v` at migrate | Preserves "no magic, what you see is what you store" decision from `docs/articles/api-design-decisions-definetable-definekv.md`. Auto-injection was considered (would eliminate 19 write-site boilerplate) and rejected to keep storage shape visible at every boundary. |
-| Version numbering | Variadic positional, but each schema self-identifies via `_v: column.literal(N)` so position is metadata only. The library looks up schemas by `_v` value at read time | Variadic preserves clean single-version case (`defineTable(cols)`). Self-identifying schemas make reorder/insert harmless: parse routes by `_v` value, not arg index. |
+| `_v` management | Explicit at every boundary: `_v: column.literal(N)` per schema, `_v: N as const` at write sites, `row._v` at migrate | Preserves "no magic, what you see is what you store" decision from `docs/articles/api-design-decisions-definetable-definekv.md`. Auto-injection was considered (would eliminate 19 write-site boilerplate) and rejected to keep storage shape visible at every boundary. (See updated reconciliation note 5: `as const` at write sites is only required without a contextual sink.) |
+| Version numbering | Variadic, unordered. Each schema self-identifies via `_v: column.literal(N)`; the library indexes by `_v` value at read time (`Map<number, TObject>`). The only objective check is "no duplicate `_v` literal"; ascending/contiguous is NOT enforced. See reconciliation note 4. | Variadic preserves clean single-version case (`defineTable(cols)`). Reorder/insert/gap are harmless: parse routes by `_v` value, not arg index. Stored rows of skipped versions surface as `UnknownVersion` parse errors. |
 | Foreign-key references | Branded `column.string<TStringSubtype>()` | No CRDT integrity guarantees possible; brand carries type safety. Reject a `column.ref(table)` primitive. |
 | Per-row Y.Doc references | Continue using `createDisposableCache` keyed by `row.id` | Documented architecture; zero existing call sites would use a `column.docRef`. |
-| Container types (`array`, `object`) | Subsumed by `column.json<T>(s?)` | Schema parameter carries element typing. Honest about JSON-encoded TEXT storage. Matches Drizzle. |
-| Timestamp materialization | `DateTimeString.schema()` stores the existing proprietary `DateTimeString` format (`${UTC ISO}|${IANA timezone}`) as TEXT; no `Date` conversion at the boundary | Drop-in compatible with the existing `DateTimeString` brand. Prevents silent breaking change at every read site. Apps that need ms-epoch use `column.integer()` directly. The helper lives on the `DateTimeString` companion object because this is an Epicenter-specific wire format, not a general column primitive. |
+| Container types (`array`, `object`) | Subsumed by `column.json(schema)`. Schema required; Static derives from `Static<S>` (reconciliation note 1). | One source of truth for type and runtime. No free `<T>` generic to drift from the schema. |
+| Timestamp materialization | `column.dateTime()` (RFC 3339 Z or offset, brand `DateTimeString`) for the instant; `column.ianaTimeZone()` as a separate `<field>Zone` when origination zone matters. See reconciliation note 3. | Standard ISO format travels through every consumer (SQLite TEXT, MCP, RPC) with no driver overhead. Lex-sort across rows is chronological iff every writer emits the Z form. Apps that need ms-epoch use `column.integer()` directly. |
 | Integer storage option | `column.integer()` separate from `column.number()` | Preserves opensidian's ms-epoch convention (`createdAt: 'number'`). Mirrors Drizzle's `integer` vs `real`. |
 | Namespace prefix | Keep `column.` prefix | Avoids global shadowing (`String`, `Number`, `enum`). Keeps autocomplete discoverable. 3 chars per call is cheap. |
 | Naming for `enum_` internally | Exposed as `column.enum`, internal symbol may be `enum_` to avoid reserved-word collision | Standard pattern. |
@@ -562,8 +624,9 @@ STEP 2: parseRow validates against version union
 Read _v from storage. Find the schema where column.literal(N) matches.
 Validate the row against that schema. If invalid, reject.
 
-Note: schemas are matched by _v value, NOT by argument position. Reordering
-the variadic args does not change which schema matches a given stored row.
+Note: schemas are matched by _v value via a Map<number, TObject>, NOT by
+argument position. Reordering or skipping versions does not change which
+schema matches a given stored row.
 
 STEP 3: migrate function runs lazily per read
 ────────────────────────────────────
@@ -938,6 +1001,8 @@ tables.entries.set({
 
 When bumping a table to a new version, every write call site needs its `_v: N as const` updated to the new current version (or grep-and-replace if the codebase uses a shared `CURRENT_V` constant). This is a deliberate cost: explicit > magic.
 
+> (See updated reconciliation note 5: write sites may write `_v: N` (no `as const`) when the call has a contextual sink such as `tables.notes.set({...})`. `as const` is only required for free-standing literals with no inferred contextual type.)
+
 ## Type signatures (sketch)
 
 ```ts
@@ -1178,7 +1243,7 @@ export function tableActions<TRow extends BaseRow>(
 - [ ] **2.6** No write-side injection: `_v` arrives from the user; library validates it matches the current schema's literal but does not insert it
 - [ ] **2.7** Update `BaseRow` type to require `_v: number` at the type level (matches existing tightening per PR #1366)
 - [ ] **2.8** Return `MigrationRequired<TVersions>` from multi-version `defineTable(...)` until `.migrate(fn)` is called. The intermediate builder must be unassignable to `TableDefinition`.
-- [ ] **2.9** Runtime guard: require version literals to be unique, ascending, and contiguous starting at `1`.
+- [ ] **2.9** Runtime guard: every version must declare an `_v: column.literal(N)` field, and no two versions may declare the same `N`. Ascending/contiguous is NOT required (reconciliation note 4).
 - [ ] **2.10** Store the reusable schema surfaces on each `TableDefinition`: `columns`, `schema.row`, `schema.union`, and `input.{get,set,update,delete}`.
 - [ ] **2.11** Mirror `columns`, `schema`, and `input` onto the attached `Table` returned by `attachTable` and `attachTables`, so custom actions can use `tables.notes.input.update` without reaching through `table.definition`.
 - [ ] **2.12** Add `tableActions(table)` as an opt-in helper that returns CRUD `defineQuery` and `defineMutation` actions using the table's `input.*` schemas.
@@ -1278,24 +1343,24 @@ The standard-schema converter exists to translate arktype/zod/etc. to JSON Schem
 
 5. **Runtime fingerprint check on schema drift?**
    - Context: explicit `_v: column.literal(N)` makes reorder/insert harmless (the library matches by `_v` value, not arg position). The remaining hazard is *editing* a shipped version's schema in place: adding/removing/retyping a column on v1 after rows with `_v: 1` exist in storage.
-   - Phase-1 requirement: enforce version literals are unique, numeric, ascending, and contiguous starting at `1`. This catches the common deletion mistake (`defineTable(v2, v3)` or `defineTable(v1, v3)`) without persisting any extra document metadata.
-   - Deferred option: compute a stable column-shape hash per `_v` and store it in document metadata. That catches editing a shipped version in place, but it adds state, hashing rules, and document upgrade behavior. Defer until the simpler contiguous-version guard proves insufficient.
+   - Phase-1 requirement: enforce version literals are unique (no two versions declaring the same `N`) and present (every version has `_v: column.literal(N)`). Ascending/contiguous-from-1 was originally required and was dropped during implementation; see reconciliation note 4. Skipping a version (`defineTable(v1, v3)`) is now allowed and stored rows of skipped versions surface as `UnknownVersion` parse errors.
+   - Deferred option: compute a stable column-shape hash per `_v` and store it in document metadata. That catches editing a shipped version in place, but it adds state, hashing rules, and document upgrade behavior. Defer until the simpler duplicate-only guard proves insufficient.
 
 ## Success criteria
 
 - [ ] `column` namespace with 7 constructors plus `column.nullable` transformation helper exported from `@epicenter/workspace`. No method-chaining API; all metadata via constructor options.
-- [ ] `DateTimeString.schema()` exported as a companion schema helper that uses `pattern` as the portable JSON Schema contract and `Type.Refine` as the TypeBox runtime backstop.
+- [ ] `column.dateTime()` (RFC 3339, brand `DateTimeString`) and `column.ianaTimeZone()` (separate field, brand `IanaTimeZone`) exported. The proprietary pipe format is gone per reconciliation note 3.
 - [ ] Branded string subtypes use `Brand<'Name'>` from `wellcrafted/brand`, never inline `{ __brand: ... }` shapes
 - [ ] `defineTable` accepts `VersionedColumns` (a record of TypeBox `TSchema`s with required string `id` and `_v: TLiteral<number>`) per version
 - [ ] Multi-version `defineTable(v1, v2, ...)` returns a `MigrationRequired` builder that is unassignable to `TableDefinition` until `.migrate(fn)` is called
-- [ ] Version literals are validated as unique, ascending, and contiguous starting at `1`
+- [ ] Version literals are validated as unique (no duplicate `_v`); ascending/contiguous is NOT enforced per reconciliation note 4
 - [ ] `TableDefinition` exposes `columns`, `schema.row`, `schema.union`, and `input.{get,set,update,delete}` without requiring callers to reach through `definition.schemas`
 - [ ] Attached `Table` mirrors `columns`, `schema`, and `input` directly, so custom actions can use `tables.notes.input.update`
 - [ ] `tableActions(table)` returns opt-in CRUD actions built from `table.input.*` schemas and existing table methods
 - [ ] Every translated schema declares `_v: column.literal(N)` per version
-- [ ] Every translated write call site keeps `_v: N as const`
+- [ ] Every translated write call site keeps `_v: N as const` (See updated reconciliation note 5: `as const` only required without a contextual sink; `_v: N` is acceptable when calling a typed `set()`/`update()`.)
 - [ ] Library does NOT inject or strip `_v` at any boundary
-- [ ] `parseRow` looks up the matching schema by `_v` value (not by arg position): swapping `defineTable(v2, v1)` would still parse a stored `_v: 1` row against v1's schema
+- [ ] `parseRow` looks up the matching schema by `_v` value via `Map<number, TObject>` (not by arg position): swapping `defineTable(v2, v1)` parses a stored `_v: 1` row against v1's schema; skipping a version (`defineTable(v1, v3)`) parses stored `_v: 1` and `_v: 3` rows correctly and surfaces stored `_v: 2` rows as `UnknownVersion`
 - [ ] `arktype` removed from `packages/workspace/package.json`
 - [ ] `packages/workspace/src/shared/standard-schema.ts` deleted; all consumers consume TypeBox `TSchema` directly
 - [ ] `StandardSchemaError.UnitFallback`, `DefaultFallback`, `ConversionFailed` deleted
@@ -1303,7 +1368,7 @@ The standard-schema converter exists to translate arktype/zod/etc. to JSON Schem
 - [ ] All apps in `apps/*` migrate without changes to `attachTables` or to `tables.x.get/set/update` semantics
 - [ ] MCP tool definitions, CLI codegen, and RPC server schemas produce identical or improved output for translated tables
 - [ ] Type-test asserts: branded IDs from different brands are mutually unassignable; `Static<>` preserves brand
-- [ ] Type-test asserts: `column.json<T extends JsonValue>` rejects `Date`, `bigint`, value-level `undefined`, optional keys
+- [ ] Type-test asserts: `column.json(schema)` derives static from `Static<S>` and rejects schemas whose static contains `Date`, `bigint`, value-level `undefined`, or optional keys (via `ColumnError` template-literal in the return type)
 - [ ] Type-test asserts: `column.literal(N)` resolves `Static<>` to `N` (literal preserved), contributing `_v: N` to the row type
 - [ ] Type-test asserts: `column.nullable(column.string())` resolves `Static<>` to `string | null`; `column.nullable(column.string<NoteId>())` resolves to `NoteId | null`
 - [ ] Type-test asserts: variadic version inference produces correct `_v: 1 | 2 | ... | N` for up to 10 versions

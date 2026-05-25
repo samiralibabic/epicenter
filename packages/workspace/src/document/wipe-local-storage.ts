@@ -1,12 +1,12 @@
 /// <reference lib="dom" />
 
 /**
- * `wipeLocalStorage`: delete every `(server, owner)`-scoped IndexedDB
+ * `wipeLocalStorage`: delete every `(server, ownerId)`-scoped IndexedDB
  * database on the current browser profile.
  *
  * Enumerates `indexedDB.databases()` and clears every entry whose name
  * starts with the durable prefix produced by {@link getOwnedYjsPrefix} for
- * the given `(server, owner)` pair. This is a free function with no auth
+ * the given `(server, ownerId)` pair. This is a free function with no auth
  * coupling: the caller (sign-out handler, "delete my local data" button,
  * admin migration) passes the pair explicitly.
  *
@@ -20,27 +20,27 @@
  * @module
  */
 
-import type { Owner } from '@epicenter/auth';
+import type { OwnerId } from '@epicenter/constants/identity';
 import { clearDocument } from 'y-indexeddb';
 import { getOwnedYjsPrefix } from './local-yjs-key.js';
 
 /**
- * Delete every encrypted IndexedDB database owned by `(server, owner)` on
+ * Delete every encrypted IndexedDB database owned by `(server, ownerId)` on
  * this browser profile.
  *
  * @example
  * ```ts
- * await wipeLocalStorage({ server: signedIn.server, owner: signedIn.owner });
+ * await wipeLocalStorage({ server: signedIn.server, ownerId: signedIn.ownerId });
  * ```
  */
 export async function wipeLocalStorage({
 	server,
-	owner,
+	ownerId,
 }: {
 	server: string;
-	owner: Owner;
+	ownerId: OwnerId;
 }): Promise<void> {
-	const prefix = getOwnedYjsPrefix(server, owner);
+	const prefix = getOwnedYjsPrefix(server, ownerId);
 	if (!('databases' in indexedDB)) return;
 	const databases = await indexedDB.databases().catch(() => []);
 	const names = databases

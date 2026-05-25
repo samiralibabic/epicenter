@@ -3,22 +3,17 @@
 	import { Button } from '@epicenter/ui/button';
 	import { confirmationDialog } from '@epicenter/ui/confirmation-dialog';
 	import { Loading } from '@epicenter/ui/loading';
-	import {
-		localTimezone,
-		NaturalLanguageDateInput,
-		toDateTimeString,
-	} from '@epicenter/ui/natural-language-date-input';
+	import { ZonedNaturalLanguageDateInput } from '@epicenter/ui/natural-language-date-input';
 	import * as Popover from '@epicenter/ui/popover';
 	import { toastOnError } from '@epicenter/ui/sonner';
 	import * as StarRating from '@epicenter/ui/star-rating';
-	import { TimezoneCombobox } from '@epicenter/ui/timezone-combobox';
-	import { DateTimeString } from '@epicenter/workspace';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import { format } from 'date-fns';
 	import { goto } from '$app/navigation';
 	import ProseMirrorEditor from '$lib/components/ProseMirrorEditor.svelte';
 	import TagInput from '$lib/components/TagInput.svelte';
+	import { formatInZone } from '$lib/format';
 	import { requireFuji } from '$lib/session';
 	import type { Entry } from '$lib/workspace';
 
@@ -41,7 +36,6 @@
 
 	let wordCount = $state(0);
 	let isDatePopoverOpen = $state(false);
-	let dateTz = $state(localTimezone());
 </script>
 
 <div class="flex h-full flex-col">
@@ -137,7 +131,7 @@
 								type="button"
 								class="cursor-pointer rounded-md border bg-background px-2.5 py-1 text-sm transition hover:bg-accent"
 							>
-								{format(DateTimeString.toDate(entry.date), 'MMM d, yyyy · h:mm a')}
+								{formatInZone(entry.date, entry.dateZone)}
 							</button>
 						{/snippet}
 					</Popover.Trigger>
@@ -146,13 +140,13 @@
 						align="start"
 						class="w-80 space-y-3 p-3"
 					>
-						<NaturalLanguageDateInput
-							onChoice={({ date }) => {
-								updateEntry({ date: toDateTimeString(date, dateTz) });
+						<ZonedNaturalLanguageDateInput
+							initialDateZone={entry.dateZone}
+							onChoice={({ date, dateZone }) => {
+								updateEntry({ date, dateZone });
 								isDatePopoverOpen = false;
 							}}
 						/>
-						<TimezoneCombobox bind:value={dateTz} />
 					</Popover.Content>
 				</Popover.Root>
 			</div>
@@ -185,11 +179,11 @@
 		<div class="flex items-center gap-3">
 			<span
 				>Created
-				{format(DateTimeString.toDate(entry.createdAt), 'MMM d, yyyy · h:mm a')}</span
+				{format(new Date(entry.createdAt), 'MMM d, yyyy · h:mm a')}</span
 			>
 			<span
 				>Updated
-				{format(DateTimeString.toDate(entry.updatedAt), 'MMM d, yyyy · h:mm a')}</span
+				{format(new Date(entry.updatedAt), 'MMM d, yyyy · h:mm a')}</span
 			>
 		</div>
 	</div>

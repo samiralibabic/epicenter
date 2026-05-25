@@ -22,7 +22,12 @@
  * ```
  */
 
-import type { FolderId, NoteId } from '@epicenter/honeycrisp';
+import {
+	asFolderId,
+	asNoteId,
+	type FolderId,
+	type NoteId,
+} from '@epicenter/honeycrisp';
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
 
@@ -86,12 +91,14 @@ function createSearchParams() {
 	return {
 		/** Currently selected folder, or `null` for "All Notes". */
 		get folder(): FolderId | null {
-			return (page.url.searchParams.get('folder') as FolderId) ?? null;
+			const raw = page.url.searchParams.get('folder');
+			return raw === null ? null : asFolderId(raw);
 		},
 
 		/** Currently selected note, or `null` for no selection. */
 		get note(): NoteId | null {
-			return (page.url.searchParams.get('note') as NoteId) ?? null;
+			const raw = page.url.searchParams.get('note');
+			return raw === null ? null : asNoteId(raw);
 		},
 
 		/** Whether the Recently Deleted view is active. */

@@ -179,7 +179,7 @@ export function openSkillsNodeWorkspace({
 					const { skillPath, parsedSkill, instructions } = entry;
 
 					const hasUniqueId =
-						parsedSkill.id !== undefined && !seenIds.has(parsedSkill.id);
+						parsedSkill.id !== null && !seenIds.has(parsedSkill.id);
 					const skillId: string = hasUniqueId
 						? (parsedSkill.id as string)
 						: generateId();
@@ -227,7 +227,6 @@ export function openSkillsNodeWorkspace({
 									skillId,
 									path: fileName,
 									updatedAt: Date.now(),
-									_v: 1,
 								});
 
 								await using h = openReferenceDoc(refId);

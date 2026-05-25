@@ -13,7 +13,7 @@
  * `openCollaboration` owns reconnect-on-auth-change internally, so this file
  * has no per-app onStateChange listener.
  *
- * The bundle's `wipe()` drops every encrypted IDB database for this subject;
+ * The bundle's `wipe()` drops every encrypted IDB database for this owner;
  * `Symbol.dispose` tears down the root + cached child Y.Docs without touching
  * local storage.
  */
@@ -29,6 +29,7 @@ import {
 	attachLocalStorage,
 	attachTimeline,
 	createDisposableCache,
+	type DeviceId,
 	onLocalUpdate,
 	openCollaboration,
 	roomWsUrl,
@@ -45,10 +46,10 @@ import { createOpensidianActions } from './actions';
 
 export function openOpensidianBrowser({
 	signedIn,
-	installationId,
+	deviceId,
 }: {
 	signedIn: SignedIn;
-	installationId: string;
+	deviceId: DeviceId;
 }) {
 	const ydoc = new Y.Doc({ guid: OPENSIDIAN_ID, gc: true });
 	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
@@ -57,7 +58,7 @@ export function openOpensidianBrowser({
 
 	const idb = attachLocalStorage(ydoc, {
 		server: signedIn.server,
-		owner: signedIn.owner,
+		ownerId: signedIn.ownerId,
 		keyring: signedIn.keyring,
 	});
 
@@ -71,20 +72,20 @@ export function openOpensidianBrowser({
 		);
 		const childIdb = attachLocalStorage(childYdoc, {
 			server: signedIn.server,
-			owner: signedIn.owner,
+			ownerId: signedIn.ownerId,
 			keyring: signedIn.keyring,
 		});
 		// File bodies sync through Cloud so device loss doesn't drop the largest
 		// data class.
 		const childSync = openCollaboration(childYdoc, {
 			url: roomWsUrl({
-				baseURL: signedIn.auth.baseURL,
-				owner: signedIn.owner,
+				baseURL: signedIn.baseURL,
+				ownerId: signedIn.ownerId,
 				guid: childYdoc.guid,
-				installationId,
+				deviceId,
 			}),
-			openWebSocket: signedIn.auth.openWebSocket,
-			onReconnectSignal: signedIn.auth.onStateChange,
+			openWebSocket: signedIn.openWebSocket,
+			onReconnectSignal: signedIn.onReconnectSignal,
 			waitFor: childIdb.whenLoaded,
 			actions: {},
 		});
@@ -137,13 +138,13 @@ export function openOpensidianBrowser({
 
 	const collaboration = openCollaboration(ydoc, {
 		url: roomWsUrl({
-			baseURL: signedIn.auth.baseURL,
-			owner: signedIn.owner,
+			baseURL: signedIn.baseURL,
+			ownerId: signedIn.ownerId,
 			guid: ydoc.guid,
-			installationId,
+			deviceId,
 		}),
-		openWebSocket: signedIn.auth.openWebSocket,
-		onReconnectSignal: signedIn.auth.onStateChange,
+		openWebSocket: signedIn.openWebSocket,
+		onReconnectSignal: signedIn.onReconnectSignal,
 		waitFor: idb.whenLoaded,
 		actions,
 	});
@@ -174,7 +175,7 @@ export function openOpensidianBrowser({
 			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
 			await wipeLocalStorage({
 				server: signedIn.server,
-				owner: signedIn.owner,
+				ownerId: signedIn.ownerId,
 			});
 		},
 		[Symbol.dispose]() {

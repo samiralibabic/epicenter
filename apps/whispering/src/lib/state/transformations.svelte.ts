@@ -116,7 +116,6 @@ export function generateDefaultTransformation(): Transformation {
 		description: '',
 		createdAt: now,
 		updatedAt: now,
-		_v: 1,
 	};
 }
 

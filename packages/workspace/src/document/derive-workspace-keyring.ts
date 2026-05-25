@@ -1,25 +1,39 @@
 import {
 	base64ToBytes,
 	deriveWorkspaceKey,
-	type SubjectKeyring,
+	type Keyring,
 	type WorkspaceKeyring,
 } from '@epicenter/encryption';
 
 /**
- * Derive the per-workspace keyring from the authenticated subject keyring.
+ * Derive the per-workspace keyring from the authenticated owner keyring.
  *
- * `SubjectKeyring` is server-issued owner material. Workspace encryption does
+ * `Keyring` is server-issued owner-scoped material. Workspace encryption does
  * not use it directly; each entry is narrowed with the workspace id so the
- * same subject gets independent keys for different Y.Doc roots.
+ * same owner gets independent keys for different Y.Doc roots.
+ *
+ * This is also the single point where transport keyring entries are decoded,
+ * so the post-schema invariants are asserted here: no duplicate `version`
+ * (a silent overwrite would orphan blobs encrypted under the losing entry)
+ * and 32-byte decoded length (HKDF accepts any IKM, so a wrong length would
+ * succeed without diagnostic).
  */
 export function deriveWorkspaceKeyring(
-	keyring: SubjectKeyring,
+	keyring: Keyring,
 	workspaceId: string,
 ): WorkspaceKeyring {
 	const workspaceKeyring: WorkspaceKeyring = new Map();
-	for (const { version, subjectKeyBase64 } of keyring) {
-		const subjectKey = base64ToBytes(subjectKeyBase64);
-		workspaceKeyring.set(version, deriveWorkspaceKey(subjectKey, workspaceId));
+	for (const { version, keyBytesBase64 } of keyring) {
+		if (workspaceKeyring.has(version)) {
+			throw new Error(`Keyring has duplicate version: ${version}`);
+		}
+		const keyBytes = base64ToBytes(keyBytesBase64);
+		if (keyBytes.length !== 32) {
+			throw new Error(
+				`Keyring version ${version}: expected 32 decoded bytes, got ${keyBytes.length}`,
+			);
+		}
+		workspaceKeyring.set(version, deriveWorkspaceKey(keyBytes, workspaceId));
 	}
 	return workspaceKeyring;
 }

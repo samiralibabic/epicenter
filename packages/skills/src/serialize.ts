@@ -16,8 +16,9 @@ import type { Skill } from './tables.js';
  *
  * Reconstructs the agentskills.io SKILL.md file from workspace table data.
  * Required fields (`name`, `description`) are always included. Optional fields
- * (`license`, `compatibility`, `metadata`, `allowedTools`) are only included
- * when they have a defined value—this keeps exported files minimal and clean.
+ * (`license`, `compatibility`, `metadata`, `allowedTools`) are stored as
+ * nullable columns and are only included in the YAML when set (non-null),
+ * keeping exported files minimal and clean.
  *
  * The skill's `id` is always injected into the `metadata` map so it survives
  * a full export→import cycle. On parse, `id` is extracted back out and stripped
@@ -30,19 +31,19 @@ import type { Skill } from './tables.js';
 export function serializeSkillMd(skill: Skill, instructions: string): string {
 	// Merge skill.id into metadata so it survives round-trips through disk
 	const existingMetadata = (
-		skill.metadata !== undefined ? JSON.parse(skill.metadata) : {}
+		skill.metadata !== null ? JSON.parse(skill.metadata) : {}
 	) as Record<string, string>;
 	const metadataWithId = { id: skill.id, ...existingMetadata };
 
 	const fm = {
 		name: skill.name,
 		description: skill.description,
-		...(skill.license !== undefined && { license: skill.license }),
-		...(skill.compatibility !== undefined && {
+		...(skill.license !== null && { license: skill.license }),
+		...(skill.compatibility !== null && {
 			compatibility: skill.compatibility,
 		}),
 		metadata: metadataWithId,
-		...(skill.allowedTools !== undefined && {
+		...(skill.allowedTools !== null && {
 			'allowed-tools': skill.allowedTools,
 		}),
 	};

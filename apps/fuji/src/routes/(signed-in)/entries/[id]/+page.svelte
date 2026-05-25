@@ -3,11 +3,11 @@
 	import FileXIcon from '@lucide/svelte/icons/file-x';
 	import { page } from '$app/state';
 	import { requireFuji } from '$lib/session';
-	import type { EntryId } from '$lib/workspace';
+	import { asEntryId } from '$lib/workspace';
 	import EntryEditor from '../../components/EntryEditor.svelte';
 
 	const fuji = requireFuji();
-	const entryId = $derived(page.params.id as EntryId);
+	const entryId = $derived(page.params.id ? asEntryId(page.params.id) : null);
 	const entry = $derived(entryId ? (fuji.entries.get(entryId) ?? null) : null);
 </script>
 

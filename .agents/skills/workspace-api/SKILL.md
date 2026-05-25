@@ -3,7 +3,7 @@ name: workspace-api
 description: 'Epicenter workspace API patterns: `defineTable`, `defineKv`, migrations, actions, `attach*` primitives, `openCollaboration`, and workspace connections. Use when editing workspace schemas, table/KV access, actions, attachments, or collaboration setup.'
 metadata:
   author: epicenter
-  version: '6.0'
+  version: '7.0'
 ---
 
 # Workspace API
@@ -19,7 +19,7 @@ Use this skill for Epicenter workspace definitions, table and KV access, action 
 - `yjs`: Yjs CRDT patterns and shared types
 - `svelte`: reactive wrappers such as `fromTable` and `fromKv`, plus commit-on-blur workspace inputs
 - `attach-primitive`: the full contract and invariants every `attach*` function must follow
-- `arktype`: runtime schema and branded ID validation
+- `typebox`: TypeBox primitives used by `column.*`, `defineKv`, and action input schemas
 
 ## When To Apply This Skill
 
@@ -36,11 +36,12 @@ Use this skill when you are:
 
 ## Core Rules
 
-- Tables always include `_v` with a number literal. Use single-version shorthand until a table actually needs evolution.
+- `_v` is library-managed. Never declare it as a column, never set it on a write, never read it off a row. Single-version tables drop the versioning surface entirely; multi-version tables expose it only inside the `migrate` function as `({ value, version })`.
+- Columns are TypeBox schemas. Prefer the `column.*` sugar (`column.string`, `column.number`, `column.boolean`, `column.enum`, `column.json`, `column.nullable`, `column.dateTime`, `column.ianaTimeZone`); raw `Type.X()` is allowed and the `FlatJsonTSchema` constraint enforces SQLite-mappable shapes either way.
 - Derive row types with `InferTableRow<typeof tableDefinition>` in the same module that defines the table. Consumers import the type from the workspace definition module.
 - Do not re-derive row types from runtime table methods or relay them through state files.
-- KV stores use `defineKv(schema, defaultValue)`. Prefer one scalar per dot-namespaced key unless the value is a true atomic object.
-- Every table `id` and string foreign key uses a branded type plus a co-located generator. Call sites use the generator, never a direct cast.
+- KV stores use `defineKv(schema, defaultValue)` where `defaultValue` is a **factory** `() => Static<S>`. Prefer one scalar per dot-namespaced key unless the value is a true atomic object.
+- Every table `id` and string foreign key uses a branded type plus a co-located generator. The brand lives as a pure type alias (`type X = string & Brand<'X'>`); the generator uses `generateId<X>()`. Call sites use the generator, never a direct cast.
 - Isomorphic actions belong in `workspace/actions.ts` factories that close over `tables` and `batch`. Runtime-specific actions live in the runtime builder where browser, Node, Tauri, or extension APIs are in scope.
 - Local action calls see the handler shape directly. Remote dispatch wraps raw values and failures in `Promise<Result<T, DispatchError>>`. Read the action return reference before changing handler failure behavior.
 - Every action method inside the workspace action object should have JSDoc that adds developer-facing value beyond the short `description` field.
@@ -51,7 +52,8 @@ Use this skill when you are:
 ## Reference Map
 
 - [Schema definition patterns](references/schema-definition-patterns.md): `defineTable`, `defineKv`, row type inference, KV scalar design, and branded IDs.
-- [Actions, layout, and attachments](references/actions-layout-and-attachments.md): action factories, JSDoc, workspace file layout, attachment ordering, `connectWorkspace`, and `_v`.
+- [Actions, layout, and attachments](references/actions-layout-and-attachments.md): action factories, JSDoc, workspace file layout, attachment ordering, and `connectWorkspace`.
+- [Deriving action input schemas](references/deriving-action-inputs.md): use `tables.X.schema` and `schema.properties.X` to compose `defineQuery`/`defineMutation` input schemas inline. No helper layer.
 - [Action return shapes](references/action-return-shapes.md): local vs remote action return contracts and error normalization.
 - [Table, KV, CRUD, and observation](references/table-kv-crud-observation.md): table/KV read, write, observe, and derived-state details.
 - [Table migrations](references/table-migrations.md): migration rules and version evolution examples.
