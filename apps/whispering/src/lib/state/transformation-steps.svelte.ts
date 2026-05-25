@@ -150,6 +150,5 @@ export function generateDefaultStep({
 		findText: '',
 		replaceText: '',
 		useRegex: false,
-		_v: 1,
 	};
 }

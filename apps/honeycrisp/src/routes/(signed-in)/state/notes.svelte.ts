@@ -20,9 +20,13 @@
  * ```
  */
 
-import type { FolderId, NoteId } from '@epicenter/honeycrisp';
+import {
+	type FolderId,
+	generateNoteId,
+	type NoteId,
+} from '@epicenter/honeycrisp';
 import { fromTable } from '@epicenter/svelte';
-import { DateTimeString, generateId } from '@epicenter/workspace';
+import { DateTimeString } from '@epicenter/workspace';
 import type { HoneycrispBrowser } from '../../../../browser';
 import type { createFolders } from './folders.svelte';
 import { searchParams } from './search-params.svelte';
@@ -44,10 +48,10 @@ export function createNotes({
 	// ─── Derived State ───────────────────────────────────────────────────
 
 	/** Active notes, not soft-deleted. */
-	const all = $derived(allNotes.filter((n) => n.deletedAt === undefined));
+	const all = $derived(allNotes.filter((n) => n.deletedAt === null));
 
 	/** Soft-deleted notes for the Recently Deleted view. */
-	const deleted = $derived(allNotes.filter((n) => n.deletedAt !== undefined));
+	const deleted = $derived(allNotes.filter((n) => n.deletedAt !== null));
 
 	/** Per-folder note counts for the sidebar (active notes only). */
 	const countsByFolder = $derived.by(() => {
@@ -98,18 +102,17 @@ export function createNotes({
 		 * ```
 		 */
 		create(folderId?: FolderId | null) {
-			const id = generateId() as NoteId;
+			const id = generateNoteId();
 			honeycrisp.tables.notes.set({
 				id,
-				folderId: folderId ?? undefined,
+				folderId: folderId ?? null,
 				title: '',
 				preview: '',
 				pinned: false,
-				deletedAt: undefined,
-				wordCount: 0,
+				deletedAt: null,
+				wordCount: null,
 				createdAt: DateTimeString.now(),
 				updatedAt: DateTimeString.now(),
-				_v: 2,
 			});
 			return { id };
 		},
@@ -155,8 +158,8 @@ export function createNotes({
 				? folders.all.some((f) => f.id === note.folderId)
 				: true;
 			honeycrisp.tables.notes.update(noteId, {
-				deletedAt: undefined,
-				...(folderExists ? {} : { folderId: undefined }),
+				deletedAt: null,
+				...(folderExists ? {} : { folderId: null }),
 			});
 		},
 
@@ -202,7 +205,7 @@ export function createNotes({
 		/**
 		 * Move a note to a different folder.
 		 *
-		 * Pass `undefined` to move the note to unfiled (remove from folder).
+		 * Pass `null` to move the note to unfiled (remove from folder).
 		 * The note remains selected if it was selected before the move.
 		 *
 		 * @example
@@ -210,10 +213,10 @@ export function createNotes({
 		 * app.state.notes.moveToFolder(noteId, folderId);
 		 *
 		 * // Move a note to unfiled
-		 * app.state.notes.moveToFolder(noteId, undefined);
+		 * app.state.notes.moveToFolder(noteId, null);
 		 * ```
 		 */
-		moveToFolder(noteId: NoteId, folderId: FolderId | undefined) {
+		moveToFolder(noteId: NoteId, folderId: FolderId | null) {
 			honeycrisp.tables.notes.update(noteId, { folderId });
 		},
 

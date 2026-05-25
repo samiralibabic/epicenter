@@ -25,11 +25,8 @@ import {
 	attachMarkdownMaterializer,
 	slugFilename,
 } from '@epicenter/workspace/document/materializer/markdown';
-import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
-import {
-	attachDaemonInfrastructure,
-	openWriterSqlite,
-} from '@epicenter/workspace/node';
+import { attachBunSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
+import { attachDaemonInfrastructure } from '@epicenter/workspace/node';
 import { createLogger } from 'wellcrafted/logger';
 import * as Y from 'yjs';
 
@@ -38,8 +35,8 @@ export default defineWorkspace({
 		projectDir,
 		route,
 		yDocClientId,
-		installationId,
-		owner,
+		deviceId,
+		ownerId,
 		keyring,
 		openWebSocket,
 		onReconnectSignal,
@@ -53,13 +50,10 @@ export default defineWorkspace({
 
 		// Runtime cache: hidden under .epicenter/ at the project root.
 		// Inlined so the canonical layout stays visible at the project root.
-		const sqliteDb = openWriterSqlite({
+		attachBunSqliteMaterializer(ydoc, {
 			filePath: join(projectDir, '.epicenter', 'sqlite.db'),
 			log: createLogger(`${route}-sqlite`),
-		});
-		ydoc.once('destroy', () => sqliteDb.close());
-
-		attachSqliteMaterializer(ydoc, { db: sqliteDb }).table(tables.entries);
+		}).table(tables.entries);
 
 		// Markdown: visible at project root, one directory per table.
 		// Committed to git as the source of truth. The materializer appends
@@ -71,8 +65,8 @@ export default defineWorkspace({
 
 		return attachDaemonInfrastructure(ydoc, {
 			projectDir,
-			owner,
-			installationId,
+			ownerId,
+			deviceId,
 			openWebSocket,
 			onReconnectSignal,
 			actions,

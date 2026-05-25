@@ -514,17 +514,18 @@ async function processRecordingPipeline({ blob, toastId }: { blob: Blob; toastId
 	});
 
 	// Step 4: Optionally run transformation
-	const { data: transformationRun, error: transformError } =
+	const { data: result, error: transformError } =
 		await rpc.transformer.transformRecording.execute({
 			recordingId: recording.id,
 			transformation,
 		});
 
 	if (transformError) return;
+	if (result.status === 'failed') return;
 
 	// Step 5: Deliver transformation result
 	await rpc.delivery.deliverTransformationResult.execute({
-		text: transformationRun.output,
+		text: result.output,
 		toastId,
 	});
 }
@@ -794,30 +795,22 @@ function transcribeBlob(blob: Blob) {
 transformInput: defineMutation({
   mutationFn: async ({ input, transformation, steps }) => {
     // Step 1: Run transformation pipeline
-    const { data: transformationRun, error: transformationRunError } =
+    const { data: result, error: runError } =
       await runTransformation({ input, transformation, steps, recordingId: null });
 
-    if (transformationRunError)
-      return WhisperingErr({ title: '⚠️ Transformation failed', serviceError: transformationRunError });
+    if (runError)
+      return WhisperingErr({ title: '⚠️ Transformation failed', serviceError: runError });
 
-    // Step 2: Check result
-    if (transformationRun.status === 'failed') {
+    // Step 2: Narrow on terminal status
+    if (result.status === 'failed')
       return WhisperingErr({
         title: '⚠️ Transformation failed',
-        description: transformationRun.error,
-        action: { type: 'more-details', error: transformationRun.error },
+        description: result.error,
+        action: { type: 'more-details', error: result.error },
       });
-    }
 
     // Step 3: Return output
-    if (!transformationRun.output) {
-      return WhisperingErr({
-        title: '⚠️ Transformation produced no output',
-        description: 'The transformation completed but produced no output.',
-      });
-    }
-
-    return Ok(transformationRun.output);
+    return Ok(result.output);
   },
 }),
 ```

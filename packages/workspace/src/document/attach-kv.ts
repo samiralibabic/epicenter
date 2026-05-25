@@ -1,58 +1,90 @@
 /**
- * attachKv() — Bind KV definitions to a Y.Doc.
+ * `attachKv()` — bind KV definitions to a Y.Doc.
  *
  * Constructs an unencrypted `YKeyValueLww` on `ydoc.getArray('kv')` and
  * wraps it with a typed `Kv`. KV uses validate-or-default semantics:
- * invalid or missing values return the default value from the KV definition.
+ * invalid or missing values return the result of the definition's
+ * `defaultValue()` factory.
  *
  * For encrypted storage, call `encryption.attachKv` on the coordinator
  * returned by `attachEncryption(ydoc, { keyring })`.
+ *
+ * `attachKv` and `createKv` accept an optional `{ logger? }`: when provided,
+ * validation failures emit `logger.warn(KvError.ValidationFailed({ key, raw }))`
+ * without changing the return contract. When omitted, behavior is silent.
  */
 
-import type { StandardSchemaV1 } from '@standard-schema/spec';
+import { type Static, type TSchema } from 'typebox';
+import { Value } from 'typebox/value';
+import { defineErrors, type InferErrors } from 'wellcrafted/error';
+import type { Logger } from 'wellcrafted/logger';
 import type * as Y from 'yjs';
-import { KV_KEY } from './keys.js';
-import type { CombinedStandardSchema } from './standard-schema.js';
+import { KV_KEY } from './keys';
 import {
 	type KvStoreChange,
 	type ObservableKvStore,
 	YKeyValueLww,
 	type YKeyValueLwwEntry,
-} from './y-keyvalue/index.js';
+} from './y-keyvalue/index';
 
 // ════════════════════════════════════════════════════════════════════════════
 // KV RESULT TYPES
 // ════════════════════════════════════════════════════════════════════════════
 
-/** Change event for KV observation */
+/** Change event for KV observation. */
 export type KvChange<TValue> =
 	| { type: 'set'; value: TValue }
 	| { type: 'delete' };
 
+/**
+ * Errors emitted to the optional logger. The default value is still returned
+ * (the silent-by-default contract), but consumers that provide a logger see
+ * a structured `ValidationFailed` event.
+ */
+export const KvError = defineErrors({
+	ValidationFailed: ({ key, raw }: { key: string; raw: unknown }) => ({
+		message: `[kv] Stored value for "${key}" failed schema validation; returning default`,
+		key,
+		raw,
+	}),
+});
+export type KvError = InferErrors<typeof KvError>;
+
 // ════════════════════════════════════════════════════════════════════════════
-// KV DEFINITION & HELPER TYPES
+// KV DEFINITION TYPES
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
  * A KV definition created by `defineKv(schema, defaultValue)`.
+ *
+ * `defaultValue` is always a factory: the library calls it on every default
+ * firing, so each call returns a fresh value safe to mutate.
  */
-export type KvDefinition<TSchema extends CombinedStandardSchema> = {
-	schema: TSchema;
-	defaultValue: StandardSchemaV1.InferOutput<TSchema>;
+export type KvDefinition<S extends TSchema = TSchema> = {
+	schema: S;
+	defaultValue: () => Static<S>;
 };
 
-/** Extract the value type from a KvDefinition */
+/** Extract the value type from a KvDefinition. */
 export type InferKvValue<T> =
-	T extends KvDefinition<infer TSchema>
-		? StandardSchemaV1.InferOutput<TSchema>
-		: never;
+	T extends KvDefinition<infer S> ? Static<S> : never;
 
-/** Map of KV definitions (uses `any` to allow variance in generic parameters) */
+/** Map of KV definitions (uses `any` to allow variance in generic parameters). */
 export type KvDefinitions = Record<
 	string,
 	// biome-ignore lint/suspicious/noExplicitAny: variance-friendly map type
 	KvDefinition<any>
 >;
+
+/** Optional knobs for `attachKv` / `createKv`. */
+export type KvOptions = {
+	/**
+	 * Logger that captures validation failures via
+	 * `logger.warn(KvError.ValidationFailed({ key, raw }))`. Omit for silent
+	 * behavior; no module-level default logger is installed.
+	 */
+	logger?: Logger;
+};
 
 /**
  * Dictionary-style typed handle over a KV store.
@@ -63,43 +95,43 @@ export type Kv<TKvDefinitions extends KvDefinitions> = ReturnType<
 
 /**
  * Bind a record of KV definitions to a Y.Doc and return a typed Kv.
- *
- * @param ydoc - The Y.Doc to attach to
- * @param definitions - Map of KV key name to KvDefinition
  */
 export function attachKv<TKvDefinitions extends KvDefinitions>(
 	ydoc: Y.Doc,
 	definitions: TKvDefinitions,
+	opts?: KvOptions,
 ): Kv<TKvDefinitions> {
 	const yarray = ydoc.getArray<YKeyValueLwwEntry<unknown>>(KV_KEY);
 	const ykv = new YKeyValueLww<unknown>(yarray);
 	ydoc.once('destroy', () => ykv[Symbol.dispose]());
-	return createKv(ykv, definitions);
+	return createKv(ykv, definitions, opts);
 }
 
 /**
  * Build a Kv helper over any `ObservableKvStore`. Exported so
- * `@epicenter/workspace` can reuse the same helper logic over its encrypted
+ * `@epicenter/workspace` can reuse the helper logic over its encrypted
  * store wrapper.
  */
 export function createKv<TKvDefinitions extends KvDefinitions>(
 	ykv: ObservableKvStore<unknown>,
 	definitions: TKvDefinitions,
+	opts?: KvOptions,
 ) {
+	const logger = opts?.logger;
 	return {
 		get<K extends keyof TKvDefinitions & string>(
 			key: K,
 		): InferKvValue<TKvDefinitions[K]> {
 			const definition = definitions[key]!;
 			const raw = ykv.get(key);
-			if (raw === undefined) return definition.defaultValue;
-
-			const result = definition.schema['~standard'].validate(raw);
-			if (result instanceof Promise)
-				throw new TypeError('Async schemas not supported');
-			if (result.issues) return definition.defaultValue;
-
-			return result.value;
+			if (raw === undefined) {
+				return definition.defaultValue() as InferKvValue<TKvDefinitions[K]>;
+			}
+			if (Value.Check(definition.schema, raw)) {
+				return raw as InferKvValue<TKvDefinitions[K]>;
+			}
+			logger?.warn(KvError.ValidationFailed({ key, raw }));
+			return definition.defaultValue() as InferKvValue<TKvDefinitions[K]>;
 		},
 
 		set<K extends keyof TKvDefinitions & string>(
@@ -135,18 +167,15 @@ export function createKv<TKvDefinitions extends KvDefinitions>(
 						break;
 					case 'add':
 					case 'update': {
-						const result = definition.schema['~standard'].validate(
-							change.newValue,
-						);
-						if (!(result instanceof Promise) && !result.issues) {
+						if (Value.Check(definition.schema, change.newValue)) {
 							callback(
-								{ type: 'set', value: result.value } as Parameters<
-									typeof callback
-								>[0],
+								{
+									type: 'set',
+									value: change.newValue as InferKvValue<TKvDefinitions[K]>,
+								},
 								origin,
 							);
 						}
-						// Skip callback for invalid values
 						break;
 					}
 					default:
@@ -174,23 +203,16 @@ export function createKv<TKvDefinitions extends KvDefinitions>(
 					if (!definition) continue;
 					if (change.action === 'delete') {
 						parsed.set(key, { type: 'delete' });
-					} else {
-						const result = definition.schema['~standard'].validate(
-							change.newValue,
-						);
-						if (!(result instanceof Promise) && !result.issues) {
-							parsed.set(key, {
-								type: 'set',
-								value: result.value,
-							});
-						}
+					} else if (Value.Check(definition.schema, change.newValue)) {
+						parsed.set(key, { type: 'set', value: change.newValue });
 					}
 				}
-				if (parsed.size > 0)
+				if (parsed.size > 0) {
 					callback(
 						parsed as Map<keyof TKvDefinitions & string, KvChange<unknown>>,
 						origin,
 					);
+				}
 			};
 			ykv.observe(handler);
 			return () => ykv.unobserve(handler);

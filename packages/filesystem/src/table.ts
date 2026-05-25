@@ -1,20 +1,16 @@
-import { defineTable, type InferTableRow } from '@epicenter/workspace';
-import { type } from 'arktype';
-import { FileId } from './ids.js';
+import { column, defineTable, type InferTableRow } from '@epicenter/workspace';
+import type { FileId } from './ids.js';
 
-export const filesTable = defineTable(
-	type({
-		id: FileId,
-		name: 'string',
-		parentId: FileId.or(type.null),
-		type: "'file' | 'folder'",
-		size: 'number',
-		createdAt: 'number',
-		updatedAt: 'number',
-		trashedAt: 'number | null',
-		_v: '1',
-	}),
-);
+export const filesTable = defineTable({
+	id: column.string<FileId>(),
+	name: column.string(),
+	parentId: column.nullable(column.string<FileId>()),
+	type: column.enum(['file', 'folder']),
+	size: column.number(),
+	createdAt: column.number(),
+	updatedAt: column.number(),
+	trashedAt: column.nullable(column.number()),
+});
 
 /** File metadata row derived from the files table definition */
 export type FileRow = InferTableRow<typeof filesTable>;

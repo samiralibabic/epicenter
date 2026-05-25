@@ -58,7 +58,7 @@ function createSettings() {
 		 */
 		reset() {
 			for (const key of Object.keys(KV_DEFINITIONS) as KvKey[]) {
-				whispering.kv.set(key, KV_DEFINITIONS[key].defaultValue);
+				whispering.kv.set(key, KV_DEFINITIONS[key].defaultValue());
 			}
 		},
 	};

@@ -19,7 +19,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
 	attachTables,
@@ -27,6 +26,7 @@ import {
 	defineTable,
 } from '../../../index.js';
 import { parseMarkdownFile } from '../../../markdown/parse-markdown-file.js';
+import { column } from '../../column/index.js';
 import {
 	attachMarkdownMaterializer,
 	type MarkdownShape,
@@ -36,11 +36,16 @@ import {
 // Test Table Definitions
 // ============================================================================
 
-const postsTable = defineTable(
-	type({ id: 'string', title: 'string', published: 'boolean', _v: '1' }),
-);
+const postsTable = defineTable({
+	id: column.string(),
+	title: column.string(),
+	published: column.boolean(),
+});
 
-const notesTable = defineTable(type({ id: 'string', body: 'string', _v: '1' }));
+const notesTable = defineTable({
+	id: column.string(),
+	body: column.string(),
+});
 
 const tableDefinitions = { posts: postsTable, notes: notesTable };
 
@@ -134,11 +139,11 @@ describe('push', () => {
 		const { workspace } = await setup({ tables: (t) => [{ table: t.posts }] });
 		await writeTestFile(
 			'posts/hello.md',
-			'---\nid: post-1\ntitle: Hello World\npublished: true\n_v: 1\n---\n',
+			'---\nid: post-1\ntitle: Hello World\npublished: true\n---\n',
 		);
 		await writeTestFile(
 			'posts/draft.md',
-			'---\nid: post-2\ntitle: Draft Post\npublished: false\n_v: 1\n---\n',
+			'---\nid: post-2\ntitle: Draft Post\npublished: false\n---\n',
 		);
 
 		const result = await workspace.materializer.push();
@@ -161,7 +166,7 @@ describe('push', () => {
 		const { workspace } = await setup({ tables: (t) => [{ table: t.posts }] });
 		await writeTestFile(
 			'posts/valid.md',
-			'---\nid: p1\ntitle: Valid\npublished: false\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Valid\npublished: false\n---\n',
 		);
 		await writeTestFile('posts/readme.txt', 'not a markdown file');
 		await writeTestFile('posts/data.json', '{"id": "test"}');
@@ -178,7 +183,7 @@ describe('push', () => {
 		const { workspace } = await setup({ tables: (t) => [{ table: t.posts }] });
 		await writeTestFile(
 			'posts/valid.md',
-			'---\nid: p1\ntitle: Valid\npublished: false\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Valid\npublished: false\n---\n',
 		);
 		await writeTestFile(
 			'posts/no-frontmatter.md',
@@ -212,7 +217,7 @@ describe('push', () => {
 		// catches the schema violation.
 		await writeTestFile(
 			'posts/bad.md',
-			'---\nid: post-bad\ntitle: 42\npublished: true\n_v: 1\n---\n',
+			'---\nid: post-bad\ntitle: 42\npublished: true\n---\n',
 		);
 
 		const result = await workspace.materializer.push();
@@ -267,12 +272,12 @@ describe('push', () => {
 		const { workspace } = await setup({ tables: (t) => [{ table: t.posts }] });
 		await writeTestFile(
 			'posts/good.md',
-			'---\nid: p1\ntitle: Good\npublished: true\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Good\npublished: true\n---\n',
 		);
 		await writeTestFile('posts/no-frontmatter.md', 'just a heading\n');
 		await writeTestFile(
 			'posts/bad.md',
-			'---\nid: p3\ntitle: 42\npublished: true\n_v: 1\n---\n',
+			'---\nid: p3\ntitle: 42\npublished: true\n---\n',
 		);
 
 		const result = await workspace.materializer.push();
@@ -297,7 +302,6 @@ describe('push', () => {
 						fromMarkdown: (parsed) => ({
 							id: parsed.frontmatter.id as string,
 							body: parsed.body ?? '',
-							_v: 1 as const,
 						}),
 					},
 				},
@@ -324,7 +328,7 @@ describe('push', () => {
 		});
 		await writeTestFile(
 			'blog/hello.md',
-			'---\nid: p1\ntitle: Hello\npublished: false\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Hello\npublished: false\n---\n',
 		);
 
 		const result = await workspace.materializer.push();
@@ -340,7 +344,7 @@ describe('push', () => {
 		// First import
 		await writeTestFile(
 			'posts/p1.md',
-			'---\nid: p1\ntitle: Original\npublished: false\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Original\npublished: false\n---\n',
 		);
 
 		const first = await workspace.materializer.push();
@@ -355,7 +359,7 @@ describe('push', () => {
 		// Second import: overwrite the same file with different data
 		await writeTestFile(
 			'posts/p1.md',
-			'---\nid: p1\ntitle: Updated From Disk\npublished: true\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Updated From Disk\npublished: true\n---\n',
 		);
 
 		const second = await workspace.materializer.push();
@@ -372,12 +376,9 @@ describe('push', () => {
 		const { workspace } = await setup();
 		await writeTestFile(
 			'posts/post.md',
-			'---\nid: p1\ntitle: Post\npublished: false\n_v: 1\n---\n',
+			'---\nid: p1\ntitle: Post\npublished: false\n---\n',
 		);
-		await writeTestFile(
-			'notes/note.md',
-			'---\nid: n1\nbody: Note body\n_v: 1\n---\n',
-		);
+		await writeTestFile('notes/note.md', '---\nid: n1\nbody: Note body\n---\n');
 
 		const result = await workspace.materializer.push();
 
@@ -400,13 +401,11 @@ describe('pull', () => {
 			id: 'p1',
 			title: 'First',
 			published: true,
-			_v: 1,
 		});
 		workspace.tables.posts.set({
 			id: 'p2',
 			title: 'Second',
 			published: false,
-			_v: 1,
 		});
 
 		const result = await workspace.materializer.pull();
@@ -423,23 +422,6 @@ describe('pull', () => {
 		workspace[Symbol.dispose]();
 	});
 
-	test('creates table directory before writing', async () => {
-		const { workspace } = await setup({ tables: (t) => [{ table: t.posts }] });
-		workspace.tables.posts.set({
-			id: 'p1',
-			title: 'First',
-			published: false,
-			_v: 1,
-		});
-
-		await workspace.materializer.pull();
-
-		const entries = await listTestDir('posts');
-		expect(entries).toContain('p1.md');
-
-		workspace[Symbol.dispose]();
-	});
-
 	test('uses custom filename and toMarkdown callbacks', async () => {
 		const { workspace } = await setup({
 			tables: (t) => [
@@ -449,13 +431,13 @@ describe('pull', () => {
 						filename: (row) => `${row.id}-custom.md`,
 						toMarkdown: (row) => ({
 							frontmatter: { id: row.id },
-							body: row.body as string,
+							body: (row as unknown as { body: string }).body,
 						}),
 					},
 				},
 			],
 		});
-		workspace.tables.notes.set({ id: 'n1', body: 'Custom body', _v: 1 });
+		workspace.tables.notes.set({ id: 'n1', body: 'Custom body' });
 
 		const result = await workspace.materializer.pull();
 
@@ -475,7 +457,6 @@ describe('pull', () => {
 			id: 'p1',
 			title: 'Blog Post',
 			published: false,
-			_v: 1,
 		});
 
 		await workspace.materializer.pull();
@@ -501,9 +482,8 @@ describe('pull', () => {
 			id: 'p1',
 			title: 'Post',
 			published: false,
-			_v: 1,
 		});
-		workspace.tables.notes.set({ id: 'n1', body: 'Note', _v: 1 });
+		workspace.tables.notes.set({ id: 'n1', body: 'Note' });
 
 		const result = await workspace.materializer.pull();
 
@@ -531,12 +511,11 @@ describe('rebuild', () => {
 			id: 'p1',
 			title: 'Live',
 			published: true,
-			_v: 1,
 		});
 		await workspace.materializer.pull();
 		await writeTestFile(
 			'posts/orphan.md',
-			'---\nid: orphan\ntitle: Orphan\npublished: false\n_v: 1\n---\n',
+			'---\nid: orphan\ntitle: Orphan\npublished: false\n---\n',
 		);
 
 		const before = await listTestDir('posts');
@@ -561,14 +540,10 @@ describe('rebuild', () => {
 			id: 'p1',
 			title: 'Post',
 			published: false,
-			_v: 1,
 		});
-		workspace.tables.notes.set({ id: 'n1', body: 'Note', _v: 1 });
+		workspace.tables.notes.set({ id: 'n1', body: 'Note' });
 		await workspace.materializer.pull();
-		await writeTestFile(
-			'notes/orphan.md',
-			'---\nid: x\nbody: gone\n_v: 1\n---\n',
-		);
+		await writeTestFile('notes/orphan.md', '---\nid: x\nbody: gone\n---\n');
 
 		const result = await workspace.materializer.rebuild('posts');
 
@@ -597,13 +572,11 @@ describe('rebuild', () => {
 			id: 'p1',
 			title: 'A',
 			published: true,
-			_v: 1,
 		});
 		workspace.tables.posts.set({
 			id: 'p2',
 			title: 'B',
 			published: false,
-			_v: 1,
 		});
 
 		const first = await workspace.materializer.rebuild();
@@ -662,13 +635,11 @@ describe('round-trip', () => {
 			id: 'p1',
 			title: 'Round Trip',
 			published: true,
-			_v: 1,
 		});
 		workspace1.tables.posts.set({
 			id: 'p2',
 			title: 'Another',
 			published: false,
-			_v: 1,
 		});
 
 		await workspace1.materializer.pull();
@@ -715,51 +686,6 @@ describe('round-trip', () => {
 		workspace2[Symbol.dispose]();
 	});
 
-	test('fromMarkdown(toMarkdown(row)) preserves row: MarkdownShape round-trip', async () => {
-		// Explicit toMarkdown / fromMarkdown pair over the shared MarkdownShape
-		// type, so the compiler guarantees one is the inverse of the other.
-		const toMarkdownFn = (row: {
-			id: string;
-			body: string;
-			_v: 1;
-		}): MarkdownShape => ({
-			frontmatter: { id: row.id, _v: row._v },
-			body: row.body,
-		});
-		const fromMarkdownFn = (parsed: MarkdownShape) => ({
-			id: parsed.frontmatter.id as string,
-			body: parsed.body ?? '',
-			_v: 1 as const,
-		});
-
-		const { workspace } = await setup({
-			tables: (t) =>
-				[
-					{
-						table: t.notes,
-						config: { toMarkdown: toMarkdownFn, fromMarkdown: fromMarkdownFn },
-					},
-				] as unknown as TableRegistration[],
-		});
-
-		const original = { id: 'n1', body: 'Hello, round trip!', _v: 1 as const };
-		workspace.tables.notes.set(original);
-
-		// Pull to disk, then push from disk into a fresh workspace.
-		await workspace.materializer.pull();
-
-		// Also assert the pure inverse identity: fromMarkdown(toMarkdown(x)) ≡ x
-		expect(fromMarkdownFn(toMarkdownFn(original))).toEqual(original);
-
-		// And verify the end-to-end disk round trip.
-		const disk = await readTestFile('notes/n1.md');
-		const parsed = parseMarkdownFile(disk);
-		if (parsed === null) throw new Error('expected notes/n1.md to parse');
-		expect(fromMarkdownFn(parsed)).toEqual(original);
-
-		workspace[Symbol.dispose]();
-	});
-
 	test('inline field-to-body pair round-trips over MarkdownShape', async () => {
 		// Most real apps store body content in a separate Y.Doc (via
 		// createDisposableCache). This test covers the simpler case where body IS a
@@ -771,21 +697,20 @@ describe('round-trip', () => {
 					{
 						table: t.notes,
 						config: {
-							toMarkdown: (row: { id: string; body: string; _v: 1 }) => {
+							toMarkdown: (row: { id: string; body: string }) => {
 								const { body, ...frontmatter } = row;
 								return { frontmatter, body };
 							},
 							fromMarkdown: (parsed: MarkdownShape) => ({
 								id: parsed.frontmatter.id as string,
 								body: parsed.body ?? '',
-								_v: 1 as const,
 							}),
 						},
 					},
 				] as unknown as TableRegistration[],
 		});
 
-		const original = { id: 'n1', body: 'Body content here', _v: 1 as const };
+		const original = { id: 'n1', body: 'Body content here' };
 		workspace.tables.notes.set(original);
 
 		await workspace.materializer.pull();

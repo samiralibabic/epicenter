@@ -79,7 +79,6 @@ describe('YKV vs Y.Map: size and tombstones', () => {
 				tags: ['research', 'important', 'draft', 'long-form'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1 as const,
 			};
 		}
 
@@ -190,7 +189,6 @@ describe('YKV vs Y.Map: size and tombstones', () => {
 				tags: ['tag1', 'tag2'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1 as const,
 			};
 		}
 

@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 import {
 	type DaemonMetadata,
@@ -11,22 +9,26 @@ import {
 } from './metadata';
 import { metadataPathFor } from './paths';
 
-let originalXdg: string | undefined;
+let originalRuntimeDir: string | undefined;
 let runtimeRoot: string;
 let workDir: string;
 
 beforeEach(() => {
-	originalXdg = process.env.XDG_RUNTIME_DIR;
-	runtimeRoot = mkdtempSync(join(tmpdir(), 'epicenter-meta-test-'));
-	process.env.XDG_RUNTIME_DIR = runtimeRoot;
-	mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
+	originalRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
+	// `/tmp/...` is short on every POSIX platform; needed because
+	// socketPathFor enforces a strict path-length guard that macOS's
+	// `os.tmpdir()` would blow.
+	runtimeRoot = mkdtempSync('/tmp/eps-meta-');
+	process.env.EPICENTER_RUNTIME_DIR = runtimeRoot;
+	mkdirSync(runtimeRoot, { recursive: true });
 
-	workDir = mkdtempSync(join(tmpdir(), 'epicenter-meta-dir-'));
+	workDir = mkdtempSync('/tmp/eps-meta-dir-');
 });
 
 afterEach(() => {
-	if (originalXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
-	else process.env.XDG_RUNTIME_DIR = originalXdg;
+	if (originalRuntimeDir === undefined)
+		delete process.env.EPICENTER_RUNTIME_DIR;
+	else process.env.EPICENTER_RUNTIME_DIR = originalRuntimeDir;
 	rmSync(runtimeRoot, { recursive: true, force: true });
 	rmSync(workDir, { recursive: true, force: true });
 });

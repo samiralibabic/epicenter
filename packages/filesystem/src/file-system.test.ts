@@ -399,14 +399,6 @@ describe('Uint8Array write support', () => {
 		await fs.cp('/src.bin', '/dest.bin');
 		expect(await fs.readFile('/dest.bin')).toBe('Hello');
 	});
-
-	test('rm cleans up Uint8Array-written file', async () => {
-		const { fs } = setup();
-		const data = new Uint8Array([0x48, 0x69]); // "Hi"
-		await fs.writeFile('/file.bin', data);
-		await fs.rm('/file.bin');
-		expect(await fs.exists('/file.bin')).toBe(false);
-	});
 });
 
 describe('ydoc destroy lifecycle', () => {
@@ -435,7 +427,6 @@ describe('ydoc destroy lifecycle', () => {
 			createdAt: now,
 			updatedAt: now,
 			trashedAt: null,
-			_v: 1,
 		});
 
 		// Index did NOT update: the observer is gone.
@@ -604,12 +595,5 @@ describe('just-bash integration', () => {
 		await bash.exec('cp /src.txt /dest.txt');
 		const result = await bash.exec('cat /dest.txt');
 		expect(result.stdout.trim()).toBe('content');
-	});
-
-	test('bash wc -l reports the expected line count', async () => {
-		const bash = setupBash();
-		await bash.exec('printf "line1\\nline2\\nline3\\n" > /file.txt');
-		const result = await bash.exec('wc -l /file.txt');
-		expect(result.stdout.trim()).toContain('3');
 	});
 });

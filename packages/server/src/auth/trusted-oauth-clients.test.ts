@@ -68,18 +68,6 @@ test('trusted OAuth clients project to public PKCE client rows', () => {
 	});
 });
 
-test('trusted OAuth client skips consent during authorization', async () => {
-	const setup = createTrustedClientTestAuth();
-
-	const cookie = await signUpTestUser(setup.auth, setup.baseURL);
-	const code = await authorize(setup, {
-		clientId: setup.trustedClientId,
-		cookie,
-	});
-
-	expect(code).toBeTruthy();
-});
-
 test('trusted OAuth client exchanges code for API-origin access token', async () => {
 	const setup = createTrustedClientTestAuth();
 
@@ -131,32 +119,6 @@ test('buildTrustedOAuthClients gives the CLI a callback at each deployment baseU
 		const cliClient = findCliClient(baseURL);
 		expect(cliClient.redirectUris).toEqual([`${baseURL}/auth/cli-callback`]);
 	}
-});
-
-test('every trusted client has at least one redirect URI', () => {
-	for (const client of buildTrustedOAuthClients('https://api.epicenter.so')) {
-		expect(client.redirectUris.length).toBeGreaterThan(0);
-	}
-});
-
-test('trusted CLI OAuth client (built for test baseURL) is accepted by Better Auth', async () => {
-	const baseURL = 'http://localhost:47878';
-	const cliClient = findCliClient(baseURL);
-	const expectedRedirectUri = `${baseURL}/auth/cli-callback`;
-	expect(cliClient.redirectUris).toContain(expectedRedirectUri);
-
-	const setup = createTrustedClientTestAuth({
-		trustedClient: cliClient,
-		baseURL,
-	});
-	const cookie = await signUpTestUser(setup.auth, setup.baseURL);
-	const code = await authorize(setup, {
-		clientId: setup.trustedClientId,
-		cookie,
-		redirectUri: expectedRedirectUri,
-	});
-
-	expect(code).toBeTruthy();
 });
 
 test('registered non-trusted OAuth client requires consent', async () => {

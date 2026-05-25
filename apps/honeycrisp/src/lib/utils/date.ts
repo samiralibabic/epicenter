@@ -1,4 +1,3 @@
-import { DateTimeString } from '@epicenter/workspace';
 import { differenceInDays, format, isToday, isYesterday } from 'date-fns';
 
 /**
@@ -16,7 +15,7 @@ import { differenceInDays, format, isToday, isYesterday } from 'date-fns';
  * ```
  */
 export function getDateLabel(dts: string): string {
-	const date = DateTimeString.toDate(dts);
+	const date = new Date(dts);
 	if (isToday(date)) return 'Today';
 	if (isYesterday(date)) return 'Yesterday';
 	const daysAgo = differenceInDays(new Date(), date);

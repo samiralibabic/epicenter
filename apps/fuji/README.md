@@ -26,7 +26,7 @@ Fuji's root workspace is built once per signed-in session by `createSession`. `o
 ```ts
 import { openFujiBrowser } from '$lib/browser';
 import { createSession } from '@epicenter/svelte';
-import { createInstallationId } from '@epicenter/workspace';
+import { createDeviceId } from '@epicenter/workspace';
 import { auth } from '$lib/auth';
 
 export const session = createSession({
@@ -34,7 +34,7 @@ export const session = createSession({
   build: (signedIn) =>
     openFujiBrowser({
       signedIn,
-      installationId: createInstallationId({ storage: localStorage }),
+      deviceId: createDeviceId({ storage: localStorage }),
     }),
 });
 ```
@@ -44,10 +44,10 @@ Inside `openFujiBrowser`, the composition is fully visible top-to-bottom:
 ```ts
 export function openFujiBrowser({
   signedIn,
-  installationId,
+  deviceId,
 }: {
   signedIn: SignedIn;
-  installationId: string;
+  deviceId: string;
 }) {
   const ydoc = new Y.Doc({ guid: FUJI_ID, gc: true });
   const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
@@ -65,7 +65,7 @@ export function openFujiBrowser({
       baseURL: signedIn.auth.baseURL,
       owner: signedIn.owner,
       guid: ydoc.guid,
-      installationId,
+      deviceId,
     }),
     openWebSocket: signedIn.auth.openWebSocket,
     onReconnectSignal: signedIn.auth.onStateChange,

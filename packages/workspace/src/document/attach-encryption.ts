@@ -8,7 +8,7 @@
  * register encrypted resources:
  *
  * ```ts
- * const encryption = attachEncryption(ydoc, { keyring: () => subjectKeyring });
+ * const encryption = attachEncryption(ydoc, { keyring: () => ownerKeyring });
  * const tables = encryption.attachTables(defs);
  * const kv = encryption.attachKv(defs);
  * ```
@@ -25,18 +25,19 @@
  * on the attachment: each attach call is its own derivation, which keeps
  * state out of this layer entirely.
  *
- * Same-subject identity updates (key rotation, profile edits) do not flow
+ * Same-owner identity updates (key rotation, profile edits) do not flow
  * through this attachment. Authenticated apps reload the page on
- * different-subject transitions; same-subject updates are observed lazily
+ * different-owner transitions; same-owner updates are observed lazily
  * via the `keyring` callback the next time it runs.
  *
  * ## Local persistence concerns live elsewhere
  *
  * Encrypted IndexedDB persistence and owner-scoped BroadcastChannel are
- * subject-scoped (one signed-in user) rather than ydoc-scoped, so they live
- * on `attachLocalStorage(ydoc, { subject, keyring })`. Local-data wipe lives
- * on `wipeLocalStorage({ subject })`. Both are free functions in this
- * package; callers compose them around `attachEncryption` at use sites.
+ * owner-scoped (one `(server, ownerId)` pair) rather than ydoc-scoped, so they
+ * live on `attachLocalStorage(ydoc, { server, ownerId, keyring })`. Local-data
+ * wipe lives on `wipeLocalStorage({ server, ownerId })`. Both are free
+ * functions in this package; callers compose them around `attachEncryption`
+ * at use sites.
  *
  * ## Disposal
  *
@@ -47,7 +48,7 @@
  *
  * ## What this attachment does NOT do
  *
- * - It does not wipe local storage. `wipeLocalStorage({ subject })` owns that.
+ * - It does not wipe local storage. `wipeLocalStorage({ server, ownerId })` owns that.
  * - It does not validate that every encryption-capable slot on the Y.Doc got
  *   registered. The caller owns the composition: if you pair a plaintext
  *   `attachTable` with `encryption.attachTable` targeting the *same slot
@@ -67,7 +68,7 @@
  * @module
  */
 
-import type { SubjectKeyring } from '@epicenter/encryption';
+import type { Keyring } from '@epicenter/encryption';
 import type * as Y from 'yjs';
 import {
 	createEncryptedYkvLww,
@@ -90,13 +91,13 @@ import { KV_KEY, TableKey } from './keys.js';
 
 export type AttachEncryptionOptions = {
 	/**
-	 * Lazy reader for the current subject keyring.
+	 * Lazy reader for the current owner keyring.
 	 *
 	 * Called synchronously at every `attachTable` / `attachKv` site. Throw if
 	 * no keyring is available (e.g. signed-out): a throw here means the
 	 * workspace outlived its signed-in scope, which is a caller bug.
 	 */
-	keyring: () => SubjectKeyring;
+	keyring: () => Keyring;
 };
 
 export type EncryptionAttachment = {

@@ -1,4 +1,4 @@
-import type { FileId, FileRow } from '@epicenter/filesystem';
+import { asFileId, type FileId, type FileRow } from '@epicenter/filesystem';
 import { fromTable } from '@epicenter/svelte';
 import { toast } from '@epicenter/ui/sonner';
 import { SvelteSet } from 'svelte/reactivity';
@@ -70,7 +70,7 @@ export function createFilesState({ binding }: { binding: OpensidianBrowser }) {
 		for (const [id, row] of filesMap) {
 			if (row.trashedAt !== null) continue;
 			const siblings = map.get(row.parentId) ?? [];
-			siblings.push(id as FileId);
+			siblings.push(asFileId(id));
 			map.set(row.parentId, siblings);
 		}
 		return map;

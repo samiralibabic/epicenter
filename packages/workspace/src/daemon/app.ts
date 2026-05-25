@@ -46,17 +46,17 @@ export const RunRequest = type({
 export type RunRequest = typeof RunRequest.infer;
 
 /**
- * Row shape returned by `/peers`. One row per `(route, installationId)` pair,
+ * Row shape returned by `/peers`. One row per `(route, deviceId)` pair,
  * tagged with its route name so a multi-route daemon can fan out.
  *
- * `installationId` is the install-stable, client-claimed identity and the
+ * `deviceId` is the install-stable, client-claimed identity and the
  * address used by `collab.dispatch({ to })`. There is no per-socket
  * `connectionId` or server-stamped identity on the wire. The relay routes by
- * `installationId` inside the already authorized sync room.
+ * `deviceId` inside the already authorized sync room.
  */
 export const PeerSnapshot = type({
 	route: 'string',
-	installationId: 'string',
+	deviceId: 'string',
 });
 export type PeerSnapshot = typeof PeerSnapshot.infer;
 
@@ -77,7 +77,7 @@ export function buildDaemonApp(routes: readonly DaemonServedRoute[]) {
 				for (const device of entry.runtime.collaboration.devices.list()) {
 					rows.push({
 						route: entry.route,
-						installationId: device.installationId,
+						deviceId: device.deviceId,
 					});
 				}
 			}

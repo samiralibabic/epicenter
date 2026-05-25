@@ -59,18 +59,18 @@ function buildSession(
 		build: (signedIn) => {
 			const tabManager = openTabManagerBrowser({
 				signedIn,
-				installationId: profile.installationId,
+				deviceId: profile.deviceId,
 			});
 
 			const collaboration = openCollaboration(tabManager.ydoc, {
 				url: roomWsUrl({
-					baseURL: signedIn.auth.baseURL,
-					owner: signedIn.owner,
+					baseURL: signedIn.baseURL,
+					ownerId: signedIn.ownerId,
 					guid: tabManager.ydoc.guid,
-					installationId: profile.installationId,
+					deviceId: profile.deviceId,
 				}),
-				openWebSocket: signedIn.auth.openWebSocket,
-				onReconnectSignal: signedIn.auth.onStateChange,
+				openWebSocket: signedIn.openWebSocket,
+				onReconnectSignal: signedIn.onReconnectSignal,
 				waitFor: tabManager.idb.whenLoaded,
 				actions: tabManager.actions,
 			});

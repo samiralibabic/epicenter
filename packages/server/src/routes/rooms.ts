@@ -1,31 +1,61 @@
 /**
  * Rooms sub-app: one Cloudflare Durable Object per named Y.Doc.
  *
- * Personal mode URL shape: `/users/:userId/rooms/:roomId` (with the
- * safety middleware enforcing `:userId === c.var.user.id`).
- * Team mode URL shape:     `/rooms/:roomId`.
+ * URL shape (uniform across modes): `/api/owners/:ownerId/rooms/:roomId`.
+ * The deployment mounts auth and `requireOwnership` upstream;
+ * `requireOwnership` resolves the partition from `(mode, user.id)`,
+ * rejects URL `:ownerId` mismatches at the boundary, and populates
+ * `c.var.ownerId` before this handler runs.
  *
  * The Durable Object name is the owner-partitioned identifier produced by
  * {@link doName}; nothing here interpolates strings inline. The DO itself
  * is owner-blind: every connection is identified by the
- * `(userId, installationId)` pair stamped onto its WebSocket attachment.
+ * `(userId, deviceId)` pair stamped onto its WebSocket attachment.
  *
  * Each HTTP/WS access pushes a fire-and-forget upsert into
  * `c.var.afterResponse` so the platform-level `durableObjectInstance`
- * table tracks who accessed which DO, and when. The userId column
- * captures the actor regardless of mode (provenance), not the data owner.
+ * table tracks which owner's DO was touched and when. The row is keyed by
+ * `do_name` and partitioned by `owner_id`; account-delete cleanup matches
+ * `owner_id` (see auth `before(delete)` hook).
  */
 
+import { API_ROUTES } from '@epicenter/constants/api-routes';
+import type { OwnerId } from '@epicenter/constants/identity';
+import { RequestGuardError } from '@epicenter/constants/request-guard-errors';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Hono } from 'hono';
 import { describeRoute } from 'hono-openapi';
+import { defineErrors } from 'wellcrafted/error';
+import { createLogger } from 'wellcrafted/logger';
 import { MAX_PAYLOAD_BYTES } from '../constants.js';
 import * as schema from '../db/schema/index.js';
 import { isWebSocketUpgrade } from '../is-websocket-upgrade.js';
-import { doName, type Owner } from '../owner.js';
-import type { Env, ServerOptions } from '../types.js';
+import { requireBearerUser } from '../middleware/require-auth.js';
+import { createRequireOwnership } from '../middleware/require-ownership.js';
+import { doName } from '../owner.js';
+import type { OwnershipRule } from '../ownership.js';
+import type { Env } from '../types.js';
 
 type Db = NodePgDatabase<typeof schema>;
+
+const log = createLogger('server/rooms');
+
+const RoomsTelemetryError = defineErrors({
+	DoInstanceUpsertFailed: ({
+		cause,
+		ownerId,
+		doName,
+	}: {
+		cause: unknown;
+		ownerId: OwnerId;
+		doName: string;
+	}) => ({
+		message: 'durableObjectInstance telemetry upsert failed; row dropped',
+		cause,
+		ownerId,
+		doName,
+	}),
+});
 
 /**
  * Wrap a Uint8Array in a Response with a fresh ArrayBuffer copy. Yjs
@@ -41,86 +71,92 @@ function binaryResponse(data: Uint8Array): Response {
 }
 
 /**
- * Fire-and-forget upsert into the platform DO instance table. Records
- * that the actor accessed the DO and, when available, the post-access
+ * Fire-and-forget upsert into the platform DO instance table. Records that
+ * the owner partition touched the DO and, when available, the post-access
  * storage size. Errors are logged and dropped: this is telemetry, not
- * billing authority.
+ * billing authority. The failure is observable via the `server/rooms`
+ * logger so silent telemetry loss surfaces in deployment logs.
  */
-function upsertDoInstance(
+async function upsertDoInstance(
 	db: Db,
 	params: {
-		userId: string;
+		ownerId: OwnerId;
 		resourceName: string;
 		doName: string;
 		storageBytes?: number;
 	},
-) {
+): Promise<void> {
 	const now = new Date();
-	return db
-		.insert(schema.durableObjectInstance)
-		.values({
-			userId: params.userId,
-			resourceName: params.resourceName,
-			doName: params.doName,
-			storageBytes: params.storageBytes ?? null,
-			lastAccessedAt: now,
-			storageMeasuredAt: params.storageBytes != null ? now : null,
-		})
-		.onConflictDoUpdate({
-			target: schema.durableObjectInstance.doName,
-			set: {
+	try {
+		await db
+			.insert(schema.durableObjectInstance)
+			.values({
+				ownerId: params.ownerId,
+				resourceName: params.resourceName,
+				doName: params.doName,
+				storageBytes: params.storageBytes ?? null,
 				lastAccessedAt: now,
-				...(params.storageBytes != null && {
-					storageBytes: params.storageBytes,
-					storageMeasuredAt: now,
-				}),
-			},
-		})
-		.catch(() => undefined);
+				storageMeasuredAt: params.storageBytes != null ? now : null,
+			})
+			.onConflictDoUpdate({
+				target: schema.durableObjectInstance.doName,
+				set: {
+					lastAccessedAt: now,
+					...(params.storageBytes != null && {
+						storageBytes: params.storageBytes,
+						storageMeasuredAt: now,
+					}),
+				},
+			});
+	} catch (cause) {
+		log.warn(
+			RoomsTelemetryError.DoInstanceUpsertFailed({
+				cause,
+				ownerId: params.ownerId,
+				doName: params.doName,
+			}),
+		);
+	}
 }
 
 /**
- * Build the rooms sub-app for the given deployment mode. The URL pattern
- * is the only thing that differs across modes; the handler body uses
- * `doName(owner, roomId)` so backend identifiers stay uniform.
+ * Rooms sub-app. URL shape is uniform across modes; the resolved owner
+ * partition arrives on `c.var.ownerId` via the deployment-mounted
+ * `requireOwnership` middleware, so handlers stay mode-blind.
  */
-export function createRoomsApp(opts: ServerOptions): Hono<Env> {
-	const app = new Hono<Env>();
-
-	const isPersonal = opts.ownerKind === 'personal';
-	const pattern = isPersonal
-		? '/users/:userId/rooms/:roomId{[a-z0-9]{15}}'
-		: '/rooms/:roomId{[a-z0-9]{15}}';
-
-	// Authentication is layered on by the deployment (cloud uses bearer-only;
-	// future deployments may differ). Personal mode also expects the
-	// `requireUrlUserIdMatchesAuth` middleware to gate `:userId` against the
-	// resolved session.
-
-	app.get(
-		pattern,
+const roomsApp = new Hono<Env>()
+	.get(
+		API_ROUTES.room.pattern,
 		describeRoute({
 			description: 'Get room doc or upgrade to WebSocket',
 			tags: ['rooms'],
 		}),
 		async (c) => {
-			const roomId = c.req.param('roomId')!;
-			const owner: Owner = isPersonal
-				? { kind: 'personal', userId: c.var.user.id }
-				: { kind: 'team' };
-			const name = doName(owner, roomId);
+			const roomId = c.req.param('roomId');
+			const name = doName(c.var.ownerId, roomId);
 			const room = c.var.rooms.get(name);
 
 			if (isWebSocketUpgrade(c)) {
-				// Stamp userId from auth onto the URL so the DO can attach it
-				// to the connection without trusting client-supplied data.
+				// Validate deviceId presence at the route boundary so the DO
+				// can trust the URL has it. deviceId is the dispatch address
+				// `dispatch({ to })` resolves against; a missing one would
+				// produce a presence-ghost connection (visible in presence
+				// frames but unreachable by dispatch).
+				if (!c.req.query('deviceId')) {
+					const err = RequestGuardError.MissingDeviceId();
+					return c.json(err, err.error.status);
+				}
+
+				// Stamp userId from auth, overwriting any client-supplied
+				// value for safety. deviceId is the client's own identifier
+				// so it rides through unchanged from c.req.url.
 				const url = new URL(c.req.url);
 				url.searchParams.set('userId', c.var.user.id);
 				const stamped = new Request(url.toString(), c.req.raw);
 
 				c.var.afterResponse.push(
 					upsertDoInstance(c.var.db, {
-						userId: c.var.user.id,
+						ownerId: c.var.ownerId,
 						resourceName: roomId,
 						doName: name,
 					}),
@@ -131,7 +167,7 @@ export function createRoomsApp(opts: ServerOptions): Hono<Env> {
 			const { data, storageBytes } = await room.getDoc();
 			c.var.afterResponse.push(
 				upsertDoInstance(c.var.db, {
-					userId: c.var.user.id,
+					ownerId: c.var.ownerId,
 					resourceName: roomId,
 					doName: name,
 					storageBytes,
@@ -139,20 +175,16 @@ export function createRoomsApp(opts: ServerOptions): Hono<Env> {
 			);
 			return binaryResponse(data);
 		},
-	);
-
-	app.post(
-		pattern,
+	)
+	.post(
+		API_ROUTES.room.pattern,
 		describeRoute({
 			description: 'Sync room doc',
 			tags: ['rooms'],
 		}),
 		async (c) => {
-			const roomId = c.req.param('roomId')!;
-			const owner: Owner = isPersonal
-				? { kind: 'personal', userId: c.var.user.id }
-				: { kind: 'team' };
-			const name = doName(owner, roomId);
+			const roomId = c.req.param('roomId');
+			const name = doName(c.var.ownerId, roomId);
 
 			const body = new Uint8Array(await c.req.raw.arrayBuffer());
 			if (body.byteLength > MAX_PAYLOAD_BYTES) {
@@ -168,7 +200,7 @@ export function createRoomsApp(opts: ServerOptions): Hono<Env> {
 
 			c.var.afterResponse.push(
 				upsertDoInstance(c.var.db, {
-					userId: c.var.user.id,
+					ownerId: c.var.ownerId,
 					resourceName: roomId,
 					doName: name,
 					storageBytes,
@@ -179,5 +211,21 @@ export function createRoomsApp(opts: ServerOptions): Hono<Env> {
 		},
 	);
 
-	return app;
+/**
+ * Mount the rooms surface on a deployment's server app.
+ *
+ * Bundles auth (bearer-only: rooms is for external clients, never
+ * browsers), the ownership boundary, and the route mount into one call.
+ * Deployments call this once; they do not assemble the chain manually.
+ */
+export function mountRoomsApp(
+	app: Hono<Env>,
+	opts: { ownership: OwnershipRule },
+): void {
+	app.use(
+		API_ROUTES.room.prefixPattern,
+		requireBearerUser,
+		createRequireOwnership(opts.ownership),
+	);
+	app.route('/', roomsApp);
 }

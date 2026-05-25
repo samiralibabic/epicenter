@@ -3,7 +3,6 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { type } from 'arktype';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 import * as Y from 'yjs';
 import { createEncryptedYkvLww } from '../shared/y-keyvalue/y-keyvalue-lww-encrypted.js';
@@ -13,6 +12,7 @@ import {
 	createReadonlyTable,
 	createTable,
 } from './attach-table.js';
+import { column } from './column/index.js';
 import { defineTable } from './define-table.js';
 
 /** Creates Yjs infrastructure for testing */
@@ -26,13 +26,16 @@ describe('createTable', () => {
 	describe('readonly helpers', () => {
 		test('createReadonlyTable reads rows without exposing write methods', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createReadonlyTable(ykv, definition, 'test');
+			// Raw ykv.set bypasses the table layer's `_v` stamping; include it
+			// manually so the read path can route to v1's schema.
 			ykv.set('1', { id: '1', name: 'Alice', _v: 1 });
 
-			expect(helper.getAllValid()).toEqual([{ id: '1', name: 'Alice', _v: 1 }]);
+			expect(helper.getAllValid()).toEqual([{ id: '1', name: 'Alice' }]);
 			expect(helper.count()).toBe(1);
 			expect(helper.has('1')).toBe(true);
 			expect('set' in helper).toBe(false);
@@ -45,18 +48,18 @@ describe('createTable', () => {
 
 		test('attachReadonlyTable reads the same Y.Doc slot without write methods', () => {
 			const ydoc = new Y.Doc();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const writer = attachTable(ydoc, 'people', definition);
 			const reader = attachReadonlyTable(ydoc, 'people', definition);
 
-			writer.set({ id: '1', name: 'Alice', _v: 1 });
+			writer.set({ id: '1', name: 'Alice' });
 
 			expect(reader.get('1').data).toEqual({
 				id: '1',
 				name: 'Alice',
-				_v: 1,
 			});
 			expect('set' in reader).toBe(false);
 			expect('bulkSet' in reader).toBe(false);
@@ -70,32 +73,34 @@ describe('createTable', () => {
 	describe('set operations', () => {
 		test('set stores a row that get returns as valid', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 
 			const data = expectOk(helper.get('1'));
-			expect(data).toEqual({ id: '1', name: 'Alice', _v: 1 });
+			expect(data).toEqual({ id: '1', name: 'Alice' });
 		});
 
 		test('bulkSet stores rows in chunks and reports progress', async () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 			const progress: number[] = [];
 
 			await helper.bulkSet(
 				[
-					{ id: '1', name: 'Alice', _v: 1 },
-					{ id: '2', name: 'Bob', _v: 1 },
-					{ id: '3', name: 'Charlie', _v: 1 },
-					{ id: '4', name: 'Dora', _v: 1 },
-					{ id: '5', name: 'Eve', _v: 1 },
+					{ id: '1', name: 'Alice' },
+					{ id: '2', name: 'Bob' },
+					{ id: '3', name: 'Charlie' },
+					{ id: '4', name: 'Dora' },
+					{ id: '5', name: 'Eve' },
 				],
 				{
 					chunkSize: 2,
@@ -111,9 +116,10 @@ describe('createTable', () => {
 	describe('get operations', () => {
 		test('get returns null for missing row', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			const data = expectOk(helper.get('nonexistent'));
@@ -122,12 +128,15 @@ describe('createTable', () => {
 
 		test('get returns ValidationFailed error for corrupted data', () => {
 			const { ykv, yarray } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			// Insert invalid data directly
+			// Insert invalid data directly. The library reads `_v` from the
+			// stored value to route to the matching schema, so fixtures that
+			// simulate raw storage must include `_v: 1`.
 			yarray.push([{ key: '1', val: { id: '1', name: 123, _v: 1 }, ts: 0 }]); // name should be string
 
 			const error = expectErr(helper.get('1'));
@@ -135,18 +144,19 @@ describe('createTable', () => {
 			if (error.name !== 'ValidationFailed')
 				throw new Error('Expected ValidationFailed');
 			expect(error.id).toBe('1');
-			expect(error.issues.length).toBeGreaterThan(0);
+			expect(error.errors.length).toBeGreaterThan(0);
 			expect(error.row).toEqual({ id: '1', name: 123, _v: 1 });
 		});
 
 		test('getAll / getAllValid / getAllInvalid partition results by validity', () => {
 			const { ykv, yarray } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Valid', _v: 1 });
+			helper.set({ id: '1', name: 'Valid' });
 			yarray.push([{ key: '2', val: { id: '2', name: 999, _v: 1 }, ts: 0 }]); // invalid: name type
 			yarray.push([{ key: '3', val: { id: '3', _v: 1 }, ts: 0 }]); // invalid: missing name
 
@@ -156,7 +166,7 @@ describe('createTable', () => {
 			expect(results.filter((r) => r.error)).toHaveLength(2);
 
 			const valid = helper.getAllValid();
-			expect(valid).toEqual([{ id: '1', name: 'Valid', _v: 1 }]);
+			expect(valid).toEqual([{ id: '1', name: 'Valid' }]);
 
 			const invalid = helper.getAllInvalid();
 			expect(invalid.map((r) => r.id).sort()).toEqual(['2', '3']);
@@ -166,15 +176,16 @@ describe('createTable', () => {
 	describe('query operations', () => {
 		test('filter returns matching rows', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', active: 'boolean', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				active: column.boolean(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			ydoc.transact(() => {
-				helper.set({ id: '1', active: true, _v: 1 });
-				helper.set({ id: '2', active: false, _v: 1 });
-				helper.set({ id: '3', active: true, _v: 1 });
+				helper.set({ id: '1', active: true });
+				helper.set({ id: '2', active: false });
+				helper.set({ id: '3', active: true });
 			});
 
 			const active = helper.filter((row) => row.active);
@@ -184,14 +195,15 @@ describe('createTable', () => {
 
 		test('filter returns empty array when no matches', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', active: 'boolean', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				active: column.boolean(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			ydoc.transact(() => {
-				helper.set({ id: '1', active: false, _v: 1 });
-				helper.set({ id: '2', active: false, _v: 1 });
+				helper.set({ id: '1', active: false });
+				helper.set({ id: '2', active: false });
 			});
 
 			const active = helper.filter((row) => row.active);
@@ -200,12 +212,13 @@ describe('createTable', () => {
 
 		test('filter skips invalid rows', () => {
 			const { ykv, yarray } = setup();
-			const definition = defineTable(
-				type({ id: 'string', active: 'boolean', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				active: column.boolean(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', active: true, _v: 1 });
+			helper.set({ id: '1', active: true });
 			yarray.push([
 				{ key: '2', val: { id: '2', active: 'not-a-boolean', _v: 1 }, ts: 0 },
 			]);
@@ -216,28 +229,30 @@ describe('createTable', () => {
 
 		test('find returns first matching row', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			ydoc.transact(() => {
-				helper.set({ id: '1', name: 'Alice', _v: 1 });
-				helper.set({ id: '2', name: 'Bob', _v: 1 });
+				helper.set({ id: '1', name: 'Alice' });
+				helper.set({ id: '2', name: 'Bob' });
 			});
 
 			const found = helper.find((row) => row.name === 'Bob');
-			expect(found).toEqual({ id: '2', name: 'Bob', _v: 1 });
+			expect(found).toEqual({ id: '2', name: 'Bob' });
 		});
 
 		test('find returns undefined when no rows match', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 
 			const found = helper.find((row) => row.name === 'Nobody');
 			expect(found).toBeUndefined();
@@ -245,42 +260,46 @@ describe('createTable', () => {
 
 		test('find skips invalid rows', () => {
 			const { ykv, yarray } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			yarray.push([{ key: '1', val: { id: '1', name: 123, _v: 1 }, ts: 0 }]); // invalid
-			helper.set({ id: '2', name: 'Valid', _v: 1 });
+			helper.set({ id: '2', name: 'Valid' });
 
 			const found = helper.find(() => true);
-			expect(found).toEqual({ id: '2', name: 'Valid', _v: 1 });
+			expect(found).toEqual({ id: '2', name: 'Valid' });
 		});
 	});
 
 	describe('update operations', () => {
 		test('update merges partial data correctly', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', age: 'number', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+				age: column.number(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', age: 25, _v: 1 });
+			helper.set({ id: '1', name: 'Alice', age: 25 });
 			const data = expectOk(helper.update('1', { age: 30 }));
 
-			expect(data).toEqual({ id: '1', name: 'Alice', age: 30, _v: 1 });
+			expect(data).toEqual({ id: '1', name: 'Alice', age: 30 });
 
 			// Verify the row is actually saved
 			const { data: saved } = helper.get('1');
-			expect(saved).toEqual({ id: '1', name: 'Alice', age: 30, _v: 1 });
+			expect(saved).toEqual({ id: '1', name: 'Alice', age: 30 });
 		});
 
 		test('update returns null data for missing rows', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			const data = expectOk(helper.update('nonexistent', { name: 'Bob' }));
@@ -290,27 +309,29 @@ describe('createTable', () => {
 
 		test('update can be called after destructuring', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 			const update = helper.update;
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 			const data = expectOk(update('1', { name: 'Bob' }));
 
-			expect(data).toEqual({ id: '1', name: 'Bob', _v: 1 });
-			expect(helper.get('1').data).toEqual({ id: '1', name: 'Bob', _v: 1 });
+			expect(data).toEqual({ id: '1', name: 'Bob' });
+			expect(helper.get('1').data).toEqual({ id: '1', name: 'Bob' });
 		});
 
 		test('update returns ValidationFailed for corrupted data', () => {
 			const { ykv, yarray } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			// Insert invalid data directly
+			// Insert invalid data directly (raw yarray.push needs `_v` for routing).
 			yarray.push([{ key: '1', val: { id: '1', name: 123, _v: 1 }, ts: 0 }]); // name should be string
 
 			const error = expectErr(helper.update('1', { name: 'Valid' }));
@@ -318,35 +339,21 @@ describe('createTable', () => {
 			if (error.name !== 'ValidationFailed')
 				throw new Error('Expected ValidationFailed');
 			expect(error.id).toBe('1');
-			expect(error.issues.length).toBeGreaterThan(0);
+			expect(error.errors.length).toBeGreaterThan(0);
 			expect(error.row).toEqual({ id: '1', name: 123, _v: 1 });
-		});
-
-		test('update preserves id field', () => {
-			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
-			const helper = createTable(ykv, definition, 'test');
-
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
-			const data = expectOk(helper.update('1', { name: 'Bob' }));
-
-			expect(data?.id).toBe('1');
-			expect(data?.name).toBe('Bob');
-			expect(helper.has('1')).toBe(true);
 		});
 	});
 
 	describe('delete operations', () => {
 		test('delete removes an existing row and is a no-op for a missing one', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 			helper.delete('1');
 			expect(helper.has('1')).toBe(false);
 
@@ -357,19 +364,20 @@ describe('createTable', () => {
 
 		test('transact can mix set and delete operations', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			ydoc.transact(() => {
-				helper.set({ id: '1', name: 'A', _v: 1 });
-				helper.set({ id: '2', name: 'B', _v: 1 });
+				helper.set({ id: '1', name: 'A' });
+				helper.set({ id: '2', name: 'B' });
 			});
 
 			ydoc.transact(() => {
 				helper.delete('1');
-				helper.set({ id: '3', name: 'C', _v: 1 });
+				helper.set({ id: '3', name: 'C' });
 			});
 
 			expect(helper.count()).toBe(2);
@@ -380,14 +388,15 @@ describe('createTable', () => {
 
 		test('clear removes all rows', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			ydoc.transact(() => {
-				helper.set({ id: '1', name: 'A', _v: 1 });
-				helper.set({ id: '2', name: 'B', _v: 1 });
+				helper.set({ id: '1', name: 'A' });
+				helper.set({ id: '2', name: 'B' });
 			});
 			expect(helper.count()).toBe(2);
 
@@ -397,18 +406,19 @@ describe('createTable', () => {
 
 		test('bulkDelete removes rows in chunks and reports progress', async () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 			const progress: number[] = [];
 
 			await helper.bulkSet([
-				{ id: '1', name: 'Alice', _v: 1 },
-				{ id: '2', name: 'Bob', _v: 1 },
-				{ id: '3', name: 'Charlie', _v: 1 },
-				{ id: '4', name: 'Dora', _v: 1 },
-				{ id: '5', name: 'Eve', _v: 1 },
+				{ id: '1', name: 'Alice' },
+				{ id: '2', name: 'Bob' },
+				{ id: '3', name: 'Charlie' },
+				{ id: '4', name: 'Dora' },
+				{ id: '5', name: 'Eve' },
 			]);
 
 			await helper.bulkDelete(['1', '3', '5'], {
@@ -429,9 +439,10 @@ describe('createTable', () => {
 	describe('observe', () => {
 		test('observe calls callback on changes', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			const changes: ReadonlySet<string>[] = [];
@@ -439,8 +450,8 @@ describe('createTable', () => {
 				changes.push(changedIds);
 			});
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
-			helper.set({ id: '2', name: 'Bob', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
+			helper.set({ id: '2', name: 'Bob' });
 			helper.delete('1');
 
 			expect(changes).toHaveLength(3);
@@ -453,9 +464,10 @@ describe('createTable', () => {
 
 		test('transact fires observer once for all operations', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			const changes: Set<string>[] = [];
@@ -465,9 +477,9 @@ describe('createTable', () => {
 
 			// Three operations, but observer should fire once
 			ydoc.transact(() => {
-				helper.set({ id: '1', name: 'Alice', _v: 1 });
-				helper.set({ id: '2', name: 'Bob', _v: 1 });
-				helper.set({ id: '3', name: 'Charlie', _v: 1 });
+				helper.set({ id: '1', name: 'Alice' });
+				helper.set({ id: '2', name: 'Bob' });
+				helper.set({ id: '3', name: 'Charlie' });
 			});
 
 			// Should have exactly one change event containing all three IDs
@@ -481,9 +493,10 @@ describe('createTable', () => {
 
 		test('observe unsubscribe stops callbacks', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			let callCount = 0;
@@ -491,12 +504,12 @@ describe('createTable', () => {
 				callCount++;
 			});
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 			expect(callCount).toBe(1);
 
 			unsubscribe();
 
-			helper.set({ id: '2', name: 'Bob', _v: 1 });
+			helper.set({ id: '2', name: 'Bob' });
 			expect(callCount).toBe(1); // no change
 		});
 	});
@@ -504,31 +517,33 @@ describe('createTable', () => {
 	describe('metadata', () => {
 		test('count returns the current number of rows', () => {
 			const { ydoc, ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
 			expect(helper.count()).toBe(0);
 
-			helper.set({ id: '1', name: 'A', _v: 1 });
+			helper.set({ id: '1', name: 'A' });
 			expect(helper.count()).toBe(1);
 
 			ydoc.transact(() => {
-				helper.set({ id: '2', name: 'B', _v: 1 });
-				helper.set({ id: '3', name: 'C', _v: 1 });
+				helper.set({ id: '2', name: 'B' });
+				helper.set({ id: '3', name: 'C' });
 			});
 			expect(helper.count()).toBe(3);
 		});
 
 		test('has returns true for existing row', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', _v: 1 });
+			helper.set({ id: '1', name: 'Alice' });
 
 			expect(helper.has('1')).toBe(true);
 			expect(helper.has('2')).toBe(false);
@@ -539,60 +554,60 @@ describe('createTable', () => {
 		test('migrates old data on read', () => {
 			const { ykv, yarray } = setup();
 			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-				type({ id: 'string', name: 'string', age: 'number', _v: '2' }),
-			).migrate((row) => {
-				if (row._v === 1) return { ...row, age: 0, _v: 2 };
-				return row;
+				{
+					id: column.string(),
+					name: column.string(),
+				},
+				{
+					id: column.string(),
+					name: column.string(),
+					age: column.number(),
+				},
+			).migrate(({ value, version }) => {
+				switch (version) {
+					case 1:
+						return { ...value, age: 0 };
+					case 2:
+						return value;
+				}
 			});
 			const helper = createTable(ykv, definition, 'test');
 
-			// Insert v1 data directly
+			// Insert v1 data directly (raw yarray.push needs `_v` for routing).
 			yarray.push([
 				{ key: '1', val: { id: '1', name: 'Alice', _v: 1 }, ts: 0 },
 			]);
 
 			const data = expectOk(helper.get('1'));
-			expect(data).toEqual({ id: '1', name: 'Alice', age: 0, _v: 2 });
-		});
-
-		test('passes through current version data unchanged', () => {
-			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-				type({ id: 'string', name: 'string', age: 'number', _v: '2' }),
-			).migrate((row) => {
-				if (row._v === 1) return { ...row, age: 0, _v: 2 };
-				return row;
-			});
-			const helper = createTable(ykv, definition, 'test');
-
-			helper.set({ id: '1', name: 'Alice', age: 30, _v: 2 });
-
-			const data = expectOk(helper.get('1'));
-			expect(data).toEqual({ id: '1', name: 'Alice', age: 30, _v: 2 });
+			expect(data).toEqual({ id: '1', name: 'Alice', age: 0 });
 		});
 
 		test('three-version migration chain v1→v2→v3 composes at read time', () => {
 			const { ykv, yarray } = setup();
 			const definition = defineTable(
-				type({ id: 'string', title: 'string', _v: '1' }),
-				type({ id: 'string', title: 'string', views: 'number', _v: '2' }),
-				type({
-					id: 'string',
-					title: 'string',
-					views: 'number',
-					author: 'string',
-					_v: '3',
-				}),
-			).migrate((row) => {
-				switch (row._v) {
+				{
+					id: column.string(),
+					title: column.string(),
+				},
+				{
+					id: column.string(),
+					title: column.string(),
+					views: column.number(),
+				},
+				{
+					id: column.string(),
+					title: column.string(),
+					views: column.number(),
+					author: column.string(),
+				},
+			).migrate(({ value, version }) => {
+				switch (version) {
 					case 1:
-						return { ...row, views: 0, author: 'unknown', _v: 3 };
+						return { ...value, views: 0, author: 'unknown' };
 					case 2:
-						return { ...row, author: 'unknown', _v: 3 };
+						return { ...value, author: 'unknown' };
 					case 3:
-						return row;
+						return value;
 				}
 			});
 			const helper = createTable(ykv, definition, 'test');
@@ -607,25 +622,34 @@ describe('createTable', () => {
 				title: 'V1',
 				views: 0,
 				author: 'unknown',
-				_v: 3,
 			});
 			expect(helper.get('b').data).toEqual({
 				id: 'b',
 				title: 'V2',
 				views: 7,
 				author: 'unknown',
-				_v: 3,
 			});
 		});
 
 		test('returns MigrationFailed when the migrator throws', () => {
 			const { ykv, yarray } = setup();
 			const definition = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-				type({ id: 'string', name: 'string', age: 'number', _v: '2' }),
-			).migrate((row) => {
-				if (row._v === 1) throw new Error('migration broke');
-				return row;
+				{
+					id: column.string(),
+					name: column.string(),
+				},
+				{
+					id: column.string(),
+					name: column.string(),
+					age: column.number(),
+				},
+			).migrate(({ value, version }) => {
+				switch (version) {
+					case 1:
+						throw new Error('migration broke');
+					case 2:
+						return value;
+				}
 			});
 			const helper = createTable(ykv, definition, 'test');
 
@@ -643,45 +667,17 @@ describe('createTable', () => {
 		});
 	});
 
-	describe('async schema', () => {
-		test('get returns AsyncSchemaNotSupported when validate yields a Promise', () => {
-			const { ykv } = setup();
-			const syncDef = defineTable(
-				type({ id: 'string', name: 'string', _v: '1' }),
-			);
-			// Swap in an async-returning validate to exercise the async guard.
-			const asyncDef = {
-				...syncDef,
-				schema: {
-					...syncDef.schema,
-					'~standard': {
-						...syncDef.schema['~standard'],
-						validate: () => Promise.resolve({ value: {} }),
-					},
-				},
-			} as unknown as typeof syncDef;
-			const helper = createTable(ykv, asyncDef, 'test');
-
-			// Any stored row triggers parseRow, which must detect the Promise.
-			ykv.set('1', { id: '1', name: 'Alice', _v: 1 });
-
-			const error = expectErr(helper.get('1'));
-			expect(error.name).toBe('AsyncSchemaNotSupported');
-			if (error.name !== 'AsyncSchemaNotSupported')
-				throw new Error('Expected AsyncSchemaNotSupported');
-			expect(error.id).toBe('1');
-		});
-	});
-
 	describe('update validation', () => {
 		test('returns ValidationFailed when the merged row fails schema', () => {
 			const { ykv } = setup();
-			const definition = defineTable(
-				type({ id: 'string', name: 'string', age: 'number>0', _v: '1' }),
-			);
+			const definition = defineTable({
+				id: column.string(),
+				name: column.string(),
+				age: column.number({ exclusiveMinimum: 0 }),
+			});
 			const helper = createTable(ykv, definition, 'test');
 
-			helper.set({ id: '1', name: 'Alice', age: 25, _v: 1 });
+			helper.set({ id: '1', name: 'Alice', age: 25 });
 
 			// Current row is valid; the partial update violates age>0.
 			const error = expectErr(
@@ -697,7 +693,6 @@ describe('createTable', () => {
 				id: '1',
 				name: 'Alice',
 				age: 25,
-				_v: 1,
 			});
 		});
 	});

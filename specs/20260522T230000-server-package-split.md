@@ -27,19 +27,20 @@ Client side       packages/auth, packages/workspace, packages/svelte-utils,
                   packages/cli, apps/whispering, apps/dashboard, etc.
 ```
 
-A single shared vocabulary spans all three: `Owner`, `ownerId(owner)`,
-`ownerPath(owner)`, `doName(owner, ...)`. The next nine sections define
-that vocabulary.
+A single shared vocabulary spans all three: `OwnerId`, `TEAM_OWNER_ID`,
+`doName(ownerId, ...)`, and `assetKey(ownerId, ...)`. The next nine
+sections define that vocabulary.
 
 ## 1. The punchline
 
 > Personal mode and team mode are the same product. Personal mode
-> **partitions data by user**. Team mode does not partition at all.
+> **partitions data by user**. Team mode uses one shared owner partition.
 
-The partition is one path segment, `users/<userId>`, that appears in every
-durable identifier the personal product writes. Team mode does not write
-that segment because team mode has nothing to partition. There is no
-`team/` literal anywhere except in the `Owner` discriminator.
+The partition is the `owners/<ownerId>` path segment that appears in every
+durable identifier. Personal deployments resolve `ownerId` to the signed-in
+user's id, giving every user a separate partition. Team deployments resolve
+`ownerId` to `TEAM_OWNER_ID` (the literal string `team`), giving every
+admitted member the same partition.
 
 Everything in this spec follows from that one sentence.
 
@@ -57,160 +58,141 @@ apps/api/          Epicenter Cloud's deployment; thin composition on top of
 Self-hosted team customers write their own `apps/server-team/` entrypoint
 (roughly 15 lines) that imports `@epicenter/server`.
 
-## 3. The Owner concept
+## 3. The OwnerId concept
 
-`Owner` is the **shared vocabulary** across server, cloud, and every
-client. The type definition lives in `@epicenter/auth` (the contract
-package) so clients can import it without taking a dependency on
-`@epicenter/server`. Server-side derivations (`doName`, `assetKey`,
-`keyringLabel`, `assetOwnerFilter`) live in `@epicenter/server` and
-consume the type. The string-form helper `ownerId(owner)` lives next to
-the type in `@epicenter/auth` because both server and client compute it.
+`OwnerId` is the shared partition key across server, cloud, and every
+client. The branded id and `TEAM_OWNER_ID` live in `@epicenter/constants`
+so every package can key local storage, routes, R2 objects, Durable Object
+names, and HKDF labels with the same value.
 
 ```ts
-// packages/auth/src/owner.ts                  (the shared contract)
+// packages/constants/src/identity.ts
 
-export type Owner =
-  | { kind: 'personal'; userId: string }
-  | { kind: 'team' };
+export const OwnerId = type('string').as<string & Brand<'OwnerId'>>();
+export type OwnerId = typeof OwnerId.infer;
+export const asOwnerId = (value: string): OwnerId => value as OwnerId;
 
-export type OwnerKind = Owner['kind'];
-
-/**
- * Stable string identifier for an Owner. Personal owners produce
- * `users/<userId>` (the partition prefix the server writes for DO names,
- * R2 keys, and HKDF labels). Team owners produce the literal `team`.
- *
- * Use this everywhere the client previously read `localIdentity.subject`.
- */
-export function ownerId(owner: Owner): string {
-  return owner.kind === 'personal' ? `users/${owner.userId}` : 'team';
-}
+export const TEAM_OWNER_ID = asOwnerId('team');
 ```
 
 ```ts
-// packages/server/src/owner.ts                (server-only derivations)
+// packages/server/src/owner.ts
 
-import type { Owner } from '@epicenter/auth';
+import type { OwnerId } from '@epicenter/constants/identity';
 
-export type OwnerPath = `users/${string}` | '';
+export type RoomDoName = `owners/${string}/rooms/${string}`;
+export type AssetR2Key = `owners/${string}/assets/${string}`;
 
-export function ownerPath(o: Owner): OwnerPath {
-  return o.kind === 'personal' ? `users/${o.userId}` : '';
+export function doName(ownerId: OwnerId, roomId: string): RoomDoName {
+  return `owners/${ownerId}/rooms/${roomId}`;
 }
 
-function joinPath(...segments: string[]): string {
-  return segments.filter(Boolean).join('/');
-}
-
-export function doName(o: Owner, roomId: string): string {
-  return joinPath(ownerPath(o), 'rooms', roomId);
-}
-
-export function assetKey(o: Owner, assetId: string): string {
-  return joinPath(ownerPath(o), 'assets', assetId);
-}
-
-export function keyringLabel(o: Owner): string {
-  return joinPath(ownerPath(o), 'keyring');
-}
-
-export function assetOwnerFilter(o: Owner) {
-  return o.kind === 'personal' ? eq(asset.userId, o.userId) : undefined;
+export function assetKey(ownerId: OwnerId, assetId: string): AssetR2Key {
+  return `owners/${ownerId}/assets/${assetId}`;
 }
 ```
 
-One function (`ownerPath`) produces the partition segment. Every durable
-string is built by concatenating it with a resource type and an id.
-`joinPath` drops the empty partition segment so team mode strings have no
-leading prefix.
+One value (`ownerId`) produces the partition segment. Every durable string
+is built by concatenating it with `owners/`, a resource type, and an id.
+Team mode keeps the same shape as personal mode; it just resolves
+`ownerId` to the shared `TEAM_OWNER_ID`.
 
 **Why the split between auth and server.** Browser apps, the CLI, and the
 workspace daemon all need to talk about Owners to render team-aware UI,
 key local storage, and decide which signed-in account they are operating
 as. None of them should depend on the Hono server library to do that.
-`Owner` and `ownerId` are pure types and string functions; they belong
-with the auth contract. The derivations that touch DO names, R2 keys,
-and HKDF labels are server-only and stay in `@epicenter/server`.
+`OwnerId` is a pure type and belongs with shared constants. The derivations
+that touch DO names and R2 keys are server-only and stay in
+`@epicenter/server`.
 
 ## 4. Every durable string under one rule
 
 ```
-RULE: `<partition>/<resource type>/<id>`,
-      where <partition> is omitted when there is no partition.
+RULE: `owners/<ownerId>/<resource type>/<id>`
 
-                       personal (userId='abc')     team
-DO name                users/abc/rooms/xyz         rooms/xyz
-R2 object key          users/abc/assets/xyz        assets/xyz
-HKDF info label        users/abc/keyring           keyring
-SQL filter             WHERE userId = 'abc'        no filter
-URL path (under /api)  /api/users/abc/...          /api/...
+                       personal (ownerId='abc')    team
+DO name                owners/abc/rooms/xyz        owners/team/rooms/xyz
+R2 object key          owners/abc/assets/xyz       owners/team/assets/xyz
+HKDF info label        owner:abc                   owner:team
+SQL filter             WHERE owner_id = 'abc'      WHERE owner_id = 'team'
+URL path (under /api)  /api/owners/abc/...         /api/owners/team/...
 ```
 
 The URL path is the durable identifier with an `/api` prefix. Reading the
-URL tells you the partition (or its absence) directly. No magic mapping.
+URL tells you the owner partition directly. No magic mapping.
 
 ## 5. URL shape
 
 ```
                           Personal cloud                       Team
                           --------------------------------     -------------------------
-Rooms snapshot/sync       GET  /api/users/:userId/rooms/:r     GET  /api/rooms/:r
-                          POST /api/users/:userId/rooms/:r     POST /api/rooms/:r
-Rooms WebSocket           WS   /api/users/:userId/rooms/:r     WS   /api/rooms/:r
-                            ?clientId=<id>                       ?clientId=<id>
+Rooms WebSocket           WS   /api/owners/:ownerId/rooms/:r   WS   /api/owners/team/rooms/:r
+                            ?deviceId=<id>                       ?deviceId=<id>
 
-Asset upload              POST /api/users/:userId/assets       POST /api/assets
-Asset list                GET  /api/users/:userId/assets       GET  /api/assets
-Asset usage               GET  /api/users/:userId/assets/usage GET  /api/assets/usage
-Asset delete              DEL  /api/users/:userId/assets/:a    DEL  /api/assets/:a
-Asset PUBLIC read         GET  /api/users/:userId/assets/:a    GET  /api/assets/:a
+Asset upload              POST /api/owners/:ownerId/assets     POST /api/owners/team/assets
+Asset list                GET  /api/owners/:ownerId/assets     GET  /api/owners/team/assets
+Asset usage               GET  /api/owners/:ownerId/assets/usage GET /api/owners/team/assets/usage
+Asset delete              DEL  /api/owners/:ownerId/assets/:a  DEL  /api/owners/team/assets/:a
+Asset PUBLIC read         GET  /api/owners/:ownerId/assets/:a  GET  /api/owners/team/assets/:a
 
 Session                   GET  /api/session                    GET  /api/session
 
-Auth / UI                 /sign-in, /consent, /auth/*, /dashboard  (no /api, no partition)
+Auth / UI                 /sign-in, /consent, /auth/*, /dashboard  (no owner route segment)
 ```
 
-The public asset read carries the userId in the URL in personal mode. The
-userId is not a credential; the URL as a whole is. Anyone who can read the
-URL already had the userId. This is the same capability-URL model as today,
-plus an extra path segment that lets the server skip a DB lookup when
-computing the R2 key.
+The public asset read carries the owner partition in the URL in both modes.
+The ownerId is not a credential; the URL as a whole is. Anyone who can read
+the URL already had the ownerId. This is the same capability-URL model as
+today, plus an explicit path segment that lets the server compute the R2 key
+without a DB lookup.
 
-A safety middleware enforces "URL userId matches authenticated user" on
-all personal-mode authed routes so Bob cannot reach `/api/users/alice/...`.
+A safety middleware enforces "URL ownerId matches the resolved owner
+partition" on authed routes so Bob cannot reach `/api/owners/alice/...`,
+and non-members cannot reach `/api/owners/team/...`.
 
 ## 6. The DO attachment (both modes)
 
 ```ts
-export type ConnectionId = { userId: string; clientId: string };
+export type Connection = {
+  userId: string;
+  deviceId: string;
+  connectedAt: number;
+  actions: ActionManifest;
+};
 ```
 
-Each WebSocket connection carries a `(userId, clientId)` pair. The DO is
+Each WebSocket connection carries a `(userId, deviceId)` pair plus the
+upgrade timestamp and the device's published action manifest. The DO is
 owner-blind; it tracks pairs and broadcasts presence with the `userId` so
 clients can render names. In personal mode every connection to a given DO
 shares the same `userId` (the DO name partitions by user). In team mode
 connections have different `userId` values. Same code path either way.
 
-`clientId` replaces today's `installationId`. A client is "one running
-instance of any app" (browser tab, Tauri app, extension, CLI). The
-lifespan is the client's concern.
+`deviceId` identifies one Epicenter app on one persistent storage scope:
+browser tabs sharing localStorage share an id; separate browsers, the
+extension, Tauri windows, and the CLI daemon each get distinct ids. The
+client generates and persists its own via `createDeviceId({ storage })`
+(from `@epicenter/workspace`); lifespan is the client's concern. The
+canonical brand `DeviceId` lives in `@epicenter/workspace`. We refused
+the name `clientId` because Yjs already ships `clientID` (a number,
+CRDT identifier) and Better Auth uses `clientId` for OAuth client ids;
+"device" matches what `PresenceDevice` and the user-facing presence UI
+already say.
 
 ## 7. /api/session response
 
 ```ts
 {
   user: AuthUser,                   // who is signed in
-  owner: Owner,                     // discriminated union
-  ownerPath: OwnerPath,             // `users/<userId>` or ''
-  keyring: SubjectKeyring,          // crypto material
+  ownerId: OwnerId,                 // partition key
+  keyring: Keyring,                 // crypto material
 }
 ```
 
-Flat top-level shape. `ownerPath` is included so clients can persist local
-state under `${origin}/${ownerPath}/<resource>/<id>` without importing
-helpers from `@epicenter/server`. Two self-hosted team deployments do not
-collide on the client because the client keys by `${origin}` too.
+Flat top-level shape. The wire carries the resolved `ownerId`, not the
+deployment's ownership rule. In personal mode, `ownerId === user.id`. In
+team mode, `ownerId === TEAM_OWNER_ID`. Two self-hosted team deployments do
+not collide on the client because the client keys by `${origin}` too.
 
 The old `localIdentity.subject` field retires.
 
@@ -277,24 +259,24 @@ That string carries two unearned segments and one missing one:
 ### 10.2 The greenfield shape
 
 ```
-epicenter/<server-origin>/<owner-segment>/<ydoc.guid>
+epicenter/<server-origin>/owners/<ownerId>/<ydoc.guid>
 ```
 
-`<owner-segment>` is `users/<userId>` for personal owners and is dropped
-entirely for team owners (the server origin already disambiguates teams
-across deployments).
+`ownerId` is the signed-in user's id for personal owners and `TEAM_OWNER_ID`
+for team deployments. The server origin still disambiguates two team
+deployments on the same browser profile.
 
 Examples:
 
 ```
-Personal Alice on Epicenter Cloud:   epicenter/api.epicenter.so/users/alice/<guid>
-Personal Bob   on Epicenter Cloud:   epicenter/api.epicenter.so/users/bob/<guid>
-Team on Acme self-host:              epicenter/team.acme.com/<guid>
-Team on Beta self-host:              epicenter/team.beta.com/<guid>
+Personal Alice on Epicenter Cloud:   epicenter/api.epicenter.so/owners/alice/<guid>
+Personal Bob   on Epicenter Cloud:   epicenter/api.epicenter.so/owners/bob/<guid>
+Team on Acme self-host:              epicenter/team.acme.com/owners/team/<guid>
+Team on Beta self-host:              epicenter/team.beta.com/owners/team/<guid>
 ```
 
 Y-indexeddb still prepends its own `yjs.` at the IndexedDB layer; the
-live database name becomes `yjs.epicenter/api.epicenter.so/users/alice/<guid>`.
+live database name becomes `yjs.epicenter/api.epicenter.so/owners/alice/<guid>`.
 Mixed `/` and `.` at the very front is the library's, not ours.
 
 ### 10.3 What this earns
@@ -302,10 +284,10 @@ Mixed `/` and `.` at the very front is the library's, not ours.
 ```
 Cross-server isolation                FIXED (was broken)
 Cross-app isolation                   PRESERVED (epicenter/ prefix)
-Cross-user isolation                  PRESERVED (users/<id>/)
+Cross-user isolation                  PRESERVED (owners/<id>/)
 Cross-doc isolation                   PRESERVED (caller appends ydoc.guid)
-Mirrors server's doName(owner, ...)   NEW (same address shape on wire and disk)
-Type-safe Owner input                 NEW (Owner replaces stringly-typed subject)
+Mirrors server's doName(ownerId, ...) NEW (same address shape on wire and disk)
+Type-safe OwnerId input               NEW (OwnerId replaces stringly-typed subject)
 Duplicate `.yjs.` segment             REMOVED
 Decorative `.owner.` segment          REMOVED
 ```
@@ -321,21 +303,20 @@ const APP = 'epicenter';
 
 /**
  * Per-owner-per-server prefix for client-side persisted Yjs data on this
- * browser profile. Mirrors the server's `doName(owner, ...)` shape so the
- * same `(server, owner, doc)` tuple lands on the same address on the wire
+ * browser profile. Mirrors the server's `doName(ownerId, ...)` shape so the
+ * same `(server, ownerId, doc)` tuple lands on the same address on the wire
  * and on disk.
  */
-export function getOwnedYjsPrefix(server: string, owner: Owner): string {
-  const ownerSeg = owner.kind === 'personal' ? `/users/${owner.userId}` : '';
-  return `${APP}/${server}${ownerSeg}/`;
+export function getOwnedYjsPrefix(server: string, ownerId: OwnerId): string {
+  return `${APP}/${server}/owners/${ownerId}/`;
 }
 
 export function createOwnedYjsKey(
   server: string,
-  owner: Owner,
+  ownerId: OwnerId,
   ydocGuid: string,
 ): string {
-  return `${getOwnedYjsPrefix(server, owner)}${ydocGuid}`;
+  return `${getOwnedYjsPrefix(server, ownerId)}${ydocGuid}`;
 }
 ```
 
@@ -392,204 +373,89 @@ No further change needed.
 
 ## 10. Library public API
 
-```ts
-// packages/server/src/types.ts
+The authoritative public surface is whatever `packages/server/src/index.ts`
+re-exports. Read that file; do not maintain a prose snapshot here.
 
-export type OwnerKind    = 'personal' | 'team';
-export type SignUpPolicy = 'open' | 'disabled';
+Earlier drafts of this section pinned a snapshot ("`createServer` returns
+a bundle of sub-apps, `ServerOptions = { ownership, signUpPolicy }`, etc.").
+That snapshot has rotted three times on this branch alone:
 
-export type ServerOptions = {
-  ownerKind: OwnerKind;
-  signUpPolicy?: SignUpPolicy;   // default: 'open'
-};
-
-export type Owner =
-  | { kind: 'personal'; userId: string }
-  | { kind: 'team' };
-
-export type OwnerPath = `users/${string}` | '';
-
-export type ConnectionId = { userId: string; clientId: string };
-
-export type Env = { Bindings: Cloudflare.Env; Variables: { /* ... */ } };
+```
+1. ApiSessionResponse shape           wave 2 reshuffle
+2. Owner discriminated union          collapsed to branded OwnerId + OwnershipMode
+3. createServer({...}) bundle         flattened to direct sub-app factories
 ```
 
-```ts
-// packages/server/src/create-server.ts
+Each rot was followed by silent drift between this section and the source.
+The asymmetric move is to refuse the snapshot duty entirely: the source IS
+the surface, and any prose copy will lie within a release cycle.
 
-export function createServer(opts: ServerOptions) {
-  return {
-    base:    createBaseApp(opts),     // CORS, db, auth context, singleCredential
-    auth:    createAuthApp(opts),     // /sign-in, /consent, /auth/*, OAuth discovery
-    session: createSessionApp(opts),  // /api/session
-    rooms:   createRoomsApp(opts),    // owner-shaped URL pattern
-    assets:  createAssetsApp(opts),   // owner-shaped URL pattern
-    ai:      createAiApp(opts),       // /api/ai/chat
-  };
-}
-```
+Design intent (which IS stable and belongs here):
 
-```ts
-// packages/server/src/index.ts
+- One factory per sub-app; each declares its full URL pattern internally.
+- Deployments mount sub-apps on `createBaseApp()`, composing auth and
+  billing middleware around each at mount time. No `ServerOptions` bundle
+  pretending to configure all of them uniformly.
+- Per-request owner partition is resolved by `createRequireOwnership(ownership)`
+  middleware so handlers stay mode-blind.
+- Internal derivations (`doName`, `assetKey`, etc.) stay
+  inside their respective files because no external consumer needs them.
 
-export { createServer } from './create-server';
-export { Room } from './room/backends/cloudflare/durable-object';
-export type {
-  OwnerKind, SignUpPolicy, ServerOptions,
-  Owner, OwnerPath, ConnectionId, Env,
-} from './types';
-```
+For the concrete shape at any point in time:
+- `packages/server/src/index.ts` — public re-exports.
+- `apps/api/src/index.ts` — cloud composition reading top-to-bottom.
 
-That is the entire public surface. The `ownerPath`, `doName`, `assetKey`,
-`keyringLabel`, and `assetOwnerFilter` functions stay internal because no
-consumer needs them.
+## 11. Library internals: how mode dispatches
 
-## 11. Library internals: how ownerKind dispatches
+Design intent: the library has minimum mode-based branching. The
+`OwnershipRule` value from `personal()` or `team({ isMember })` is read at
+construction by the small set of factories that need ownership decisions
+(for example `createAssetsApp` and `createRequireOwnership`). After route
+registration, every handler reads the resolved `OwnerId` from
+`c.var.ownerId` and stays mode-blind.
 
-`opts.ownerKind` is the only static config the library reads. It is used
-in exactly one place: route registration shape.
+This invariant is the load-bearing one: any new feature should resolve to
+an `OwnerId` once at the boundary and never re-branch on mode inside
+handlers.
 
-```ts
-function createAssetsApp(opts: ServerOptions): Hono<Env> {
-  const app = new Hono<Env>();
-
-  if (opts.ownerKind === 'personal') {
-    // Personal: URL carries userId; safety middleware enforces it
-    app.get('/users/:userId/assets/:assetId{[a-z0-9]{15}}', publicReadPersonal);
-    app.use('/users/:userId/*', requireAuth, requireUrlUserIdMatchesAuth);
-    app.post('/users/:userId/assets', uploadPersonal);
-    app.get('/users/:userId/assets', listPersonal);
-    app.get('/users/:userId/assets/usage', usagePersonal);
-    app.delete('/users/:userId/assets/:assetId{[a-z0-9]{15}}', deletePersonal);
-  } else {
-    // Team: no partition in URL; auth still required for mutating ops
-    app.get('/assets/:assetId{[a-z0-9]{15}}', publicReadTeam);
-    app.use('/assets/*', requireAuth);
-    app.post('/assets', uploadTeam);
-    app.get('/assets', listTeam);
-    app.get('/assets/usage', usageTeam);
-    app.delete('/assets/:assetId{[a-z0-9]{15}}', deleteTeam);
-  }
-
-  return app;
-}
-```
-
-After route registration, every handler builds its `Owner` value the same
-way: personal handlers from `c.req.param('userId')`, team handlers from
-the constant `{ kind: 'team' }`. The `Owner` flows into `doName`,
-`assetKey`, `keyringLabel`, `assetOwnerFilter` uniformly.
-
-This is the only conditional branch on `ownerKind` in the library.
-Everything downstream operates on the resolved `Owner` value.
+For the concrete dispatch shape at any point in time, read the actual
+factory source under `packages/server/src/routes/`. Earlier drafts of
+this section pinned an example; that example rotted under the same
+factory-flattening refactors as §10's snapshot. The intent above is
+stable; the code is the surface.
 
 ## 12. Deployment composition
 
-### 11.1 Self-hosted team (`apps/server-team/src/index.ts`)
+Design intent: each deployment composes the public sub-apps onto
+`createBaseApp()` top-to-bottom, layering its own middleware (auth,
+billing, CSRF) around each sub-app at mount time. The base app owns
+per-request lifecycle (pg, after-response queue, CORS); deployments own
+which sub-apps are mounted and what middleware wraps them.
 
-```ts
-import { createServer } from '@epicenter/server';
-
-const s = createServer({
-  ownerKind: 'team',
-  signUpPolicy: 'disabled',
-});
-
-export default s.base
-  .route('/api/session', s.session)
-  .route('/sign-in',     s.auth)
-  .route('/consent',     s.auth)
-  .route('/auth',        s.auth)
-  .route('/api',         s.rooms)        // mounts /api/rooms/...
-  .route('/api',         s.assets)       // mounts /api/assets/...
-  .route('/api/ai',      s.ai);
-
-export { Room } from '@epicenter/server';
-```
-
-### 11.2 Epicenter Cloud (`apps/api/src/index.ts`)
-
-```ts
-import { Hono } from 'hono';
-import { createServer } from '@epicenter/server';
-import type { Env } from '@epicenter/server';
-import { autumnStorageGate, autumnPlanGate } from './autumn-gates';
-import { billingRoutes } from './billing-routes';
-import { adminRoutes }   from './admin-routes';
-import { dashboardSpa }  from './dashboard';
-
-const s = createServer({
-  ownerKind: 'personal',
-  signUpPolicy: 'open',
-});
-
-export default s.base
-  .route('/api/session', s.session)
-  .route('/sign-in',     s.auth)
-  .route('/consent',     s.auth)
-  .route('/auth',        s.auth)
-  .route('/api',         s.rooms)
-  .route(
-    '/api',
-    new Hono<Env>().use('/users/:userId/assets/*', autumnStorageGate).route('/', s.assets),
-  )
-  .route('/api/ai',      new Hono<Env>().use('*', autumnPlanGate).route('/', s.ai))
-  .route('/api/billing', billingRoutes)
-  .route('/admin',       adminRoutes)
-  .route('/dashboard',   dashboardSpa);
-
-export { Room } from '@epicenter/server';
-```
-
-Any reader sees the entire URL surface of either deployment in one file,
-top to bottom.
+For the cloud composition, read `apps/api/src/index.ts` top to bottom —
+that file is the canonical example and the entire cloud URL surface.
+For a self-hosted team deployment, a sibling app directory would compose
+the same sub-apps with team-mode middleware (no billing gates, no
+admin/dashboard SPA). Earlier drafts of this section pinned both
+compositions in prose; those snapshots rotted, but the intent above is
+stable.
 
 ## 13. Package shape
 
-```
-packages/server/
-  package.json                name: "@epicenter/server"
-  tsconfig.json
-  src/
-    index.ts                  public re-exports
-    create-server.ts          factory; returns named sub-apps
-    types.ts                  ServerOptions, OwnerKind, SignUpPolicy, Env
-    owner.ts                  Owner, OwnerPath, ownerPath, doName,
-                              assetKey, keyringLabel, assetOwnerFilter
-    routes/
-      auth.ts                 /sign-in, /consent, /auth/*, OAuth discovery
-      session.ts              /api/session
-      rooms.ts                /api/.../rooms/:roomId (GET, POST, WS upgrade)
-      assets.ts               /api/.../assets/[/:id, /usage] (public read + authed CRUD)
-      ai.ts                   /api/ai/chat
-    middleware/
-      single-credential.ts
-      require-auth.ts
-      require-url-user-id-matches-auth.ts
-      cors.ts
-      require-origin-for-cookie-mutations.ts
-    auth/                     Better Auth setup, encryption, OAuth metadata,
-                              resource-boundary, trusted-oauth-clients
-    room/                     Room DO class, RoomCore, update-log
-    db/                       schema (everything except billing-only columns)
-    auth-pages/               sign-in / consent / cli-callback / signed-in HTML
+Design intent:
 
-apps/api/                     Epicenter Cloud deployment
-  package.json                depends on @epicenter/server
-  wrangler.jsonc              cloud secrets and bindings
-  src/
-    index.ts                  ~30 lines composition
-    autumn-gates.ts           autumnStorageGate, autumnPlanGate
-    autumn.ts                 createAutumn client wrapper
-    billing-routes.ts         /api/billing/*
-    admin-routes.ts           /admin/* and /api/assets/reconcile
-    dashboard.ts              dashboard SPA static serving
-    billing-plans.ts          FEATURE_IDS, plan definitions
+- `packages/server/` is one library: a parent app (`createBaseApp`), sub-app
+  factories (one file per route family), middleware (one file per check),
+  and supporting subsystems (`auth/`, `room/`, `db/`, `auth-pages/`).
+- Sub-apps declare full URL patterns internally; deployments mount each
+  at the root. No `ServerOptions` bundle uniformly configuring all of them.
+- `apps/api/` is the only deployment shipped in this repo. Cloud-only
+  concerns (Autumn billing, admin routes, dashboard SPA) live there, not
+  in the library.
 
-(future) apps/server-team/    template self-hosted deployment, or example
-                              in @epicenter/server's README until a real
-                              customer runs one
-```
+The concrete file layout has moved enough times that mirroring it in
+prose has rotted twice this branch. Read `packages/server/src/` and
+`apps/api/src/` directly for the current shape.
 
 ## 14. Env reads, not opts
 
@@ -639,15 +505,20 @@ value. Until that exists, the meaningful gradient is `open` or `disabled`.
 2. Refactor moved code into sub-app factories:
      createBaseApp, createAuthApp, createSessionApp, createRoomsApp,
      createAssetsApp, createAiApp.
-   Each reads opts.ownerKind once to pick URL shapes; downstream handlers
-   work in terms of the resolved Owner value.
+   Each receives the deployment ownership rule where needed; downstream
+   handlers work in terms of the resolved OwnerId value.
 
 3. Rewrite URLs to the owner-partition shape (section 5).
-   Personal-mode authed routes get the requireUrlUserIdMatchesAuth gate.
+   Authed owner routes get the requireOwnership gate.
 
-4. Replace installationId with clientId everywhere
+4. Replace installationId with deviceId everywhere
    (WebSocket query param, DO attachment, presence map).
-   DO attachment becomes { userId, clientId }.
+   DO attachment becomes { userId, deviceId, connectedAt, actions }.
+   The canonical brand `DeviceId` (`asDeviceId`, `createDeviceId`,
+   `createDeviceIdAsync`) lives in `@epicenter/workspace`. The earlier
+   draft proposed `clientId`; refused because `clientID` (number) is
+   already the Yjs CRDT identifier and `clientId` (string) is Better
+   Auth's OAuth client param.
 
 5. Recreate apps/api/src/index.ts as the cloud composition (section 11.2).
    Cloud-only files live in apps/api/src/.
@@ -664,28 +535,29 @@ value. Until that exists, the meaningful gradient is `open` or `disabled`.
    imports from apps/api/src/... to import from @epicenter/server.
 
 10. Update client URL builders (workspace daemon, browser apps, CLI,
-    extension) to use session.ownerPath when constructing room and
-    asset URLs. Replace any installationId usage with clientId.
+    extension) to use session.ownerId when constructing room and
+    asset URLs. Replace any installationId usage with deviceId.
 ```
 
 ## 17. Tests
 
 ```
 packages/server/
-  owner.test.ts                ownerPath, doName, assetKey, keyringLabel
-                               produce expected strings for both kinds
-  session.test.ts              /api/session returns owner, ownerPath, keyring
-                               personal: omits userId; team: same shape, '' path
-  rooms.test.ts                personal: requires URL userId == auth userId
-                               team: no userId in URL
-                               WS upgrade carries clientId
+  owner.test.ts                doName and assetKey produce expected
+                               `owners/<ownerId>/...` strings
+  session.test.ts              /api/session returns user, ownerId, keyring
+                               personal: ownerId == auth user id
+                               team:     ownerId == TEAM_OWNER_ID
+  rooms.test.ts                personal: requires URL ownerId == auth user id
+                               team: requires URL ownerId == TEAM_OWNER_ID
+                               WS upgrade carries deviceId
   assets.test.ts               personal: public read works without auth via
-                               URL userId; authed routes require URL match
+                               URL ownerId; authed routes require URL match
                                team: public read works without auth
-                               provenance (asset.userId) recorded both modes
+                               provenance (asset.ownerId) recorded both modes
   signup-policy.test.ts        disabled rejects /sign-up/email
                                open allows
-  scope-isolation.test.ts      personal: two userIds resolve to distinct DO
+  scope-isolation.test.ts      personal: two ownerIds resolve to distinct DO
                                names, distinct R2 keys, distinct keyrings
                                team: every request resolves to the same
                                DO name and R2 key
@@ -705,10 +577,10 @@ apps/api/
   consumer; one consumer = no package needed.
 - No per-feature packages. auth/rooms/assets share singleCredential and
   the OAuth resource boundary.
-- No runtime OwnerResolver function. ownerKind is the only deployment-
-  level choice; per-request owner is derived from URL params.
-- No mixed personal+team mode. A third OwnerKind can be added later
-  without touching this shape.
+- No runtime OwnerResolver function. The ownership rule is the deployment-
+  level choice; per-request owner is resolved at the auth boundary.
+- No mixed personal+team mode. A third OwnershipRule variant can be added
+  later without touching handler logic.
 - Invitation system (the data model behind invite-only): sibling spec.
 - Sign-in page branding per team deployment: out of scope.
 - Custom auth providers per team deployment: out of scope.
@@ -716,34 +588,34 @@ apps/api/
 - Versioned HKDF labels: greenfield; add a version when you rotate.
 - Server-side teamId field: deployment IS the team. CF script_name is
   the cross-deployment boundary.
-- Two factories (createPersonalServer / createTeamServer): one factory
-  with ownerKind is the smaller surface.
+- Two factories (createPersonalServer / createTeamServer): one server
+  library with `personal()` / `team({ isMember })` is the smaller surface.
 - mountDefaults helper: each deployment mounts explicitly for visibility.
 ```
 
 ## 19. Open questions
 
 ```
-1. Should the WebSocket URL place clientId in the query string or in a
-   subprotocol entry like `client.<clientId>`? Query string is simpler
+1. Should the WebSocket URL place deviceId in the query string or in a
+   subprotocol entry like `device.<deviceId>`? Query string is simpler
    and matches today's pattern; subprotocol is harder to log and slightly
-   more secure. Defaulting to query string.
+   more secure. Defaulting to query string. (Landed: query string.)
 
-2. The personal-mode safety middleware compares c.req.param('userId') to
-   c.var.user.id. Confirm Better Auth's resolved user id matches the
-   shape we put in URLs (no encoding mismatch, no case sensitivity).
+2. The ownership middleware compares URL ownerId to the resolved owner
+   partition. Confirm Better Auth's resolved user id matches the shape we put
+   in URLs (no encoding mismatch, no case sensitivity).
 
-3. /api/session in team mode includes ownerPath: ''. Do we instead want
-   to return a sentinel like `null` to make "no partition" more visible
-   to client code? Probably keep '' so concatenation works without
-   special-casing.
+3. /api/session in team mode returns `ownerId: TEAM_OWNER_ID`. The team
+   partition is explicit, shared, and uses the same `owners/<ownerId>`
+   shape as personal mode.
 
 4. Should apps/server-team/wrangler.jsonc live in this monorepo as a
    template, or as a downstream example repo? Either works.
 
 5. The Room DO attachment shape change from { installationId } to
-   { userId, clientId } is a wire change; old clients and old DOs
-   would not interoperate. Acceptable because greenfield.
+   { userId, deviceId, connectedAt, actions } is a wire change; old
+   clients and old DOs would not interoperate. Acceptable because
+   greenfield. (Landed.)
 ```
 
 ## 20. Success criteria
@@ -753,14 +625,13 @@ apps/api/
    top-to-bottom and know exactly what URLs the server serves and what
    middleware runs on each.
 
-2. The library's only conditional branch on ownerKind is in route URL
-   registration. After routes are mounted, all handlers operate on the
-   resolved Owner value uniformly.
+2. The library's ownership branch is at the boundary that resolves
+   `OwnerId`. After routes are mounted, handlers operate on the resolved
+   owner partition uniformly.
 
-3. Adding a hypothetical third OwnerKind requires:
-     - 1 new OwnerKind enum value
-     - 1 new ownerPath case
-     - 1 new branch in route registration
+3. Adding a hypothetical third ownership rule requires:
+     - 1 new `OwnershipRule` variant
+     - 1 new `resolveExpectedOwnerId` case
      - 0 changes to handler logic
 
 4. The self-hosted team deployment has zero Autumn code in its dependency
@@ -772,10 +643,10 @@ apps/api/
      apps/api tests pass with Autumn mocked.
 
 6. Every durable identifier in the codebase follows the rule:
-     <partition>/<resource type>/<id>
-   where <partition> is `users/<userId>` in personal mode and absent in
-   team mode. No code constructs durable strings inline; everything goes
-   through ownerPath() + joinPath().
+     owners/<ownerId>/<resource type>/<id>
+   where `ownerId` is the signed-in user's id in personal mode and
+   `TEAM_OWNER_ID` in team mode. No code constructs durable strings inline;
+   everything goes through the resource-specific owner helpers.
 ```
 
 ## 21. References
@@ -871,19 +742,18 @@ What this wave does:
 ```
 EDIT  packages/workspace/src/document/local-yjs-key.ts
       Signature: getOwnedYjsPrefix(ownerId: string)
-              -> getOwnedYjsPrefix(server: string, owner: Owner)
+              -> getOwnedYjsPrefix(server: string, ownerId: OwnerId)
       Shape:    epicenter.owner.<id>.yjs.
-              -> epicenter/<server>/users/<id>/      (personal)
-              -> epicenter/<server>/                  (team)
+              -> epicenter/<server>/owners/<ownerId>/ (both modes)
 
 EDIT  packages/workspace/src/document/local-owner.ts
-      Pass (server, owner) instead of ownerId string.
+      Pass (server, ownerId) instead of ownerId alone.
 
 EDIT  packages/workspace/src/document/attach-local-storage.ts
-      Accept server in options; pass (server, owner) down.
+      Accept server in options; pass (server, ownerId) down.
 
 EDIT  packages/workspace/src/document/wipe-local-storage.ts
-      Accept server in options; pass (server, owner) down.
+      Accept server in options; pass (server, ownerId) down.
 
 EDIT  packages/workspace/src/document/local-yjs-key.test.ts
       Update literal-shape assertions.
@@ -994,8 +864,8 @@ type AuthState =
 type Session = {
   user: AuthUser;            // NEW on auth state (apps want it for UI
                              // without re-hitting /api/session)
-  owner: Owner;
-  keyring: SubjectKeyring;
+  ownerId: OwnerId;
+  keyring: Keyring;
 };
 
 type PersistedAuth = {
@@ -1137,11 +1007,10 @@ Reason:   the bag has a name and a domain meaning ("the auth-bound bundle
 4. LocalOwner / LocalWorkspace does NOT exist anywhere. The encryption
    boundary is exactly the free primitives.
 
-5. Adding a hypothetical third OwnerKind requires:
-     - 1 new variant on Owner
+5. Adding a hypothetical third ownership rule requires:
+     - 1 new variant on OwnershipRule
      - 0 changes to Session
-     - 0 changes to apps (apps already pattern-match on owner.kind for
-       UI; the new variant participates in the same union)
+     - 0 changes to apps
 ```
 
 ### Notes on integrating with the fuji branch

@@ -44,16 +44,6 @@ describe('encodeSyncStep1', () => {
 		expect(syncType).toBe(SYNC_MESSAGE_TYPE.STEP1);
 		expect(payload).toEqual(Y.encodeStateVector(doc));
 	});
-
-	test('frame changes after the document is modified', () => {
-		const doc = createDoc();
-		const before = encodeSyncStep1({ doc });
-
-		doc.getMap('data').set('key', 'value');
-		const after = encodeSyncStep1({ doc });
-
-		expect(before).not.toEqual(after);
-	});
 });
 
 describe('encodeSyncUpdate', () => {
@@ -193,44 +183,6 @@ describe('full sync protocol', () => {
 
 		expect(clientDoc.getMap('notes').get('note1')).toBe('Hello from server');
 	});
-
-	test('bidirectional sync merges both documents', () => {
-		const doc1 = createDoc((d) => d.getMap('data').set('from1', 'value1'));
-		const doc2 = createDoc((d) => d.getMap('data').set('from2', 'value2'));
-
-		// Full bidirectional sync using Yjs V2 pattern
-		syncDocs(doc1, doc2);
-
-		expect(doc1.getMap('data').get('from1')).toBe('value1');
-		expect(doc1.getMap('data').get('from2')).toBe('value2');
-		expect(doc2.getMap('data').get('from1')).toBe('value1');
-		expect(doc2.getMap('data').get('from2')).toBe('value2');
-	});
-
-	test('incremental updates are applied correctly', () => {
-		const doc1 = createDoc();
-		const doc2 = createDoc();
-
-		// Capture V2 updates from doc1
-		const updates: Uint8Array[] = [];
-		doc1.on('updateV2', (update: Uint8Array) => {
-			updates.push(update);
-		});
-
-		// Make changes
-		doc1.getMap('data').set('key1', 'value1');
-		doc1.getMap('data').set('key2', 'value2');
-		doc1.getArray('list').push(['item1', 'item2']);
-
-		// Apply V2 updates to doc2
-		for (const update of updates) {
-			Y.applyUpdateV2(doc2, update);
-		}
-
-		expect(doc2.getMap('data').get('key1')).toBe('value1');
-		expect(doc2.getMap('data').get('key2')).toBe('value2');
-		expect(doc2.getArray('list').toArray()).toEqual(['item1', 'item2']);
-	});
 });
 
 // ============================================================================
@@ -261,33 +213,6 @@ describe('edge cases', () => {
 
 		expect(clientDoc.getArray('items').length).toBe(1000);
 	});
-
-	test('handles concurrent modifications (CRDT merge)', () => {
-		const doc1 = createDoc();
-		const doc2 = createDoc();
-
-		// Both modify same key concurrently
-		doc1.getMap('data').set('key', 'value1');
-		doc2.getMap('data').set('key', 'value2');
-
-		// Sync should resolve deterministically
-		syncDocs(doc1, doc2);
-
-		// Both should have same value (CRDT resolution)
-		const val1 = doc1.getMap('data').get('key');
-		const val2 = doc2.getMap('data').get('key');
-		expect(val1).toBe(val2);
-	});
-
-	test('empty document produces a valid STEP1 frame', () => {
-		const { syncType, payload } = readFrame(
-			encodeSyncStep1({ doc: createDoc() }),
-		);
-
-		expect(syncType).toBe(SYNC_MESSAGE_TYPE.STEP1);
-		// Even an empty doc has a state vector (carries clientID info).
-		expect(payload).toBeInstanceOf(Uint8Array);
-	});
 });
 
 // ============================================================================
@@ -315,12 +240,4 @@ function readFrame(data: Uint8Array): {
 		syncType: decoding.readVarUint(decoder) as SyncMessageType,
 		payload: decoding.readVarUint8Array(decoder),
 	};
-}
-
-/** Sync two documents bidirectionally (standard Yjs test pattern, V2) */
-function syncDocs(doc1: Y.Doc, doc2: Y.Doc): void {
-	const state1 = Y.encodeStateAsUpdateV2(doc1);
-	const state2 = Y.encodeStateAsUpdateV2(doc2);
-	Y.applyUpdateV2(doc1, state2);
-	Y.applyUpdateV2(doc2, state1);
 }

@@ -58,7 +58,7 @@
 	);
 
 	function getDateLabel(dts: string): string {
-		const date = DateTimeString.toDate(dts);
+		const date = new Date(dts);
 		if (isToday(date)) return 'Today';
 		if (isYesterday(date)) return 'Yesterday';
 		return format(date, 'MMM d');

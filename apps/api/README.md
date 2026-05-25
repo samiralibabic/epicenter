@@ -4,7 +4,7 @@ The hub server. Handles authentication, real-time sync, and AI inference: everyt
 
 Part of the [Epicenter](https://github.com/EpicenterHQ/epicenter) monorepo. AGPL-3.0 licensed. If you host a modified version, you share your changes. Self-hosting the unmodified server is encouraged; see the encryption and trust model below.
 
-Runs on Cloudflare Workers with Durable Objects. Cloud sync opens documents through the single route `/rooms/:room`: a cloud doc is owned by the authenticated subject and addressed by its `ydoc.guid`, and the route resolves the DO name `subject:${userId}:rooms:${room}` from the auth token. Browser apps and the workspace daemon both use this route. The Hono route's auth middleware authorizes the caller before it builds the internal room name.
+Runs on Cloudflare Workers with Durable Objects. Cloud sync opens documents through `/api/owners/:ownerId/rooms/:room` (the same path in both personal and team mode): a cloud doc is owned by the authenticated `ownerId` and addressed by its `ydoc.guid`, and the route resolves the DO name `owners/${ownerId}/rooms/${room}` from the auth token. In personal mode `ownerId === user.id`; in team mode `ownerId === 'team'`. Browser apps and the workspace daemon both use this route. The Hono route's auth middleware authorizes the caller before it builds the internal room name.
 
 ## Why a hub exists
 
@@ -65,8 +65,9 @@ Cloudflare Workers
 ├── Hono app (src/app.ts)
 │   ├── /auth/*          Better Auth (email/password, Google OAuth, OAuth provider)
 │   ├── /ai/chat         AI streaming (OpenAI and Gemini via @tanstack/ai)
-│   ├── /rooms/:room     Cloud doc sync (WebSocket upgrade or HTTP)
-│   └── /rooms/:room/dispatch
+│   ├── /api/owners/:ownerId/rooms/:room
+│   │                    Cloud doc sync (WebSocket upgrade or HTTP)
+│   └── /api/owners/:ownerId/rooms/:room/dispatch
 │                        Cross-device dispatch (HTTP POST)
 │
 └── Room (Durable Object, SQLite-backed)

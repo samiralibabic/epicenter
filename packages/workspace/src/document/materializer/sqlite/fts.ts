@@ -8,10 +8,73 @@
  * @module
  */
 
+import {
+	defineErrors,
+	extractErrorMessage,
+	type InferErrors,
+} from 'wellcrafted/error';
 import type { Logger } from 'wellcrafted/logger';
+import type { MirrorDatabase } from './core.js';
 import { quoteIdentifier } from './ddl.js';
-import { SqliteMaterializerError } from './sqlite.js';
-import type { MirrorDatabase, SearchOptions, SearchResult } from './types.js';
+
+// ════════════════════════════════════════════════════════════════════════════
+// FTS ERRORS
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Errors logged by the FTS search path. Module-local; not exported. */
+const FtsError = defineErrors({
+	/** An FTS5 MATCH query raised inside the mirror database. */
+	FtsSearchFailed: ({
+		tableName,
+		query,
+		cause,
+	}: {
+		tableName: string;
+		query: string;
+		cause: unknown;
+	}) => ({
+		message: `[sqlite-materializer] FTS search failed on table "${tableName}" for query "${query}": ${extractErrorMessage(cause)}`,
+		tableName,
+		query,
+		cause,
+	}),
+});
+type FtsError = InferErrors<typeof FtsError>;
+
+// ════════════════════════════════════════════════════════════════════════════
+// PUBLIC SEARCH TYPES
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Optional arguments for FTS5 searches.
+ *
+ * Use this when you want to cap result count or choose which indexed column is
+ * used for snippets in the search response.
+ */
+export type SearchOptions = {
+	/** Maximum number of matches to return. */
+	limit?: number;
+
+	/** Column name used to generate the snippet text. */
+	snippetColumn?: string;
+};
+
+/**
+ * One full-text search result returned by the materializer.
+ *
+ * `id` points back to the materialized row, `snippet` is display-ready text, and
+ * `rank` is the database-provided relevance score.
+ */
+export type SearchResult = {
+	/** ID of the materialized row that matched the query. */
+	id: string;
+
+	/** Snippet generated from indexed text content. */
+	snippet: string;
+
+	/** Relevance score returned by the FTS query. */
+	rank: number;
+};
 
 // ════════════════════════════════════════════════════════════════════════════
 // FTS SETUP
@@ -139,7 +202,7 @@ export async function ftsSearch(
 		});
 	} catch (cause: unknown) {
 		log?.warn(
-			SqliteMaterializerError.FtsSearchFailed({
+			FtsError.FtsSearchFailed({
 				tableName,
 				query: trimmed,
 				cause,

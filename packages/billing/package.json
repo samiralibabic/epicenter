@@ -1,0 +1,21 @@
+{
+	"name": "@epicenter/billing",
+	"description": "Canonical product catalog, AI model pricing, and wire DTOs for Epicenter billing",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		"./catalog": "./src/catalog.ts",
+		"./ai-model-pricing": "./src/ai-model-pricing.ts",
+		"./contracts": "./src/contracts.ts"
+	},
+	"devDependencies": {
+		"@tanstack/ai-gemini": "catalog:",
+		"@tanstack/ai-openai": "catalog:",
+		"typescript": "catalog:"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"license": "AGPL-3.0-or-later"
+}

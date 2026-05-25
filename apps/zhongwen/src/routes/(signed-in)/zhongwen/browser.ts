@@ -10,7 +10,7 @@
  * Zhongwen has no child docs and no daemon actions; the root doc is the
  * entire workspace surface. `openCollaboration` owns reconnect-on-auth-change
  * internally, so this file has no per-app onStateChange listener. The
- * bundle's `wipe()` drops every encrypted IDB database for this subject;
+ * bundle's `wipe()` drops every encrypted IDB database for this owner;
  * `Symbol.dispose` tears down the root Y.Doc without touching local storage.
  */
 
@@ -18,6 +18,7 @@ import type { SignedIn } from '@epicenter/svelte';
 import {
 	attachEncryption,
 	attachLocalStorage,
+	type DeviceId,
 	openCollaboration,
 	roomWsUrl,
 	wipeLocalStorage,
@@ -27,10 +28,10 @@ import * as Y from 'yjs';
 
 export function openZhongwenBrowser({
 	signedIn,
-	installationId,
+	deviceId,
 }: {
 	signedIn: SignedIn;
-	installationId: string;
+	deviceId: DeviceId;
 }) {
 	const ydoc = new Y.Doc({ guid: ZHONGWEN_ID, gc: true });
 	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
@@ -39,18 +40,18 @@ export function openZhongwenBrowser({
 
 	const idb = attachLocalStorage(ydoc, {
 		server: signedIn.server,
-		owner: signedIn.owner,
+		ownerId: signedIn.ownerId,
 		keyring: signedIn.keyring,
 	});
 	const collaboration = openCollaboration(ydoc, {
 		url: roomWsUrl({
-			baseURL: signedIn.auth.baseURL,
-			owner: signedIn.owner,
+			baseURL: signedIn.baseURL,
+			ownerId: signedIn.ownerId,
 			guid: ydoc.guid,
-			installationId,
+			deviceId,
 		}),
-		openWebSocket: signedIn.auth.openWebSocket,
-		onReconnectSignal: signedIn.auth.onStateChange,
+		openWebSocket: signedIn.openWebSocket,
+		onReconnectSignal: signedIn.onReconnectSignal,
 		waitFor: idb.whenLoaded,
 		actions: {},
 	});
@@ -66,7 +67,7 @@ export function openZhongwenBrowser({
 			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
 			await wipeLocalStorage({
 				server: signedIn.server,
-				owner: signedIn.owner,
+				ownerId: signedIn.ownerId,
 			});
 		},
 		[Symbol.dispose]() {

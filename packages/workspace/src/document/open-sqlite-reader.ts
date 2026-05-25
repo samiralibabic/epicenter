@@ -15,9 +15,9 @@
  * driver. Wrapping it in Drizzle (`drizzle(reader.db, { schema })`) is the
  * per-app peer factory's job; this primitive intentionally stays narrow.
  *
- * Named `open*` rather than `attach*` because it has no Y.Doc subject and
- * registers no listeners. The caller owns the lifecycle through `using` or
- * an explicit `[Symbol.dispose]()` call.
+ * Named `open*` rather than `attach*` because it has no Y.Doc to attach to
+ * and registers no listeners. The caller owns the lifecycle through `using`
+ * or an explicit `[Symbol.dispose]()` call.
  *
  * The mirror does not observe schema changes or ydoc state. It is a thin
  * wrapper around an on-disk file the daemon owns; if the daemon hasn't
@@ -27,10 +27,7 @@
 
 import { Database } from 'bun:sqlite';
 import { quoteIdentifier } from './materializer/sqlite/ddl.js';
-import type {
-	SearchOptions,
-	SearchResult,
-} from './materializer/sqlite/types.js';
+import type { SearchOptions, SearchResult } from './materializer/sqlite/fts.js';
 
 /**
  * Options for {@link openSqliteReader}.

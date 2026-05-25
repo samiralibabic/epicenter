@@ -20,11 +20,10 @@ import {
 	attachMarkdownMaterializer,
 	slugFilename,
 } from '@epicenter/workspace/document/materializer/markdown';
-import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
+import { attachBunSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
 import {
 	attachDaemonInfrastructure,
 	markdownPath,
-	openWriterSqlite,
 	sqlitePath,
 } from '@epicenter/workspace/node';
 import { createLogger } from 'wellcrafted/logger';
@@ -35,8 +34,8 @@ export function openFujiDaemon({
 	projectDir,
 	route,
 	yDocClientId,
-	installationId,
-	owner,
+	deviceId,
+	ownerId,
 	keyring,
 	openWebSocket,
 	onReconnectSignal,
@@ -48,21 +47,18 @@ export function openFujiDaemon({
 	encryption.attachKv({});
 	const actions = createFujiActions(tables);
 
-	const sqliteDb = openWriterSqlite({
+	attachBunSqliteMaterializer(ydoc, {
 		filePath: sqlitePath(projectDir, ydoc.guid),
 		log: createLogger(`${route}-sqlite`),
-	});
-	ydoc.once('destroy', () => sqliteDb.close());
-
-	attachSqliteMaterializer(ydoc, { db: sqliteDb }).table(tables.entries);
+	}).table(tables.entries);
 	attachMarkdownMaterializer(ydoc, {
 		dir: markdownPath(projectDir, ydoc.guid),
 	}).table(tables.entries, { filename: slugFilename('title') });
 
 	return attachDaemonInfrastructure(ydoc, {
 		projectDir,
-		owner,
-		installationId,
+		ownerId,
+		deviceId,
 		openWebSocket,
 		onReconnectSignal,
 		actions,

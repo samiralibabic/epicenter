@@ -87,7 +87,7 @@ describe('executeRun peer dispatch', () => {
 		expect(error.syncStatus).toEqual(runSyncStatus);
 	});
 
-	test('remote dispatch sends the resolved installationId and action key', async () => {
+	test('remote dispatch sends the resolved deviceId and action key', async () => {
 		let invokedAction = '';
 		let invokedTo = '';
 		const entry = fakeEntry({

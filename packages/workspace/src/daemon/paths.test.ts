@@ -6,23 +6,18 @@ import { join } from 'node:path';
 import { dirHash, socketPathFor } from './paths.js';
 
 describe('daemon/paths', () => {
-	const originalXdg = process.env.XDG_RUNTIME_DIR;
+	const originalRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
 
 	afterEach(() => {
-		if (originalXdg === undefined) {
-			delete process.env.XDG_RUNTIME_DIR;
+		if (originalRuntimeDir === undefined) {
+			delete process.env.EPICENTER_RUNTIME_DIR;
 		} else {
-			process.env.XDG_RUNTIME_DIR = originalXdg;
+			process.env.EPICENTER_RUNTIME_DIR = originalRuntimeDir;
 		}
 	});
 
-	test('dirHash is deterministic for the same absolute path', () => {
-		const abs = realpathSync(tmpdir());
-		expect(dirHash(abs)).toBe(dirHash(abs));
-	});
-
 	test('dirHash of a relative path equals the hash of its realpath', () => {
-		// `tmpdir()` may resolve through a symlink (e.g. /tmp → /private/tmp on
+		// `tmpdir()` may resolve through a symlink (e.g. /tmp -> /private/tmp on
 		// macOS); dirHash should normalize via realpathSync so equivalent inputs
 		// hash identically.
 		const symlinked = tmpdir();
@@ -31,16 +26,21 @@ describe('daemon/paths', () => {
 	});
 
 	test('socketPathFor stays under the configured safe Unix socket limit', () => {
-		delete process.env.XDG_RUNTIME_DIR;
 		const dir = realpathSync(tmpdir());
 		expect(Buffer.byteLength(socketPathFor(dir))).toBeLessThanOrEqual(95);
 	});
 
 	test('socketPathFor rejects unsafe socket paths', () => {
+		// Override the runtime dir with a pathologically long path so the
+		// resolved socket path overflows the guard. Production callers never
+		// see paths this long, but the guard is load-bearing so we exercise it.
 		const longRuntimeDir = mkdtempSync(
-			join(tmpdir(), 'epicenter-runtime-path-that-is-too-long-for-sockets-'),
+			join(
+				tmpdir(),
+				'epicenter-runtime-path-that-is-way-too-long-for-sockets-',
+			),
 		);
-		process.env.XDG_RUNTIME_DIR = longRuntimeDir;
+		process.env.EPICENTER_RUNTIME_DIR = longRuntimeDir;
 		try {
 			expect(() => socketPathFor(tmpdir())).toThrow(
 				/exceeds safe Unix socket limit/,

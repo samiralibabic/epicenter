@@ -1,101 +1,133 @@
 /**
- * defineTable() for creating versioned table definitions.
+ * `defineTable(...)` — TypeBox-native table definition.
  *
- * All table schemas must include `_v: number` as a discriminant field.
- * The underscore prefix signals framework metadata—see `BaseRow` in
- * `types.ts` for the full rationale.
+ * Every column schema flows through the `FlatJsonTSchema` mapped-type
+ * constraint, which rejects every TypeBox `~kind` that cannot materialize
+ * 1:1 to a SQLite column. Users may construct columns via `column.X()` or
+ * raw `Type.X()` interchangeably; the constraint enforces safety either way.
  *
- * Use shorthand for single-version tables, variadic args for multiple versions with migrations.
+ * `_v` is library-managed. Users never declare it as a column, never type
+ * it at write sites, and never see it on returned rows. The library stamps
+ * the current version onto each stored row, reads it for schema routing on
+ * load, and strips it before handing the row back to the caller.
+ *
+ * Version numbers are positional: the first argument is v1, the second is
+ * v2, etc. The migrate function receives `{ value, version }` and returns
+ * the latest row shape; `switch (version)` narrows `value` to the matching
+ * version's columns.
  *
  * @example
- * ```typescript
- * import { defineTable } from '@epicenter/workspace';
- * import { type } from 'arktype';
+ * ```ts
+ * // Single-version table: no migrate needed.
+ * const notes = defineTable({
+ *   id: column.string<NoteId>(),
+ *   title: column.string({ minLength: 1, maxLength: 200 }),
+ *   createdAt: column.dateTime(),
+ * });
  *
- * // Shorthand for single version
- * const users = defineTable(type({ id: 'string', email: 'string', _v: '1' }));
- *
- * // Variadic for multiple versions with migration
- * const posts = defineTable(
- *   type({ id: 'string', title: 'string', _v: '1' }),
- *   type({ id: 'string', title: 'string', views: 'number', _v: '2' }),
- * ).migrate((row) => {
- *   switch (row._v) {
- *     case 1: return { ...row, views: 0, _v: 2 };
- *     case 2: return row;
+ * // Multi-version table: migrate is required.
+ * const versioned = defineTable(
+ *   // v1
+ *   { id: column.string<NoteId>(), title: column.string() },
+ *   // v2
+ *   { id: column.string<NoteId>(), title: column.string(), pinned: column.boolean() },
+ * ).migrate(({ value, version }) => {
+ *   switch (version) {
+ *     case 1: return { ...value, pinned: false };
+ *     case 2: return value;
  *   }
  * });
  * ```
  */
 
-import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { BaseRow, LastSchema, TableDefinition } from './attach-table.js';
-import { createUnionSchema } from './schema-union.js';
-import type { CombinedStandardSchema } from './standard-schema.js';
+import {
+	createTableDefinition,
+	type LastVersion,
+	type MigrateInput,
+	type RowOf,
+	type TableDefinition,
+	type VersionedColumns,
+} from './attach-table';
+import type { ColumnError, FlatJsonTSchema } from './column/constraint';
 
 /**
- * Creates a table definition with a single schema version.
- * Schema must include `{ id: string, _v: number }`.
+ * Refuse `_v` as a user-declared column key. The library stamps `_v` itself
+ * on every write and strips it from every read; declaring it in columns
+ * either silently fights the library or accidentally desyncs the schema.
  */
-export function defineTable<TSchema extends CombinedStandardSchema<BaseRow>>(
-	schema: TSchema,
-): TableDefinition<[TSchema]>;
+type RefuseV<TCols> = '_v' extends keyof TCols
+	? ColumnError<'_v is library-managed; remove it from the column record'>
+	: TCols;
 
 /**
- * Creates a table definition for multiple schema versions with migrations.
- *
- * Pass 2+ schemas as arguments, then call `.migrate()` on the result to provide
- * a migration function that normalizes any version to the latest.
+ * Apply `FlatJsonTSchema` per column. Used DIRECTLY as `defineTable`'s
+ * parameter type (never intersected with `TCols`), so column-level errors
+ * surface as readable English tooltips at the offending field rather than
+ * collapsing to `never`.
  */
-export function defineTable<
-	const TVersions extends [
-		CombinedStandardSchema<BaseRow>,
-		CombinedStandardSchema<BaseRow>,
-		...CombinedStandardSchema<BaseRow>[],
-	],
->(
-	...versions: TVersions
-): {
+type ConstrainColumns<TCols extends VersionedColumns> = RefuseV<TCols> & {
+	[K in keyof TCols]: FlatJsonTSchema<TCols[K]>;
+};
+
+type ConstrainVersions<TVersions extends readonly VersionedColumns[]> = {
+	[I in keyof TVersions]: TVersions[I] extends VersionedColumns
+		? ConstrainColumns<TVersions[I]>
+		: never;
+};
+
+/**
+ * Intermediate builder returned by the variadic overload until `.migrate(fn)`
+ * is supplied. Intentionally NOT assignable to `TableDefinition`, so
+ * attaching the unfinished builder to a Y.Doc is a compile error.
+ */
+type MigrationRequired<TVersions extends readonly VersionedColumns[]> = {
 	migrate(
-		fn: (
-			row: StandardSchemaV1.InferOutput<TVersions[number]>,
-		) => StandardSchemaV1.InferOutput<LastSchema<TVersions>>,
+		fn: (input: MigrateInput<TVersions>) => RowOf<LastVersion<TVersions>>,
 	): TableDefinition<TVersions>;
 };
 
-export function defineTable<TSchema extends CombinedStandardSchema<BaseRow>>(
-	...args: [TSchema, ...CombinedStandardSchema<BaseRow>[]]
-):
-	| TableDefinition<[TSchema]>
-	| {
-			migrate(
-				fn: (row: unknown) => unknown,
-			): TableDefinition<CombinedStandardSchema<BaseRow>[]>;
-	  } {
+// Single-version overload: no migrate step needed.
+export function defineTable<const TCols extends VersionedColumns>(
+	v1: ConstrainColumns<TCols>,
+): TableDefinition<[TCols]>;
+
+// Multi-version overload: migrate is required before the definition is usable.
+export function defineTable<
+	const TVersions extends readonly [
+		VersionedColumns,
+		VersionedColumns,
+		...VersionedColumns[],
+	],
+>(...versions: ConstrainVersions<TVersions>): MigrationRequired<TVersions>;
+
+export function defineTable(
+	// biome-ignore lint/suspicious/noExplicitAny: variance-friendly; overloads constrain caller-visible shape
+	...args: any[]
+	// biome-ignore lint/suspicious/noExplicitAny: see above
+): any {
 	if (args.length === 0) {
 		throw new Error('defineTable() requires at least one schema argument');
 	}
 
-	if (args.length === 1) {
-		const schema = args[0];
-		return {
-			schema,
-			migrate: (row: unknown) => row as BaseRow,
-		} as TableDefinition<[TSchema]>;
+	const versions = args as readonly VersionedColumns[];
+
+	if (versions.length === 1) {
+		const onlyColumns = versions[0]!;
+		return createTableDefinition(
+			[onlyColumns] as const,
+			(input) =>
+				(input as { value: RowOf<VersionedColumns> }).value as RowOf<
+					typeof onlyColumns
+				>,
+		);
 	}
 
-	const versions = args as CombinedStandardSchema[];
-
 	return {
-		migrate(fn: (row: unknown) => unknown) {
-			return {
-				schema: createUnionSchema(versions),
-				migrate: fn,
-			};
+		migrate(fn: (input: unknown) => unknown) {
+			return createTableDefinition(
+				versions,
+				fn as (input: unknown) => RowOf<VersionedColumns>,
+			);
 		},
-	} as {
-		migrate(
-			fn: (row: unknown) => unknown,
-		): TableDefinition<CombinedStandardSchema<BaseRow>[]>;
 	};
 }

@@ -201,28 +201,32 @@ The hard problem with local-first apps is synchronization. If each device has it
 The [`@epicenter/workspace`](packages/workspace) package wraps this into a single API. Define a schema, get CRDT-backed tables, attach providers to materialize to SQLite or markdown, and add sync when you're ready.
 
 ```typescript
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
   attachIndexedDb,
   attachTables,
+  column,
   defineTable,
   openCollaboration,
-  websocketUrl,
+  roomWsUrl,
 } from '@epicenter/workspace';
 
-const posts = defineTable(
-  type({ id: 'string', title: 'string', published: 'boolean', _v: '1' }),
-);
+const posts = defineTable({
+  id: column.string(),
+  title: column.string(),
+  published: column.boolean(),
+});
 
-function openBlog(id: string, installationId: string) {
+function openBlog(id: string, ownerId, deviceId, auth) {
   const ydoc = new Y.Doc({ guid: id });
   const tables = attachTables(ydoc, { posts });
   const idb = attachIndexedDb(ydoc);
   const collaboration = openCollaboration(ydoc, {
-    url: websocketUrl(`http://localhost:3913/rooms/${ydoc.guid}`),
+    url: roomWsUrl({ baseURL: auth.baseURL, ownerId, guid: ydoc.guid, deviceId }),
+    openWebSocket: auth.openWebSocket,
+    onReconnectSignal: auth.onStateChange,
     waitFor: idb.whenLoaded,
-    installationId,
+    actions: {},
   });
 
   return {
@@ -231,8 +235,8 @@ function openBlog(id: string, installationId: string) {
   };
 }
 
-const workspace = openBlog('epicenter.blog', 'browser-dev');
-workspace.tables.posts.set({ id: '1', title: 'Hello', published: false, _v: 1 });
+const workspace = openBlog('epicenter.blog', myOwnerId, 'browser-dev', auth);
+workspace.tables.posts.set({ id: '1', title: 'Hello', published: false });
 ```
 
 Each user gets their own database. Schema definitions are plain JSON, so they work with MCP and OpenAPI out of the box. Write to Yjs and SQLite updates; edit a markdown file and the CRDT merges it in.

@@ -167,7 +167,6 @@ export function attachFileTree(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
 				trashedAt: null,
-				_v: 1,
 			});
 			return id;
 		},

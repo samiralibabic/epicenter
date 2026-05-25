@@ -11,8 +11,8 @@
  * source of truth, and clients learn its contents from the relay's
  * `presence` full-list text frame.
  *
- * Identity and routing in one sentence: the relay maps `installationId`
- * to "most-recently-connected open socket"; multi-tab same-install is
+ * Identity and routing in one sentence: the relay maps `deviceId` to
+ * "most-recently-connected open socket"; multi-tab same-device is
  * handled by positional newest-wins lookup at delivery time.
  *
  * @module
@@ -158,8 +158,8 @@ export type ActionOutput<A extends (...args: any[]) => unknown> =
  * schema, and the success branch carries the unwrapped handler return
  * (Result peeled to `T`).
  *
- * Caller-asserted: the relay routes by `installationId` only; it does not
- * prove a given install implements `TTargetActions`.
+ * Caller-asserted: the relay routes by `deviceId` only; it does not
+ * prove a given device implements `TTargetActions`.
  */
 export type TypedDispatch<TTargetActions extends ActionRegistry> = <
 	TAction extends keyof TTargetActions & string,
@@ -183,7 +183,7 @@ export type TypedDispatch<TTargetActions extends ActionRegistry> = <
  *
  * const tabManager = typedDispatch<TabManagerActions>(collab.dispatch);
  * await tabManager({
- *   to: tabManagerInstallationId,
+ *   to: tabManagerDeviceId,
  *   action: 'tabs_close',
  *   input: { tabIds: [1, 2] },
  * });

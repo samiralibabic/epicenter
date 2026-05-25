@@ -59,7 +59,7 @@ app.use('/ai/*', async (c, next) => {
     email: c.var.user.email ?? undefined,
     expand: ['subscriptions.plan'],
   });
-  const mainSub = customer.subscriptions?.find(
+  const mainSub = customer.subscriptions.find(
     (s: { addOn?: boolean }) => !s.addOn,
   );
   c.set('planId', mainSub?.planId ?? 'free');

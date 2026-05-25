@@ -15,30 +15,33 @@
  *   attachRichText,
  *   attachTables,
  *   createDisposableCache,
- *   createInstallationId,
+ *   createDeviceId,
  *   defineTable,
  *   docGuid,
  *   openCollaboration,
  *   roomWsUrl,
  * } from '@epicenter/workspace';
- * import type { AuthClient, Owner } from '@epicenter/auth';
- * import { type } from 'arktype';
+ * import type { AuthClient } from '@epicenter/auth';
+ * import type { OwnerId } from '@epicenter/constants/identity';
  * import * as Y from 'yjs';
  *
- * const posts = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
+ * const posts = defineTable({
+ *   id: column.string(),
+ *   title: column.string(),
+ * });
  * declare const auth: AuthClient;
- * declare const owner: Owner;
+ * declare const ownerId: OwnerId;
  *
- * const installationId = createInstallationId({ storage: localStorage });
+ * const deviceId = createDeviceId({ storage: localStorage });
  *
- * // A cloud doc is owned by the authenticated subject and addressed by its
- * // Y.Doc guid: `roomWsUrl({ baseURL, owner, guid, installationId })` builds the
+ * // A cloud doc is owned by the authenticated `ownerId` and addressed by its
+ * // Y.Doc guid: `roomWsUrl({ baseURL, ownerId, guid, deviceId })` builds the
  * // partitioned room URL the server expects.
  * const ydoc = new Y.Doc({ guid: 'notes' });
  * const tables = attachTables(ydoc, { posts });
  * const idb = attachIndexedDb(ydoc);
  * const collaboration = openCollaboration(ydoc, {
- *   url: roomWsUrl({ baseURL: auth.baseURL, owner, guid: ydoc.guid, installationId }),
+ *   url: roomWsUrl({ baseURL: auth.baseURL, ownerId, guid: ydoc.guid, deviceId }),
  *   openWebSocket: auth.openWebSocket,
  *   onReconnectSignal: auth.onStateChange,
  *   waitFor: idb.whenLoaded,
@@ -62,9 +65,9 @@
  *     const bodySync = openCollaboration(bodyYdoc, {
  *       url: roomWsUrl({
  *         baseURL: auth.baseURL,
- *         owner,
+ *         ownerId,
  *         guid: bodyYdoc.guid,
- *         installationId,
+ *         deviceId,
  *       }),
  *       openWebSocket: auth.openWebSocket,
  *       onReconnectSignal: auth.onStateChange,
@@ -100,13 +103,15 @@ export {
 } from './shared/actions';
 
 // ════════════════════════════════════════════════════════════════════════════
-// INSTALLATION IDENTITY
+// DEVICE IDENTITY
 // ════════════════════════════════════════════════════════════════════════════
 
+export type { DeviceId } from './document/device-id.js';
 export {
-	createInstallationId,
-	createInstallationIdAsync,
-} from './document/installation-id.js';
+	asDeviceId,
+	createDeviceId,
+	createDeviceIdAsync,
+} from './document/device-id.js';
 
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECT CONFIG (browser-safe surface)
@@ -116,9 +121,8 @@ export {
 // `loadProjectConfig`, etc.) import `node:fs`, `node:path`, or `node:os`
 // at module top level. They are exported from `@epicenter/workspace/node`;
 // keeping them out of this root barrel stops browser bundles (fuji,
-// whispering, etc.) from traversing `node:*` modules. Platform paths
-// (data, log, cache, config, runtime) live in `@epicenter/constants/node`
-// behind `createEpicenterEnv`.
+// whispering, etc.) from traversing `node:*` modules. Daemon runtime and
+// log paths live in `@epicenter/workspace/daemon/paths.ts`.
 export {
 	DEFAULT_PROJECT_CONFIG_SOURCE,
 	defineConfig,
@@ -131,8 +135,20 @@ export type { ProjectDir } from './shared/types';
 // ════════════════════════════════════════════════════════════════════════════
 
 export { DateTimeString } from './shared/datetime-string';
+export { IANA_TIME_ZONE_FORMAT, IanaTimeZone } from './shared/iana-time-zone';
 export type { Guid, Id } from './shared/id';
 export { generateGuid, generateId } from './shared/id';
+
+// ════════════════════════════════════════════════════════════════════════════
+// COLUMN PRIMITIVES (TypeBox-native)
+// ════════════════════════════════════════════════════════════════════════════
+
+export {
+	type ColumnError,
+	column,
+	type FlatJsonTSchema,
+	type Infer,
+} from './document/column/index';
 
 // ════════════════════════════════════════════════════════════════════════════
 // DOCUMENT PRIMITIVES
@@ -155,23 +171,38 @@ export {
 	type InferKvValue,
 	type Kv,
 	type KvDefinitions,
+	KvError,
 } from './document/attach-kv.js';
 export { attachLocalStorage } from './document/attach-local-storage.js';
 export { attachPlainText } from './document/attach-plain-text.js';
 export { attachRichText } from './document/attach-rich-text.js';
 export {
+	attachReadonlyTable,
+	attachReadonlyTables,
 	attachTable,
 	attachTables,
 	type BaseRow,
 	type InferTableRow,
+	type ReadonlyTable,
+	type ReadonlyTables,
 	type Table,
+	TableParseError,
 	type Tables,
 } from './document/attach-table.js';
 export { attachTimeline } from './document/attach-timeline/index.js';
 export { defineKv } from './document/define-kv.js';
 export { defineTable } from './document/define-table.js';
-export { DispatchError } from './document/dispatch.js';
+export {
+	DispatchError,
+	type DispatchRequest,
+	type TypedDispatch,
+	typedDispatch,
+} from './document/dispatch.js';
 export { docGuid } from './document/doc-guid.js';
+export {
+	type TablesToDrizzleSchema,
+	tablesToDrizzleSchema,
+} from './document/drizzle-schema.js';
 export type { SyncStatus } from './document/internal/sync-supervisor.js';
 export { onLocalUpdate } from './document/on-local-update.js';
 export {
@@ -181,11 +212,12 @@ export {
 	type OpenWebSocketFn,
 	openCollaboration,
 } from './document/open-collaboration.js';
+export type { PresenceDevice } from './document/presence-protocol.js';
 // Transport URL builder.
 //
-// `roomWsUrl({ baseURL, owner, guid, installationId })` builds the WebSocket URL
-// for the partitioned `/api/users/:userId/rooms/:roomId` (personal) or
-// `/api/rooms/:roomId` (team) endpoint. Both browser apps and the daemon
-// use this one builder.
+// `roomWsUrl({ baseURL, ownerId, guid, deviceId })` builds the WebSocket
+// URL for the partitioned `/api/owners/:ownerId/rooms/:roomId` endpoint. The
+// same single URL form is used in both personal and team modes. Both browser
+// apps and the daemon use this one builder.
 export { type RoomWsUrlOptions, roomWsUrl } from './document/transport.js';
 export { wipeLocalStorage } from './document/wipe-local-storage.js';

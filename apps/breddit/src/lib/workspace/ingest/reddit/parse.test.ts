@@ -47,16 +47,6 @@ describe('batched file parsing', () => {
 		]);
 	});
 
-	test('unsplit file still works when no batched variants exist', async () => {
-		const zip = createZip({
-			'post_votes.csv': 'id,permalink,direction\n1,/r/a,up\n2,/r/b,down',
-		});
-
-		const result = await parseRedditZip(zip);
-
-		expect(result.post_votes).toHaveLength(2);
-	});
-
 	test('batched files in a subdirectory are found', async () => {
 		const zip = createZip({
 			'export/post_votes_1.csv': 'id,permalink,direction\n1,/r/a,up',

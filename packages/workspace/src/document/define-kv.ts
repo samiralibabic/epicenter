@@ -1,56 +1,50 @@
 /**
- * defineKv() for creating KV definitions with required defaults.
+ * `defineKv(schema, defaultValue)` — TypeBox-native KV definition.
  *
- * KV stores use validate-or-default semantics—no migration step.
- * Invalid stored data falls back to `defaultValue`.
+ * KV stores use validate-or-default semantics: invalid or missing values
+ * return the result of the `defaultValue` factory. There is no migration
+ * step; preferences resetting to the default is acceptable in the contexts
+ * KV is used in.
  *
- * Use dot-namespaced keys for logical groupings of scalar values:
- * - `'theme.mode'`: `defineKv(type("'light' | 'dark' | 'system'"), 'light')`
- * - `'theme.fontSize'`: `defineKv(type('number'), 14)`
+ * `defaultValue` is **always a factory** `() => Static<S>`. The library
+ * calls it on every default-branch firing (missing key or validation
+ * failure), so callers can mutate the result of `kv.get(...)` without
+ * leaking changes to the next reader. The uniformity is the entire
+ * mutation-safety story; the cost is six characters at scalar call sites
+ * (`() => true` vs `true`), and the win includes dynamic defaults
+ * (`() => Date.now()`).
  *
  * @example
- * ```typescript
- * import { defineKv } from '@epicenter/workspace';
- * import { type } from 'arktype';
+ * ```ts
+ * import { Type } from 'typebox';
  *
- * // Boolean preference
- * const sidebar = defineKv(type('boolean'), false);
+ * const sidebar = defineKv(Type.Boolean(), () => false);
  *
- * // Object preference
- * const layout = defineKv(type({ collapsed: 'boolean', width: 'number' }), { collapsed: false, width: 300 });
+ * const layout = defineKv(
+ *   Type.Object({
+ *     collapsed: Type.Boolean(),
+ *     width: Type.Number(),
+ *   }),
+ *   () => ({ collapsed: false, width: 300 }),
+ * );
+ *
+ * const startedAt = defineKv(Type.Number(), () => Date.now());
  * ```
  */
 
-import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { JsonValue } from 'wellcrafted/json';
-import type { KvDefinition } from './attach-kv.js';
-import type { CombinedStandardSchema } from './standard-schema.js';
+import type { Static, TSchema } from 'typebox';
+import type { KvDefinition } from './attach-kv';
 
 /**
- * Create a KV definition with a schema and required default value.
+ * Create a KV definition with a TypeBox schema and a factory default.
  *
- * The `defaultValue` serves dual duty: it is returned both when the key has
- * never been set (initial state) and when the stored value fails schema
- * validation (corrupt or outdated data). It is never written to storage—
- * it exists only at read time.
- *
- * Schema output must be JSON-serializable (`JsonValue`).
- *
- * Unlike tables, KV stores have no versioning or migration. See
- * {@link KvDefinition} for the full design rationale.
- *
- * @param schema - Standard Schema validator for this entry's value
- * @param defaultValue - Value returned by `get()` when stored data is missing or invalid
- *
- * @example
- * ```typescript
- * const sidebar = defineKv(type({ collapsed: 'boolean', width: 'number' }), { collapsed: false, width: 300 });
- * const fontSize = defineKv(type('number'), 14);
- * ```
+ * `defaultValue` runs on every missing-key / validation-failure read, so
+ * each call produces a fresh value. Callers may mutate the result of
+ * `kv.get()` without affecting other readers.
  */
-export function defineKv<TSchema extends CombinedStandardSchema<JsonValue>>(
-	schema: TSchema,
-	defaultValue: StandardSchemaV1.InferOutput<TSchema>,
-): KvDefinition<TSchema> {
+export function defineKv<S extends TSchema>(
+	schema: S,
+	defaultValue: () => Static<S>,
+): KvDefinition<S> {
 	return { schema, defaultValue };
 }

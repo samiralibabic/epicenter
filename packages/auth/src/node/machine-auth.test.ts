@@ -13,8 +13,10 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { asOwnerId } from '@epicenter/constants/identity';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 import type { PersistedAuth } from '../auth-types.js';
+import { asUserId } from '../auth-types.js';
 import type { AuthFetch } from '../create-oauth-app-auth.js';
 import {
 	createMachineAuthClient,
@@ -41,7 +43,7 @@ const NOW = 1_700_000_000_000;
 const keyring = [
 	{
 		version: 1,
-		subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+		keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
 	},
 ] as const;
 
@@ -55,12 +57,6 @@ function tmpAuthPath() {
 	);
 	cleanupPaths.push(filePath);
 	return filePath;
-}
-
-function tmpDataDir() {
-	const dirPath = path.join(os.tmpdir(), `epicenter-data-${randomUUID()}`);
-	cleanupDirs.push(dirPath);
-	return dirPath;
 }
 
 afterEach(async () => {
@@ -168,11 +164,11 @@ function tokenSuccess(): Route {
 		});
 }
 
-function apiSessionOk(subject = 'user-1'): Route {
+function apiSessionOk(userId = 'user-1'): Route {
 	return () =>
 		jsonResponse({
-			user: { id: subject, email: `${subject}@example.com` },
-			owner: { kind: 'personal' as const, userId: subject },
+			user: { id: userId, email: `${userId}@example.com` },
+			ownerId: userId,
 			keyring: [...keyring],
 		});
 }
@@ -212,7 +208,7 @@ test('loginWithOob writes PersistedAuth and returns identity', async () => {
 	});
 	const data = expectOk(result);
 	expect(data.identity.user).toEqual({
-		id: 'user-1',
+		id: asUserId('user-1'),
 		email: 'user-1@example.com',
 	});
 
@@ -223,40 +219,20 @@ test('loginWithOob writes PersistedAuth and returns identity', async () => {
 			refreshToken: 'refresh-1',
 			accessTokenExpiresAt: NOW + 3_600_000,
 		},
-		owner: { kind: 'personal' as const, userId: 'user-1' },
-		keyring: [...keyring],
+		userId: asUserId('user-1'),
+		ownerId: asOwnerId('user-1'),
+		keyring: [
+			{
+				version: 1,
+				keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+			},
+		],
 	});
 
 	if (process.platform !== 'win32') {
 		const stat = await fs.stat(filePath);
 		expect(stat.mode & 0o777).toBe(0o600);
 	}
-});
-
-test('loginWithOob writes to the API-target-specific default path under the data dir', async () => {
-	const dataDir = tmpDataDir();
-	const filePath = machineAuthFilePath({ baseURL: BASE_URL, dataDir });
-
-	const { fetch } = createFetch({
-		tokenRoute: tokenSuccess(),
-		apiSessionRoute: apiSessionOk('user-1'),
-	});
-
-	const result = await loginWithOob({
-		baseURL: BASE_URL,
-		clientId: CLIENT_ID,
-		filePath,
-		fetch,
-		now: () => NOW,
-		print: () => {},
-		openBrowser: () => {},
-		readCode: async () => 'CODE',
-	});
-	expectOk(result);
-
-	const loaded = (await readCellRaw(filePath)) as PersistedAuth;
-	expect(loaded.grant.accessToken).toBe('access-1');
-	expect(filePath).toBe(path.join(dataDir, 'auth', 'localhost_8787.json'));
 });
 
 test('loginWithOob with empty paste writes no file', async () => {
@@ -311,45 +287,27 @@ test('loginWithOob with /api/session 401 returns Err and writes no file', async 
 	expect(exists).toBe(false);
 });
 
-async function preWriteCell(filePath: string, subject = 'user-1') {
+async function preWriteCell(filePath: string, userId = 'user-1') {
 	const cell: PersistedAuth = {
 		grant: {
 			accessToken: 'access-stored',
 			refreshToken: 'refresh-stored',
 			accessTokenExpiresAt: NOW + 3_600_000,
 		},
-		owner: { kind: 'personal' as const, userId: subject },
-		keyring: [...keyring],
+		userId: asUserId(userId),
+		ownerId: asOwnerId(userId),
+		keyring: [
+			{
+				version: 1,
+				keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+			},
+		],
 	};
 	await writeCell(filePath, cell);
 	return cell;
 }
 
-test('sign-in writes the new persisted shape', async () => {
-	const filePath = tmpAuthPath();
-	const { fetch } = createFetch({
-		tokenRoute: tokenSuccess(),
-		apiSessionRoute: apiSessionOk('user-1'),
-	});
-
-	const result = await loginWithOob({
-		baseURL: BASE_URL,
-		clientId: CLIENT_ID,
-		filePath,
-		fetch,
-		now: () => NOW,
-		print: () => {},
-		openBrowser: () => {},
-		readCode: async () => 'CODE',
-	});
-	expectOk(result);
-	const raw = await fs.readFile(filePath, 'utf-8');
-	const parsed = JSON.parse(raw) as Record<string, unknown>;
-	expect(Object.keys(parsed).sort()).toEqual(['grant', 'keyring', 'owner']);
-	expect('unlock' in parsed).toBe(false);
-});
-
-test('status valid when /api/session returns 200 with same subject', async () => {
+test('status valid when /api/session returns 200 with same owner', async () => {
 	const filePath = tmpAuthPath();
 	await preWriteCell(filePath, 'user-1');
 	const { fetch } = createFetch({ apiSessionRoute: apiSessionOk('user-1') });
@@ -435,7 +393,7 @@ test('status signedOut when no file', async () => {
 	expect(data).toEqual({ status: 'signedOut' });
 });
 
-test('same-subject guard wipes cell when /api/session returns different subject', async () => {
+test('same-owner guard wipes cell when /api/session returns different owner', async () => {
 	const filePath = tmpAuthPath();
 	await preWriteCell(filePath, 'alice');
 	const { fetch } = createFetch({ apiSessionRoute: apiSessionOk('bob') });
@@ -553,7 +511,7 @@ test('createMachineAuthClient loads file and attaches Bearer after gate', async 
 		if (url.endsWith('/api/session')) {
 			return jsonResponse({
 				user: { id: 'user-1', email: 'user-1@example.com' },
-				owner: { kind: 'personal' as const, userId: 'user-1' },
+				ownerId: 'user-1',
 				keyring: [...keyring],
 			});
 		}

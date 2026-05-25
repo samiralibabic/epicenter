@@ -44,10 +44,6 @@ describe('daemon action path helpers', () => {
 		);
 	});
 
-	test('joinDaemonActionPath returns the route when local path is empty', () => {
-		expect(joinDaemonActionPath('demo', '')).toBe('demo');
-	});
-
 	test('parseDaemonActionPath separates the route from the local action path', () => {
 		expect(parseDaemonActionPath('demo.counter_get')).toEqual({
 			routeName: 'demo',

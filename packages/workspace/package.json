@@ -46,8 +46,6 @@
 		"bench": "bun test ./src/__benchmarks__/*.bench.ts --timeout 60000"
 	},
 	"dependencies": {
-		"@ark/json-schema": "^0.0.4",
-		"@epicenter/auth": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/encryption": "workspace:*",
 		"@hono/standard-validator": "catalog:",
@@ -55,7 +53,6 @@
 		"@epicenter/sync": "workspace:*",
 		"@epicenter/util": "workspace:*",
 		"@sindresorhus/slugify": "catalog:",
-		"@standard-schema/spec": "catalog:",
 		"@tursodatabase/database": "^0.3.2",
 		"@types/bun": "catalog:",
 		"arkregex": "catalog:",
@@ -64,6 +61,7 @@
 		"diff": "^8.0.3",
 		"drizzle-orm": "catalog:",
 		"elysia": "^1.2.25",
+		"env-paths": "^3.0.0",
 		"fflate": "catalog:",
 		"hono": "catalog:",
 		"lib0": "catalog:",

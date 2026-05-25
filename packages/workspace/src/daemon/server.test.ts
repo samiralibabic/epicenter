@@ -14,8 +14,6 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 import { type ActionRegistry, defineQuery } from '../shared/actions.js';
 import { daemonClient } from './client.js';
@@ -23,7 +21,7 @@ import { claimDaemonLease, type DaemonLease } from './lease.js';
 import { startDaemonServer } from './server.js';
 import type { DaemonServedRoute } from './types.js';
 
-let originalXdg: string | undefined;
+let originalRuntimeDir: string | undefined;
 let runtimeRoot: string;
 let workDir: string;
 
@@ -47,16 +45,20 @@ function claimTestLease(): DaemonLease {
 }
 
 beforeEach(() => {
-	originalXdg = process.env.XDG_RUNTIME_DIR;
-	runtimeRoot = mkdtempSync(join(tmpdir(), 'ep-server-'));
-	process.env.XDG_RUNTIME_DIR = runtimeRoot;
-	mkdirSync(join(runtimeRoot, 'epicenter'), { recursive: true });
-	workDir = mkdtempSync(join(tmpdir(), 'ep-server-dir-'));
+	originalRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
+	// `/tmp/...` is short on every POSIX platform; needed because
+	// socketPathFor enforces a strict path-length guard that macOS's
+	// `os.tmpdir()` would blow.
+	runtimeRoot = mkdtempSync('/tmp/eps-server-rt-');
+	process.env.EPICENTER_RUNTIME_DIR = runtimeRoot;
+	mkdirSync(runtimeRoot, { recursive: true });
+	workDir = mkdtempSync('/tmp/eps-server-dir-');
 });
 
 afterEach(() => {
-	if (originalXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
-	else process.env.XDG_RUNTIME_DIR = originalXdg;
+	if (originalRuntimeDir === undefined)
+		delete process.env.EPICENTER_RUNTIME_DIR;
+	else process.env.EPICENTER_RUNTIME_DIR = originalRuntimeDir;
 	rmSync(runtimeRoot, { recursive: true, force: true });
 	rmSync(workDir, { recursive: true, force: true });
 });

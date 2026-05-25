@@ -7,13 +7,14 @@
  * at `/auth/oauth2/token` with PKCE. Returns a 3-field `OAuthTokenGrant`.
  *
  * The launcher is concerned only with the OAuth dance. The caller pairs
- * the returned grant with `GET /api/session` to build the `localIdentity` section
- * of `PersistedAuth`.
+ * the returned grant with `GET /api/session` to fill in the `userId`,
+ * `ownerId`, `mode`, and `keyring` fields of `PersistedAuth`.
  */
 
 import * as readline from 'node:readline';
 import { EPICENTER_API_URL } from '@epicenter/constants/apps';
 import { EPICENTER_OAUTH_SCOPES } from '@epicenter/constants/oauth';
+import { OAUTH_ROUTES } from '@epicenter/constants/oauth-routes';
 import {
 	defineErrors,
 	extractErrorMessage,
@@ -78,7 +79,7 @@ export type CreateOobOAuthLauncherConfig = {
 export function createOobOAuthLauncher({
 	baseURL = EPICENTER_API_URL,
 	clientId,
-	redirectUri = `${baseURL}/auth/cli-callback`,
+	redirectUri = OAUTH_ROUTES.cliCallback.url(baseURL),
 	scopes = EPICENTER_OAUTH_SCOPES,
 	openBrowser = defaultOpenBrowser,
 	readCode = defaultReadCode,
@@ -99,7 +100,7 @@ export function createOobOAuthLauncher({
 				),
 			);
 			const codeChallenge = base64UrlEncode(challengeBytes);
-			const authorizeUrl = new URL(`${baseURL}/auth/oauth2/authorize`);
+			const authorizeUrl = new URL(OAUTH_ROUTES.authorize.url(baseURL));
 			authorizeUrl.search = new URLSearchParams({
 				response_type: 'code',
 				client_id: clientId,
@@ -128,7 +129,7 @@ export function createOobOAuthLauncher({
 
 			let response: Response;
 			try {
-				response = await fetch(`${baseURL}/auth/oauth2/token`, {
+				response = await fetch(OAUTH_ROUTES.token.url(baseURL), {
 					method: 'POST',
 					headers: { 'content-type': 'application/x-www-form-urlencoded' },
 					credentials: 'omit',
@@ -173,12 +174,13 @@ export function createOobOAuthLauncher({
 				return Err(OobLauncherError.InvalidTokenResponse({ cause }).error);
 			}
 
-			try {
-				const grant = parseOAuthTokenGrant(payload, { now });
-				return Ok(grant);
-			} catch (cause) {
-				return Err(OobLauncherError.InvalidTokenResponse({ cause }).error);
+			const { data: grant, error } = parseOAuthTokenGrant(payload, { now });
+			if (error) {
+				return Err(
+					OobLauncherError.InvalidTokenResponse({ cause: error }).error,
+				);
 			}
+			return Ok(grant);
 		},
 	};
 }

@@ -1,5 +1,6 @@
+import { RequestGuardError } from '@epicenter/constants/request-guard-errors';
 import { createMiddleware } from 'hono/factory';
-import { parseBearer } from '../auth/resource-boundary.js';
+import { parseBearer } from '../auth/parse-bearer.js';
 import { TRUSTED_ORIGINS } from '../trusted-origins.js';
 
 /**
@@ -24,7 +25,8 @@ export const requireOriginForCookieMutations = createMiddleware(
 		if (parseBearer(c.req.header('authorization') ?? null)) return next();
 		const origin = c.req.header('origin');
 		if (!origin || !TRUSTED_ORIGINS.includes(origin)) {
-			return c.json({ name: 'forbidden_origin' }, 403);
+			const err = RequestGuardError.ForbiddenOrigin();
+			return c.json(err, err.error.status);
 		}
 		await next();
 	},

@@ -10,15 +10,10 @@ describe('document/workspace-paths', () => {
 		);
 	});
 
-	test('sqlitePath lives alongside yjsPath under .epicenter/', () => {
+	test('sqlitePath places the database under .epicenter/sqlite/', () => {
 		const dir = '/Users/me/vault';
 		expect(sqlitePath(dir, 'epicenter.fuji')).toBe(
 			'/Users/me/vault/.epicenter/sqlite/epicenter.fuji.db',
-		);
-		// Distinct from the yjs file (raw update log) so the two coexist
-		// without colliding.
-		expect(sqlitePath(dir, 'epicenter.fuji')).not.toBe(
-			yjsPath(dir, 'epicenter.fuji'),
 		);
 	});
 

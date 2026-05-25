@@ -3,7 +3,7 @@ name: logging
 description: 'wellcrafted/logger for library diagnostics: 5 levels, typed errors, DI sink. Use for attach primitives, background errors, file-backed logs. No console.* in library code.'
 metadata:
   author: epicenter
-  version: '2.0'
+  version: '2.1'
 ---
 
 # Workspace Logger
@@ -12,7 +12,7 @@ Structured, level-keyed, field-oriented logging for library code. Modeled on Rus
 
 ## Where it lives
 
-All of it ships from **`wellcrafted/logger`** : `createLogger`, `consoleSink`, `memorySink`, `composeSinks`, `tapErr`, and the types. Runtime-agnostic, browser-safe. No file sink in-process: durability is a *host* concern (shell redirect, systemd journal, Cloudflare tail). The library emits to `consoleSink`; the operator decides where stdout/stderr go.
+All of it ships from **`wellcrafted/logger`** : `createLogger`, `consoleSink`, `memorySink`, `composeSinks`, and the types. Runtime-agnostic, browser-safe. No file sink in-process: durability is a *host* concern (shell redirect, systemd journal, Cloudflare tail). The library emits to `consoleSink`; the operator decides where stdout/stderr go.
 
 ## Quickstart
 
@@ -49,6 +49,30 @@ log.error(SyncError.ConnectionFailed({ cause })); // last attempt, giving up
 
 Do NOT attach a `severity` to `defineErrors` variants. That's `miette`'s pattern; `tracing`, `log`, and every production Rust logger put level on the call. Context-dependent data belongs at the context.
 
+## The dominant call-site shape
+
+In epicenter, the typical pattern is **branch on the Result, log inside the branch, then take action**. The Result's data is usually needed on the Ok branch, so a chain combinator wouldn't earn its keep:
+
+```ts
+const walResult = trySync({
+  try: () => db.query('PRAGMA journal_mode = WAL').get(),
+  catch: (cause) => SqliteWriterError.PragmaSetupFailed({ pragma: 'WAL', cause }),
+});
+if (walResult.error !== null) {
+  log.warn(walResult.error);
+} else if (walResult.data !== 'wal') {
+  log.warn(SqliteWriterError.WalSilentFallback({ actualMode: walResult.data }));
+}
+```
+
+You can also mint-and-log a tagged variant directly inside a `.catch` tail when there's no Result to branch on:
+
+```ts
+}).catch((cause) => {
+  log.warn(MaterializerWriteError.TableWriteFailed({ tableName, cause }));
+});
+```
+
 ## Sinks
 
 A sink is `((event) => void) & Partial<AsyncDisposable>` : a callable with optional resource cleanup.
@@ -59,7 +83,6 @@ import {
   consoleSink,    // default; routes to console[level]
   memorySink,     // for tests; returns { sink, events }
   composeSinks,   // fan out to multiple sinks
-  tapErr,         // Result-flow combinator
 } from 'wellcrafted/logger';
 ```
 
@@ -95,19 +118,6 @@ expect(events[0]).toMatchObject({ level: 'warn', source: 'test' });
 ```
 
 Do NOT assert on `console.*` output. Inject a `memorySink` and inspect the event array.
-
-## `tapErr` : the Result-flow combinator
-
-`tapErr(logFn)` logs on the Err branch and returns the Result unchanged. Takes a log *method*, not a whole logger, so the caller picks the level at the pipeline site.
-
-```ts
-const result = await tryAsync({
-  try: () => writeTable(path),
-  catch: (cause) => MarkdownError.TableWrite({ path, cause }),
-}).then(tapErr(log.warn));
-```
-
-Mirrors Rust's `.inspect_err` and Effect's `tapErrorCause`. No message argument : the typed error owns its message.
 
 ## DI, not globals
 
@@ -149,6 +159,7 @@ Custom sinks that serialize for the wire should convert `ts` to ISO-8601 and fla
 
 ## See also
 
-- `error-handling` skill : the `tryAsync.catch:` → `tapErr(log.warn)` pipeline
+- `error-handling` skill : the `trySync`/`tryAsync` patterns the logger consumes
 - `define-errors` skill : how to mint the typed error variants the logger consumes
 - `rust-errors` skill : full `tracing` ↔ `Logger` mapping
+- `tapErr` (from `wellcrafted/result`) : Result-chain combinator that logs on the Err branch and passes the Result through. Rare in epicenter, since most call sites branch on `result.error` directly to use the data on the Ok branch. Reach for it only when the Result flows out of the function in a `.then(...)` chain.

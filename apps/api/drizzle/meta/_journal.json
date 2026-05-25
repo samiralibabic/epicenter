@@ -22,6 +22,20 @@
 			"when": 1778827600452,
 			"tag": "0002_salty_hex",
 			"breakpoints": true
+		},
+		{
+			"idx": 3,
+			"version": "7",
+			"when": 1779613911447,
+			"tag": "0003_glorious_the_hand",
+			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "7",
+			"when": 1779614482626,
+			"tag": "0004_striped_dracula",
+			"breakpoints": true
 		}
 	]
 }
