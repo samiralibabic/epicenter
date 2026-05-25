@@ -1,0 +1,22 @@
+{
+	"name": "@epicenter/client",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Typed HTTP client for the Epicenter server (assets, session, AI chat). Composes on @epicenter/auth's AuthFetch.",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@epicenter/auth": "workspace:*",
+		"@epicenter/constants": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "catalog:",
+		"typescript": "catalog:"
+	},
+	"license": "AGPL-3.0-or-later"
+}

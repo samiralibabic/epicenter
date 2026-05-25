@@ -53,7 +53,6 @@ describe('heap usage: small rows', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 
@@ -136,7 +135,6 @@ describe('heap overhead: binary vs in-memory', () => {
 				tags: ['tag1'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1,
 			});
 		}
 

@@ -19,7 +19,7 @@ import { join } from 'node:path';
 
 import { createLogger } from 'wellcrafted/logger';
 
-import { daemonRuntimeDir, metadataPathFor } from './paths.js';
+import { metadataPathFor, runtimeDir } from './paths.js';
 
 const log = createLogger('workspace/daemon/metadata');
 
@@ -74,7 +74,7 @@ export function unlinkMetadata(dir: string): void {
 }
 
 export function enumerateDaemons(): DaemonMetadata[] {
-	const root = daemonRuntimeDir();
+	const root = runtimeDir();
 	if (!existsSync(root)) return [];
 	const result: DaemonMetadata[] = [];
 	for (const name of readdirSync(root)) {

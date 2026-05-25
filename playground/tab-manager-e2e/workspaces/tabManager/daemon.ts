@@ -31,8 +31,8 @@ export default defineWorkspace({
 	async open({
 		projectDir,
 		yDocClientId,
-		installationId,
-		owner,
+		deviceId,
+		ownerId,
 		keyring,
 		openWebSocket,
 		onReconnectSignal,
@@ -52,9 +52,9 @@ export default defineWorkspace({
 		const collaboration = openCollaboration(ydoc, {
 			url: roomWsUrl({
 				baseURL: SERVER_URL,
-				owner,
+				ownerId,
 				guid: ydoc.guid,
-				installationId,
+				deviceId,
 			}),
 			openWebSocket,
 			onReconnectSignal,

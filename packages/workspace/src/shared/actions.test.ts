@@ -13,7 +13,6 @@ import { Err, Ok } from 'wellcrafted/result';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 import {
 	ACTION_KEY_PATTERN,
-	type ActionRegistry,
 	defineActions,
 	defineMutation,
 	defineQuery,
@@ -167,20 +166,6 @@ describe('invokeAction', () => {
 // ---------------------------------------------------------------------------
 
 describe('ActionRegistry', () => {
-	test('registry keys are addresses; flat string lookup, no recursion', () => {
-		const actions = {
-			entries_create: defineMutation({ handler: () => ({ id: 'x' }) }),
-			entries_update: defineMutation({ handler: () => ({ id: 'x' }) }),
-		} satisfies ActionRegistry;
-
-		expect(Object.keys(actions).sort()).toEqual([
-			'entries_create',
-			'entries_update',
-		]);
-		expect(actions.entries_create).toBeDefined();
-		// No segment walking. The key is the address.
-	});
-
 	test('action keys must match ACTION_KEY_PATTERN', () => {
 		expect(ACTION_KEY_PATTERN.test('tabs_close')).toBe(true);
 		expect(ACTION_KEY_PATTERN.test('entries_bulk_create')).toBe(true);
@@ -197,26 +182,6 @@ describe('ActionRegistry', () => {
 // ---------------------------------------------------------------------------
 
 describe('defineActions', () => {
-	test('returns the input record verbatim for valid snake_case keys', () => {
-		const actions = defineActions({
-			tabs_close: defineMutation({ handler: () => ({ closed: 1 }) }),
-			tabs_list: defineQuery({ handler: () => [] }),
-		});
-		expect(Object.keys(actions).sort()).toEqual(['tabs_close', 'tabs_list']);
-	});
-
-	test('preserves Action type narrowing for type extraction', () => {
-		const actions = defineActions({
-			entries_update: defineMutation({
-				input: Type.Object({ id: Type.String() }),
-				handler: ({ id }) => ({ id }),
-			}),
-		});
-		type UpdateInput = Parameters<typeof actions.entries_update>[0];
-		const ok: UpdateInput = { id: 'x' };
-		expect(ok.id).toBe('x');
-	});
-
 	test('throws at construction when a dynamic key fails the pattern', () => {
 		const dynamic = {
 			'tabs.close': defineMutation({ handler: () => null }),

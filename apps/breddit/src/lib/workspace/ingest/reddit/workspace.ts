@@ -3,335 +3,280 @@
  *
  * Workspace definition with 1:1 CSV → table mapping for Reddit GDPR export data.
  * (Singleton/settings-like CSVs map to the KV store instead of tables.)
- * Uses arktype schemas for type validation and inference.
+ * Uses TypeBox `column.*` schemas for type validation and inference.
  */
 
 import {
 	attachKv,
 	attachTables,
+	column,
 	defineKv,
 	defineTable,
 } from '@epicenter/workspace';
-import { type } from 'arktype';
+import { Type } from 'typebox';
 import * as Y from 'yjs';
 
 const redditTables = {
 	/** posts.csv */
-	posts: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string | null',
-			date: 'string | null',
-			subreddit: 'string',
-			gildings: 'number',
-			'title?': 'string',
-			'url?': 'string',
-			'body?': 'string',
-			_v: '1',
-		}),
-	),
+	posts: defineTable({
+		id: column.string(),
+		permalink: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		subreddit: column.string(),
+		gildings: column.number(),
+		title: column.nullable(column.string()),
+		url: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+	}),
 
 	/** comments.csv */
-	comments: defineTable(
-		type({
-			id: 'string', // Composite: `${targetType}:${targetId}`
-			permalink: 'string | null',
-			date: 'string | null',
-			subreddit: 'string',
-			gildings: 'number',
-			link: 'string',
-			'parent?': 'string',
-			'body?': 'string',
-			'media?': 'string',
-			_v: '1',
-		}),
-	),
+	comments: defineTable({
+		id: column.string(), // Composite: `${targetType}:${targetId}`
+		permalink: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		subreddit: column.string(),
+		gildings: column.number(),
+		link: column.string(),
+		parent: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+		media: column.nullable(column.string()),
+	}),
 
 	/** drafts.csv */
-	drafts: defineTable(
-		type({
-			id: 'string',
-			'title?': 'string',
-			'body?': 'string',
-			'kind?': 'string',
-			created: 'string | null',
-			'spoiler?': 'string',
-			'nsfw?': 'string',
-			'original_content?': 'string',
-			'content_category?': 'string',
-			'flair_id?': 'string',
-			'flair_text?': 'string',
-			'send_replies?': 'string',
-			'subreddit?': 'string',
-			'is_public_link?': 'string',
-			_v: '1',
-		}),
-	),
+	drafts: defineTable({
+		id: column.string(),
+		title: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+		kind: column.nullable(column.string()),
+		created: column.nullable(column.string()),
+		spoiler: column.nullable(column.string()),
+		nsfw: column.nullable(column.string()),
+		original_content: column.nullable(column.string()),
+		content_category: column.nullable(column.string()),
+		flair_id: column.nullable(column.string()),
+		flair_text: column.nullable(column.string()),
+		send_replies: column.nullable(column.string()),
+		subreddit: column.nullable(column.string()),
+		is_public_link: column.nullable(column.string()),
+	}),
 
 	/** post_votes.csv */
-	postVotes: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			direction: "'up' | 'down' | 'none' | 'removed'",
-			_v: '1',
-		}),
-	),
+	postVotes: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+		direction: column.enum(['up', 'down', 'none', 'removed']),
+	}),
 
 	/** comment_votes.csv */
-	commentVotes: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			direction: "'up' | 'down' | 'none' | 'removed'",
-			_v: '1',
-		}),
-	),
+	commentVotes: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+		direction: column.enum(['up', 'down', 'none', 'removed']),
+	}),
 
 	/** poll_votes.csv */
-	pollVotes: defineTable(
-		type({
-			id: 'string', // Composite: `${post_id}|${user_selection ?? ''}|${text ?? ''}`
-			post_id: 'string',
-			'user_selection?': 'string',
-			'text?': 'string',
-			'image_url?': 'string',
-			'is_prediction?': 'string',
-			'stake_amount?': 'string',
-			_v: '1',
-		}),
-	),
+	pollVotes: defineTable({
+		id: column.string(), // Composite: `${post_id}|${user_selection ?? ''}|${text ?? ''}`
+		post_id: column.string(),
+		user_selection: column.nullable(column.string()),
+		text: column.nullable(column.string()),
+		image_url: column.nullable(column.string()),
+		is_prediction: column.nullable(column.string()),
+		stake_amount: column.nullable(column.string()),
+	}),
 
 	/** saved_posts.csv */
-	savedPosts: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			_v: '1',
-		}),
-	),
+	savedPosts: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+	}),
 
 	/** saved_comments.csv */
-	savedComments: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			_v: '1',
-		}),
-	),
+	savedComments: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+	}),
 
 	/** hidden_posts.csv */
-	hiddenPosts: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			_v: '1',
-		}),
-	),
+	hiddenPosts: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+	}),
 
 	/** messages.csv (optional) */
-	messages: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			thread_id: 'string | null',
-			date: 'string | null',
-			'from?': 'string',
-			'to?': 'string',
-			'subject?': 'string',
-			'body?': 'string',
-			_v: '1',
-		}),
-	),
+	messages: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+		thread_id: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		from: column.nullable(column.string()),
+		to: column.nullable(column.string()),
+		subject: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+	}),
 
 	/** messages_archive.csv */
-	messagesArchive: defineTable(
-		type({
-			id: 'string',
-			permalink: 'string',
-			thread_id: 'string | null',
-			date: 'string | null',
-			'from?': 'string',
-			'to?': 'string',
-			'subject?': 'string',
-			'body?': 'string',
-			_v: '1',
-		}),
-	),
+	messagesArchive: defineTable({
+		id: column.string(),
+		permalink: column.string(),
+		thread_id: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		from: column.nullable(column.string()),
+		to: column.nullable(column.string()),
+		subject: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+	}),
 
 	/** chat_history.csv */
-	chatHistory: defineTable(
-		type({
-			id: 'string', // message_id from CSV
-			created_at: 'string | null',
-			updated_at: 'string | null',
-			username: 'string | null',
-			message: 'string | null',
-			thread_parent_message_id: 'string | null',
-			channel_url: 'string | null',
-			subreddit: 'string | null',
-			channel_name: 'string | null',
-			conversation_type: 'string | null',
-			_v: '1',
-		}),
-	),
+	chatHistory: defineTable({
+		id: column.string(), // message_id from CSV
+		created_at: column.nullable(column.string()),
+		updated_at: column.nullable(column.string()),
+		username: column.nullable(column.string()),
+		message: column.nullable(column.string()),
+		thread_parent_message_id: column.nullable(column.string()),
+		channel_url: column.nullable(column.string()),
+		subreddit: column.nullable(column.string()),
+		channel_name: column.nullable(column.string()),
+		conversation_type: column.nullable(column.string()),
+	}),
 
 	/** subscribed_subreddits.csv */
-	subscribedSubreddits: defineTable(
-		type({
-			id: 'string', // subreddit
-			subreddit: 'string',
-			_v: '1',
-		}),
-	),
+	subscribedSubreddits: defineTable({
+		id: column.string(), // subreddit
+		subreddit: column.string(),
+	}),
 
 	/** moderated_subreddits.csv */
-	moderatedSubreddits: defineTable(
-		type({
-			id: 'string', // subreddit
-			subreddit: 'string',
-			_v: '1',
-		}),
-	),
+	moderatedSubreddits: defineTable({
+		id: column.string(), // subreddit
+		subreddit: column.string(),
+	}),
 
 	/** approved_submitter_subreddits.csv */
-	approvedSubmitterSubreddits: defineTable(
-		type({
-			id: 'string', // subreddit
-			subreddit: 'string',
-			_v: '1',
-		}),
-	),
+	approvedSubmitterSubreddits: defineTable({
+		id: column.string(), // subreddit
+		subreddit: column.string(),
+	}),
 
 	/** multireddits.csv */
-	multireddits: defineTable(
-		type({
-			id: 'string',
-			'display_name?': 'string',
-			date: 'string | null',
-			'description?': 'string',
-			'privacy?': 'string',
-			'subreddits?': 'string', // Comma-separated list
-			'image_url?': 'string',
-			'is_owner?': 'string',
-			'favorited?': 'string',
-			'followers?': 'string',
-			_v: '1',
-		}),
-	),
+	multireddits: defineTable({
+		id: column.string(),
+		display_name: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		description: column.nullable(column.string()),
+		privacy: column.nullable(column.string()),
+		subreddits: column.nullable(column.string()), // Comma-separated list
+		image_url: column.nullable(column.string()),
+		is_owner: column.nullable(column.string()),
+		favorited: column.nullable(column.string()),
+		followers: column.nullable(column.string()),
+	}),
 
 	/** gilded_content.csv */
-	gildedContent: defineTable(
-		type({
-			id: 'string', // Composite: `${content_link}|${date ?? ''}|${award ?? ''}|${amount ?? ''}`
-			content_link: 'string',
-			'award?': 'string',
-			'amount?': 'string',
-			date: 'string | null',
-			_v: '1',
-		}),
-	),
+	gildedContent: defineTable({
+		id: column.string(), // Composite: `${content_link}|${date ?? ''}|${award ?? ''}|${amount ?? ''}`
+		content_link: column.string(),
+		award: column.nullable(column.string()),
+		amount: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+	}),
 
 	/** gold_received.csv */
-	goldReceived: defineTable(
-		type({
-			id: 'string', // Composite: `${content_link}|${date ?? ''}|${gold_received ?? ''}|${gilder_username ?? ''}`
-			content_link: 'string',
-			'gold_received?': 'string',
-			'gilder_username?': 'string',
-			date: 'string | null',
-			_v: '1',
-		}),
-	),
+	goldReceived: defineTable({
+		id: column.string(), // Composite: `${content_link}|${date ?? ''}|${gold_received ?? ''}|${gilder_username ?? ''}`
+		content_link: column.string(),
+		gold_received: column.nullable(column.string()),
+		gilder_username: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+	}),
 
 	/** purchases.csv */
-	purchases: defineTable(
-		type({
-			id: 'string', // transaction_id
-			'processor?': 'string',
-			transaction_id: 'string',
-			'product?': 'string',
-			date: 'string | null',
-			'cost?': 'string',
-			'currency?': 'string',
-			'status?': 'string',
-			_v: '1',
-		}),
-	),
+	purchases: defineTable({
+		id: column.string(), // transaction_id
+		processor: column.nullable(column.string()),
+		transaction_id: column.string(),
+		product: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		cost: column.nullable(column.string()),
+		currency: column.nullable(column.string()),
+		status: column.nullable(column.string()),
+	}),
 
 	/** subscriptions.csv */
-	subscriptions: defineTable(
-		type({
-			id: 'string', // subscription_id
-			'processor?': 'string',
-			subscription_id: 'string',
-			'product?': 'string',
-			'product_id?': 'string',
-			'product_name?': 'string',
-			'status?': 'string',
-			start_date: 'string | null',
-			end_date: 'string | null',
-			_v: '1',
-		}),
-	),
+	subscriptions: defineTable({
+		id: column.string(), // subscription_id
+		processor: column.nullable(column.string()),
+		subscription_id: column.string(),
+		product: column.nullable(column.string()),
+		product_id: column.nullable(column.string()),
+		product_name: column.nullable(column.string()),
+		status: column.nullable(column.string()),
+		start_date: column.nullable(column.string()),
+		end_date: column.nullable(column.string()),
+	}),
 
 	/** payouts.csv */
-	payouts: defineTable(
-		type({
-			id: 'string', // payout_id ?? date
-			'payout_amount_usd?': 'string',
-			date: 'string | null',
-			'payout_id?': 'string',
-			_v: '1',
-		}),
-	),
+	payouts: defineTable({
+		id: column.string(), // payout_id ?? date
+		payout_amount_usd: column.nullable(column.string()),
+		date: column.nullable(column.string()),
+		payout_id: column.nullable(column.string()),
+	}),
 
 	/** friends.csv */
-	friends: defineTable(
-		type({
-			id: 'string', // username
-			username: 'string',
-			'note?': 'string',
-			_v: '1',
-		}),
-	),
+	friends: defineTable({
+		id: column.string(), // username
+		username: column.string(),
+		note: column.nullable(column.string()),
+	}),
 
 	/** announcements.csv */
-	announcements: defineTable(
-		type({
-			id: 'string', // announcement_id from CSV
-			announcement_id: 'string',
-			sent_at: 'string | null',
-			read_at: 'string | null',
-			from_id: 'string | null',
-			from_username: 'string | null',
-			subject: 'string | null',
-			body: 'string | null',
-			url: 'string | null',
-			_v: '1',
-		}),
-	),
+	announcements: defineTable({
+		id: column.string(), // announcement_id from CSV
+		announcement_id: column.string(),
+		sent_at: column.nullable(column.string()),
+		read_at: column.nullable(column.string()),
+		from_id: column.nullable(column.string()),
+		from_username: column.nullable(column.string()),
+		subject: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+		url: column.nullable(column.string()),
+	}),
 
 	/** scheduled_posts.csv */
-	scheduledPosts: defineTable(
-		type({
-			id: 'string', // scheduled_post_id from CSV
-			scheduled_post_id: 'string',
-			'subreddit?': 'string',
-			'title?': 'string',
-			'body?': 'string',
-			'url?': 'string',
-			submission_time: 'string | null',
-			'recurrence?': 'string',
-			_v: '1',
-		}),
-	),
+	scheduledPosts: defineTable({
+		id: column.string(), // scheduled_post_id from CSV
+		scheduled_post_id: column.string(),
+		subreddit: column.nullable(column.string()),
+		title: column.nullable(column.string()),
+		body: column.nullable(column.string()),
+		url: column.nullable(column.string()),
+		submission_time: column.nullable(column.string()),
+		recurrence: column.nullable(column.string()),
+	}),
 };
 
+/**
+ * KV singletons store one JSON-encoded payload per key. Both entries hold a
+ * flat `Record<string, string>` (or `null` when the source CSV was absent),
+ * so the schema is JSON-encoded via `column.json` and the union with
+ * `Type.Null()` carries the "no data" state.
+ */
 const redditKv = {
 	// Singleton values from CSV files
-	statistics: defineKv(type('Record<string, string> | null'), null),
-	preferences: defineKv(type('Record<string, string> | null'), null),
+	statistics: defineKv(
+		column.json(
+			Type.Union([Type.Record(Type.String(), Type.String()), Type.Null()]),
+		),
+		(): Record<string, string> | null => null,
+	),
+	preferences: defineKv(
+		column.json(
+			Type.Union([Type.Record(Type.String(), Type.String()), Type.Null()]),
+		),
+		(): Record<string, string> | null => null,
+	),
 };
 
 export function openReddit() {

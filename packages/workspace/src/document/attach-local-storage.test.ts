@@ -2,22 +2,22 @@
  * `attachLocalStorage` and `wipeLocalStorage` behavior tests.
  *
  * Covers the identity-scoped pairing of encrypted IDB persistence and
- * cross-tab BroadcastChannel, keyed by `(server, owner, ydoc.guid)`. Pins
+ * cross-tab BroadcastChannel, keyed by `(server, ownerId, ydoc.guid)`. Pins
  * the durable storage shape so any accidental change to the layout is
  * caught here:
  *
- *   personal: epicenter/<server>/users/<userId>/<guid>
- *   team:     epicenter/<server>/<guid>
+ *   epicenter/<server>/owners/<ownerId>/<guid>
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { asOwnerId } from '@epicenter/constants/identity';
 import {
 	base64ToBytes,
 	bytesToBase64,
 	decryptBytes,
 	deriveWorkspaceKey,
 	type EncryptedBlob,
-	type SubjectKeyring,
+	type Keyring,
 } from '@epicenter/encryption';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb';
@@ -28,14 +28,12 @@ import { wipeLocalStorage } from './wipe-local-storage.js';
 Object.assign(globalThis, { indexedDB, IDBKeyRange });
 
 const SERVER = 'api.epicenter.so';
-const personalOwner = (userId: string) =>
-	({ kind: 'personal', userId }) as const;
 
-function toKeyring(key: Uint8Array): SubjectKeyring {
-	return [{ version: 1, subjectKeyBase64: bytesToBase64(key) }];
+function toKeyring(key: Uint8Array): Keyring {
+	return [{ version: 1, keyBytesBase64: bytesToBase64(key) }];
 }
 
-const noKeys: () => SubjectKeyring = () => toKeyring(randomBytes(32));
+const noKeys: () => Keyring = () => toKeyring(randomBytes(32));
 
 function tick(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
@@ -61,13 +59,13 @@ async function readEncryptedUpdates(dbName: string): Promise<EncryptedBlob[]> {
 }
 
 function keyringForGuid(
-	keyring: SubjectKeyring,
+	keyring: Keyring,
 	guid: string,
 ): Map<number, Uint8Array> {
 	return new Map(
-		keyring.map(({ version, subjectKeyBase64 }) => [
+		keyring.map(({ version, keyBytesBase64 }) => [
 			version,
-			deriveWorkspaceKey(base64ToBytes(subjectKeyBase64), guid),
+			deriveWorkspaceKey(base64ToBytes(keyBytesBase64), guid),
 		]),
 	);
 }
@@ -103,7 +101,7 @@ describe('attachLocalStorage', () => {
 		expect(() =>
 			attachLocalStorage(ydoc, {
 				server: SERVER,
-				owner: personalOwner('user-no-keys'),
+				ownerId: asOwnerId('user-no-keys'),
 				keyring: () => {
 					throw new Error('not signed-in');
 				},
@@ -114,7 +112,7 @@ describe('attachLocalStorage', () => {
 
 	test('round trips encrypted Yjs updates through IndexedDB at the owner prefix', async () => {
 		const userId = `user-${crypto.randomUUID()}`;
-		const databaseName = `epicenter/${SERVER}/users/${userId}/encrypted-idb-roundtrip`;
+		const databaseName = `epicenter/${SERVER}/owners/${userId}/encrypted-idb-roundtrip`;
 		const keyring = toKeyring(randomBytes(32));
 
 		const firstDoc = new Y.Doc({
@@ -123,7 +121,7 @@ describe('attachLocalStorage', () => {
 		});
 		const firstIdb = attachLocalStorage(firstDoc, {
 			server: SERVER,
-			owner: personalOwner(userId),
+			ownerId: asOwnerId(userId),
 			keyring: () => keyring,
 		});
 		await firstIdb.whenLoaded;
@@ -142,7 +140,7 @@ describe('attachLocalStorage', () => {
 		});
 		const secondIdb = attachLocalStorage(secondDoc, {
 			server: SERVER,
-			owner: personalOwner(userId),
+			ownerId: asOwnerId(userId),
 			keyring: () => keyring,
 		});
 		await secondIdb.whenLoaded;
@@ -155,12 +153,12 @@ describe('attachLocalStorage', () => {
 
 	test('target guid changes the derived storage key', async () => {
 		const userId = `user-${crypto.randomUUID()}`;
-		const databaseName = `epicenter/${SERVER}/users/${userId}/encrypted-idb-guid-a`;
+		const databaseName = `epicenter/${SERVER}/owners/${userId}/encrypted-idb-guid-a`;
 		const keyring = toKeyring(randomBytes(32));
 		const ydoc = new Y.Doc({ guid: 'encrypted-idb-guid-a', gc: true });
 		const idb = attachLocalStorage(ydoc, {
 			server: SERVER,
-			owner: personalOwner(userId),
+			ownerId: asOwnerId(userId),
 			keyring: () => keyring,
 		});
 		await idb.whenLoaded;
@@ -189,7 +187,7 @@ describe('attachLocalStorage', () => {
 		const firstDoc = new Y.Doc({ guid: 'encrypted-idb-clear', gc: true });
 		const firstIdb = attachLocalStorage(firstDoc, {
 			server: SERVER,
-			owner: personalOwner(userId),
+			ownerId: asOwnerId(userId),
 			keyring: () => keyring,
 		});
 		await firstIdb.whenLoaded;
@@ -202,7 +200,7 @@ describe('attachLocalStorage', () => {
 		const secondDoc = new Y.Doc({ guid: 'encrypted-idb-clear', gc: true });
 		const secondIdb = attachLocalStorage(secondDoc, {
 			server: SERVER,
-			owner: personalOwner(userId),
+			ownerId: asOwnerId(userId),
 			keyring: () => keyring,
 		});
 		await secondIdb.whenLoaded;
@@ -246,7 +244,7 @@ describe('attachLocalStorage BroadcastChannel naming', () => {
 
 		attachLocalStorage(ydoc, {
 			server: SERVER,
-			owner: personalOwner('user-123'),
+			ownerId: asOwnerId('user-123'),
 			keyring: noKeys,
 		});
 
@@ -254,7 +252,7 @@ describe('attachLocalStorage BroadcastChannel naming', () => {
 		// channels coordinate with the same name y-indexeddb writes for the
 		// shared database. The owner-scoped portion is everything after.
 		expect(FakeBroadcastChannel.names).toEqual([
-			`yjs.epicenter/${SERVER}/users/user-123/epicenter.fuji`,
+			`yjs.epicenter/${SERVER}/owners/user-123/epicenter.fuji`,
 		]);
 		expect(ydoc.guid).toBe('epicenter.fuji');
 		ydoc.destroy();
@@ -268,33 +266,33 @@ describe('wipeLocalStorage', () => {
 		);
 	});
 
-	test('clears every database under the (server, owner) prefix', async () => {
-		await createDatabase(`epicenter/${SERVER}/users/user-1/doc-a`);
-		await createDatabase(`epicenter/${SERVER}/users/user-1/doc-b`);
+	test('clears every database under the (server, ownerId) prefix', async () => {
+		await createDatabase(`epicenter/${SERVER}/owners/user-1/doc-a`);
+		await createDatabase(`epicenter/${SERVER}/owners/user-1/doc-b`);
 
 		await wipeLocalStorage({
 			server: SERVER,
-			owner: personalOwner('user-1'),
+			ownerId: asOwnerId('user-1'),
 		});
 
 		const remaining = await databaseNames();
-		expect(remaining).not.toContain(`epicenter/${SERVER}/users/user-1/doc-a`);
-		expect(remaining).not.toContain(`epicenter/${SERVER}/users/user-1/doc-b`);
+		expect(remaining).not.toContain(`epicenter/${SERVER}/owners/user-1/doc-a`);
+		expect(remaining).not.toContain(`epicenter/${SERVER}/owners/user-1/doc-b`);
 	});
 
 	test('leaves other owners and unscoped databases alone', async () => {
-		await createDatabase(`epicenter/${SERVER}/users/user-1/doc-a`);
-		await createDatabase(`epicenter/${SERVER}/users/user-2/doc-c`);
+		await createDatabase(`epicenter/${SERVER}/owners/user-1/doc-a`);
+		await createDatabase(`epicenter/${SERVER}/owners/user-2/doc-c`);
 		await createDatabase('unscoped-doc');
 
 		await wipeLocalStorage({
 			server: SERVER,
-			owner: personalOwner('user-1'),
+			ownerId: asOwnerId('user-1'),
 		});
 
 		const remaining = await databaseNames();
-		expect(remaining).not.toContain(`epicenter/${SERVER}/users/user-1/doc-a`);
-		expect(remaining).toContain(`epicenter/${SERVER}/users/user-2/doc-c`);
+		expect(remaining).not.toContain(`epicenter/${SERVER}/owners/user-1/doc-a`);
+		expect(remaining).toContain(`epicenter/${SERVER}/owners/user-2/doc-c`);
 		expect(remaining).toContain('unscoped-doc');
 	});
 });

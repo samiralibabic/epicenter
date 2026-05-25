@@ -2,7 +2,7 @@
 
 /**
  * `attachLocalStorage`: pair encrypted IndexedDB persistence with a
- * `(server, owner)`-scoped BroadcastChannel for a Y.Doc.
+ * `(server, ownerId)`-scoped BroadcastChannel for a Y.Doc.
  *
  * One call covers both browser-local surfaces because they are always paired
  * for an authenticated workspace doc: writes that go to encrypted IDB also
@@ -22,8 +22,8 @@
  * @module
  */
 
-import type { Owner } from '@epicenter/auth';
-import type { SubjectKeyring } from '@epicenter/encryption';
+import type { OwnerId } from '@epicenter/constants/identity';
+import type { Keyring } from '@epicenter/encryption';
 import type * as Y from 'yjs';
 import { attachBroadcastChannel } from './attach-broadcast-channel.js';
 import { attachEncryptedIndexedDb } from './attach-encrypted-indexed-db.js';
@@ -31,10 +31,10 @@ import type { IndexedDbAttachment } from './attach-indexed-db.js';
 import { createOwnedYjsKey } from './local-yjs-key.js';
 
 /**
- * Attach `(server, owner)`-scoped encrypted IndexedDB persistence plus a
+ * Attach `(server, ownerId)`-scoped encrypted IndexedDB persistence plus a
  * matching BroadcastChannel to `ydoc`.
  *
- * `server` and `owner` are stable for the lifetime of the attachment: they
+ * `server` and `ownerId` are stable for the lifetime of the attachment: they
  * become the IDB database name and BroadcastChannel key prefix, so two
  * accounts on the same browser profile do not share local workspace data
  * and two team deployments on the same machine do not collide either.
@@ -55,13 +55,13 @@ export function attachLocalStorage(
 	ydoc: Y.Doc,
 	options: {
 		server: string;
-		owner: Owner;
-		keyring: () => SubjectKeyring;
+		ownerId: OwnerId;
+		keyring: () => Keyring;
 	},
 ): IndexedDbAttachment {
 	const databaseName = createOwnedYjsKey(
 		options.server,
-		options.owner,
+		options.ownerId,
 		ydoc.guid,
 	);
 	const idb = attachEncryptedIndexedDb(ydoc, {

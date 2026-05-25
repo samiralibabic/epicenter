@@ -143,9 +143,10 @@ export type ResolvedRoom = {
  * `DurableObjectNamespace`; a Bun backend wraps an in-process
  * `Map<string, RoomCore>` with lazy synchronous creation.
  *
- * The host-owned room name is built upstream by `doName(owner, roomId)`
- * in `owner.ts`, e.g. `users/<userId>/rooms/<roomId>` in personal mode or
- * `rooms/<roomId>` in team mode. This contract treats the name as opaque.
+ * The host-owned room name is built upstream by `doName(ownerId, roomId)`
+ * in `owner.ts`, producing `owners/<ownerId>/rooms/<roomId>` in both modes
+ * (in personal mode `ownerId === user.id`, in team mode `ownerId === 'team'`).
+ * This contract treats the name as opaque.
  */
 export type Rooms = {
 	/** Resolve a room by its opaque host-owned name. */

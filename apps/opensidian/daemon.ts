@@ -24,8 +24,8 @@ import { OPENSIDIAN_ID, opensidianTables } from './workspace.js';
 export function openOpensidianDaemon({
 	projectDir,
 	yDocClientId,
-	installationId,
-	owner,
+	deviceId,
+	ownerId,
 	keyring,
 	openWebSocket,
 	onReconnectSignal,
@@ -38,8 +38,8 @@ export function openOpensidianDaemon({
 
 	return attachDaemonInfrastructure(ydoc, {
 		projectDir,
-		owner,
-		installationId,
+		ownerId,
+		deviceId,
 		openWebSocket,
 		onReconnectSignal,
 		actions: {},

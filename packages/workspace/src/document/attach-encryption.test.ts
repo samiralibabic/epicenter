@@ -1,75 +1,31 @@
 /**
- * attachEncryption tests: lazy keyring callback wires the workspace keyring
- * at every registration site (table, kv). Plaintext mode does not exist:
- * registration always activates encryption.
+ * attachEncryption tests: keyring lookup failures surface at registration,
+ * and readonly helpers expose encrypted reads without write methods.
  *
- * Encrypted IndexedDB and subject-scoped BroadcastChannel behavior live on
+ * Encrypted IndexedDB and owner-scoped BroadcastChannel behavior live on
  * `attachLocalStorage`; see `attach-local-storage.test.ts` for those
  * round-trip tests.
  */
 
 import { describe, expect, test } from 'bun:test';
-import type { SubjectKeyring } from '@epicenter/encryption';
+import type { Keyring } from '@epicenter/encryption';
 import { bytesToBase64 } from '@epicenter/encryption';
 import { randomBytes } from '@noble/ciphers/utils.js';
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import { attachEncryption } from './attach-encryption.js';
+import { column } from './column/index.js';
 import { defineTable } from './define-table.js';
 
-function toKeyring(key: Uint8Array): SubjectKeyring {
-	return [{ version: 1, subjectKeyBase64: bytesToBase64(key) }];
+function toKeyring(key: Uint8Array): Keyring {
+	return [{ version: 1, keyBytesBase64: bytesToBase64(key) }];
 }
 
-const encryptedRowDefinition = defineTable(
-	type({ id: 'string', title: 'string', _v: '1' }),
-);
-
-function setup(keyring: SubjectKeyring = toKeyring(randomBytes(32))) {
-	const ydoc = new Y.Doc({ guid: 'enc-test', gc: true });
-	const encryption = attachEncryption(ydoc, { keyring: () => keyring });
-	const tableA = encryption.attachTable('a', encryptedRowDefinition);
-	const tableB = encryption.attachTable('b', encryptedRowDefinition);
-	return { ydoc, tableA, tableB, encryption };
-}
+const encryptedRowDefinition = defineTable({
+	id: column.string(),
+	title: column.string(),
+});
 
 describe('attachEncryption', () => {
-	test('registered stores accept encrypted writes immediately', () => {
-		const { tableA, tableB } = setup();
-		tableA.set({ id: '1', title: 'Secret A', _v: 1 });
-		tableB.set({ id: '1', title: 'Secret B', _v: 1 });
-		expect(tableA.get('1').data).toEqual({
-			id: '1',
-			title: 'Secret A',
-			_v: 1,
-		});
-		expect(tableB.get('1').data).toEqual({
-			id: '1',
-			title: 'Secret B',
-			_v: 1,
-		});
-	});
-
-	test('late-registered store activates via keyring callback at registration time', () => {
-		const keyring = toKeyring(randomBytes(32));
-		const ydoc = new Y.Doc({ guid: 'enc-late-register', gc: true });
-		const encryption = attachEncryption(ydoc, { keyring: () => keyring });
-
-		// Initial table is registered.
-		const earlyTable = encryption.attachTable('early', encryptedRowDefinition);
-		earlyTable.set({ id: '1', title: 'Early', _v: 1 });
-
-		// A later registration also calls keyring() and is encrypted from the start.
-		const lateTable = encryption.attachTable('late', encryptedRowDefinition);
-
-		lateTable.set({ id: '1', title: 'Written after late register', _v: 1 });
-		expect(lateTable.get('1').data).toEqual({
-			id: '1',
-			title: 'Written after late register',
-			_v: 1,
-		});
-	});
-
 	test('keyring callback throwing at registration surfaces the throw', () => {
 		const ydoc = new Y.Doc({ guid: 'enc-no-keys', gc: true });
 		const encryption = attachEncryption(ydoc, {
@@ -86,18 +42,18 @@ describe('attachEncryption', () => {
 		const keyring = toKeyring(randomBytes(32));
 		const ydoc = new Y.Doc({ guid: 'enc-readonly-table', gc: true });
 		const encryption = attachEncryption(ydoc, { keyring: () => keyring });
-		const definition = defineTable(
-			type({ id: 'string', title: 'string', _v: '1' }),
-		);
+		const definition = defineTable({
+			id: column.string(),
+			title: column.string(),
+		});
 		const writer = encryption.attachTable('entries', definition);
 		const reader = encryption.attachReadonlyTable('entries', definition);
 
-		writer.set({ id: '1', title: 'Secret row', _v: 1 });
+		writer.set({ id: '1', title: 'Secret row' });
 
 		expect(reader.get('1').data).toEqual({
 			id: '1',
 			title: 'Secret row',
-			_v: 1,
 		});
 		expect('set' in reader).toBe(false);
 		expect('bulkSet' in reader).toBe(false);
@@ -111,18 +67,19 @@ describe('attachEncryption', () => {
 		const keyring = toKeyring(randomBytes(32));
 		const ydoc = new Y.Doc({ guid: 'enc-readonly-tables', gc: true });
 		const encryption = attachEncryption(ydoc, { keyring: () => keyring });
-		const definition = defineTable(
-			type({ id: 'string', title: 'string', _v: '1' }),
-		);
+		const definition = defineTable({
+			id: column.string(),
+			title: column.string(),
+		});
 		const writers = encryption.attachTables({ entries: definition });
 		const readers = encryption.attachReadonlyTables({
 			entries: definition,
 		});
 
-		writers.entries.set({ id: '1', title: 'Secret row', _v: 1 });
+		writers.entries.set({ id: '1', title: 'Secret row' });
 
 		expect(readers.entries.getAllValid()).toEqual([
-			{ id: '1', title: 'Secret row', _v: 1 },
+			{ id: '1', title: 'Secret row' },
 		]);
 		expect('set' in readers.entries).toBe(false);
 		expect('bulkSet' in readers.entries).toBe(false);

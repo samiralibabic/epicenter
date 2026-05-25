@@ -1,6 +1,6 @@
 ---
 name: testing
-description: 'Test file conventions: setup functions, factories, organization, type testing, naming. Use when: "write tests", "add a test", "fix this test", or modifying *.test.ts files.'
+description: 'Test file conventions: setup functions, factories, organization, type testing, naming, and pruning low-value tests. Use when: "write tests", "add a test", "fix this test", "delete tests", "prune tests", "audit tests", or modifying *.test.ts files.'
 metadata:
   author: epicenter
   version: '2.0'
@@ -18,6 +18,7 @@ Use this pattern when you need to:
 - Enforce behavior-based test naming and clear failure intent.
 - Add or review negative type tests using `@ts-expect-error`.
 - Audit a test file for assertions that cannot fail or fakes that don't earn their lines.
+- Prune tests that cannot name a real regression they would catch.
 
 ## References
 
@@ -27,6 +28,7 @@ Load these on demand based on what you're working on:
 - If working with **test setup architecture** (`setup()` patterns, composable setup, `beforeEach` avoidance, shared schemas), read [references/setup-pattern.md](references/setup-pattern.md)
 - If working with **test organization structure** (flat tests, `describe()` boundaries, helper-over-nesting), read [references/test-structure.md](references/test-structure.md)
 - If **auditing existing tests** for hedged assertions, pass-through getters, stalled fakes, dead fake surface, or docstrings that contradict the code, read [references/honest-tests.md](references/honest-tests.md)
+- If **deleting or pruning tests** that may not earn their keep, read [references/test-deletion-grill.md](references/test-deletion-grill.md)
 
 External reading:
 

@@ -14,7 +14,7 @@
  * groups) is NOT stored here. Chrome is the sole authority for ephemeral
  * browser state. See `browser-state.svelte.ts`.
  *
- * The bundle's `wipe()` drops every encrypted IDB database for this subject;
+ * The bundle's `wipe()` drops every encrypted IDB database for this owner;
  * `Symbol.dispose` tears down the root Y.Doc without touching local storage.
  */
 
@@ -34,17 +34,17 @@ import {
 
 /**
  * Build the tab-manager binding. Synchronous: callers must resolve the
- * installation id before invoking (the extension's installation id comes
- * from `chrome.storage.local` via `createDeviceProfile()` in `device.ts`).
+ * device id before invoking (the extension's device id comes from
+ * `chrome.storage.local` via `createDeviceProfile()` in `device.ts`).
  *
  * Consumers gate UI render on `tabManager.idb.whenLoaded`.
  */
 export function openTabManagerBrowser({
 	signedIn,
-	installationId,
+	deviceId,
 }: {
 	signedIn: SignedIn;
-	installationId: DeviceId;
+	deviceId: DeviceId;
 }) {
 	const ydoc = new Y.Doc({ guid: TAB_MANAGER_ID, gc: true });
 	const encryption = attachEncryption(ydoc, { keyring: signedIn.keyring });
@@ -53,17 +53,17 @@ export function openTabManagerBrowser({
 	const actions = createTabManagerActions({
 		tables,
 		batch: (fn) => ydoc.transact(fn),
-		deviceId: installationId,
+		deviceId,
 	});
 
 	const idb = attachLocalStorage(ydoc, {
 		server: signedIn.server,
-		owner: signedIn.owner,
+		ownerId: signedIn.ownerId,
 		keyring: signedIn.keyring,
 	});
 
 	return {
-		installationId,
+		deviceId,
 		ydoc,
 		tables,
 		kv,
@@ -74,7 +74,7 @@ export function openTabManagerBrowser({
 			await idb.whenDisposed;
 			await wipeLocalStorage({
 				server: signedIn.server,
-				owner: signedIn.owner,
+				ownerId: signedIn.ownerId,
 			});
 		},
 		[Symbol.dispose]() {

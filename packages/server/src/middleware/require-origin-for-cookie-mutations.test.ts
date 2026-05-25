@@ -9,10 +9,11 @@
  */
 
 import { expect, test } from 'bun:test';
+import { APPS, localUrl } from '@epicenter/constants/apps';
 import { Hono } from 'hono';
 import { requireOriginForCookieMutations } from './require-origin-for-cookie-mutations.js';
 
-const PORTAL_ORIGIN = 'http://localhost:5178';
+const TRUSTED_ORIGIN = localUrl(APPS.API);
 
 test('CSRF guard rejects cookie-auth POST from a non-trusted origin', async () => {
 	const app = createCsrfTestApp();
@@ -26,8 +27,8 @@ test('CSRF guard rejects cookie-auth POST from a non-trusted origin', async () =
 		body: '{}',
 	});
 	expect(res.status).toBe(403);
-	const body = (await res.json()) as { name: string };
-	expect(body.name).toBe('forbidden_origin');
+	const body = (await res.json()) as { error: { name: string } };
+	expect(body.error.name).toBe('ForbiddenOrigin');
 });
 
 test('CSRF guard rejects cookie-auth POST with no Origin header', async () => {
@@ -49,7 +50,7 @@ test('CSRF guard admits cookie-auth POST from a trusted origin', async () => {
 		method: 'POST',
 		headers: {
 			cookie: 'better-auth.session_token=abc123',
-			origin: PORTAL_ORIGIN,
+			origin: TRUSTED_ORIGIN,
 			'content-type': 'application/json',
 		},
 		body: '{}',

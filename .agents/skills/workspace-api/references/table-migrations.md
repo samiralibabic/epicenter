@@ -4,56 +4,93 @@
 
 Read when adding table versions, writing `.migrate()` functions, or validating migration style and anti-patterns.
 
-## Table Migration Function Rules
+## Migrate Function Contract
 
-1. Input type is a union of all version outputs
-2. Return type is the latest version output
-3. Use `switch (row._v)` for discrimination (tables always have `_v`)
-4. Final case returns `row` as-is (already latest)
-5. Always migrate directly to latest (not incrementally through each version)
+`defineTable` is variadic over positional versions. The first argument is v1, the second is v2, etc. `.migrate(fn)` is required for the multi-version form and forbidden on the single-version form (there's nothing to migrate).
 
-## Table Anti-Patterns
+The migrate function takes a **discriminated** `{ value, version }` and returns the latest version's user-facing row.
+
+```typescript
+.migrate(({ value, version }) => {
+  switch (version) {
+    case 1: /* `value` narrows to v1 columns */
+    case 2: /* `value` narrows to v2 columns */
+  }
+});
+```
+
+Rules:
+
+1. Input is a discriminated union: `{ value: RowOf<vN>; version: N }` for every N.
+2. Return type is the latest version's row (user-facing; no `_v`).
+3. Use `switch (version)` for discrimination. `value` does not carry `version` and is not self-describing.
+4. The final case returns `value` as-is (already latest).
+5. Always migrate directly to latest. Don't chain v1 → v2 → v3 incrementally.
+
+`_v` is never present on `value`, never returned from the function, and never appears in user-facing row types. The library stamps it on storage and routes by it before calling migrate.
+
+## Anti-Patterns
 
 ### Incremental migration (v1 -> v2 -> v3)
 
 ```typescript
-// BAD: Chains through each version
-.migrate((row) => {
-  let current = row;
-  if (current._v === 1) current = { ...current, views: 0, _v: 2 };
-  if (current._v === 2) current = { ...current, tags: [], _v: 3 };
+// BAD: Chains through each version, re-running intermediate migrations
+.migrate(({ value, version }) => {
+  let current: any = value;
+  if (version === 1) current = { ...current, views: 0 };
+  if (version <= 2) current = { ...current, tags: [] };
   return current;
-})
+});
 
-// GOOD: Migrate directly to latest
-.migrate((row) => {
-  switch (row._v) {
-    case 1: return { ...row, views: 0, tags: [], _v: 3 };
-    case 2: return { ...row, tags: [], _v: 3 };
-    case 3: return row;
+// GOOD: Migrate directly to latest, one branch per stored version
+.migrate(({ value, version }) => {
+  switch (version) {
+    case 1: return { ...value, views: 0, tags: [] };
+    case 2: return { ...value, tags: [] };
+    case 3: return value;
   }
-})
+});
 ```
 
-### Note: `as const` is unnecessary
-
-TypeScript contextually narrows `_v: 2` to the literal type based on the return type constraint. Both of these work:
+### Declaring `_v` as a column
 
 ```typescript
-return { ...row, views: 0, _v: 2 }; // Works — contextual narrowing
-return { ...row, views: 0, _v: 2 as const }; // Also works — redundant
+// BAD: `_v` is library-managed. The defineTable parameter type refuses it.
+defineTable({
+  id: column.string<NoteId>(),
+  title: column.string(),
+  _v: column.literal(1),   // compile error: "_v is library-managed; remove it from the column record"
+});
+
+// GOOD: just declare your columns.
+defineTable({
+  id: column.string<NoteId>(),
+  title: column.string(),
+});
 ```
 
-### Rules
+### Reading or writing `_v` at call sites
+
+```typescript
+// BAD: `_v` does not exist on the user-facing row type.
+const { _v } = note;                  // type error: property '_v' does not exist
+tables.notes.set({ ..., _v: 2 });     // type error: object literal may only specify known properties
+
+// GOOD: set/update/get the user columns. Library handles versioning.
+tables.notes.set({ id, title, pinned: false });
+tables.notes.update(id, { title });
+```
+
+## Branded ID Rules
 
 1. **Every table gets its own ID type**: `DeviceId`, `SavedTabId`, `ConversationId`, `ChatMessageId`, etc.
-2. **Foreign keys use the referenced table's ID type**: `chatMessages.conversationId` uses `ConversationId`, not `'string'`
-3. **Optional FKs use `.or('undefined')`**: `'parentId?': ConversationId.or('undefined')`
-4. **Composite IDs are also branded**: `TabCompositeId`, `WindowCompositeId`, `GroupCompositeId`
-5. **Use generator functions**: When IDs are generated at runtime, use a `generate*` factory: `generateConversationId()`. Never scatter double-casts across call sites.
-6. **Functions accept branded types**: `function switchConversation(id: ConversationId)` not `(id: string)`
+2. **Foreign keys use the referenced table's ID type**: `chatMessages.conversationId` uses `column.string<ConversationId>()`, not `column.string()`.
+3. **Optional FKs use `column.nullable(...)`**: `parentId: column.nullable(column.string<ConversationId>())`.
+4. **Composite IDs are also branded**: `TabCompositeId`, `WindowCompositeId`, `GroupCompositeId`.
+5. **Use generator functions**: When IDs are generated at runtime, use a `generate*` factory that calls `generateId<X>()`. Never scatter casts across call sites.
+6. **Functions accept branded types**: `function switchConversation(id: ConversationId)` not `(id: string)`.
 
-### Why Not Plain `'string'`
+### Why Not Plain `string`
 
 ```typescript
 // BAD: Nothing prevents mixing conversation IDs with message IDs
@@ -65,57 +102,61 @@ function deleteConversation(id: ConversationId) { ... }
 deleteConversation(message.id);  // Error: ChatMessageId is not ConversationId
 ```
 
-### Reference Implementation
+### Reference Implementations
 
-See `apps/tab-manager/src/lib/workspace.ts` for the canonical example with 7 branded ID types and 4 generator functions.
-See `packages/filesystem/src/ids.ts` for the reference factory pattern (`generateRowId`, `generateColumnId`, `generateFileId`).
-See `specs/20260312T180000-branded-id-convention.md` for the full inventory and migration plan.
+See `apps/honeycrisp/workspace.ts` and `apps/fuji/src/lib/workspace.ts` for the canonical co-located pattern (brand type + `generate*` / `as*` + table + `InferTableRow` export).
+See `apps/whispering/src/lib/workspace/definition.ts` for a multi-table example including a multi-version migration and `column.json(Type.Union([...]))` for discriminated JSON results.
 
 ### Pattern
 
 ```typescript
+import type { Brand } from 'wellcrafted/brand';
 import {
-	attachTables,
-	createDisposableCache,
-	defineTable,
-	type InferTableRow,
+  attachTables,
+  column,
+  createDisposableCache,
+  defineTable,
+  generateId,
+  type InferTableRow,
 } from '@epicenter/workspace';
 import * as Y from 'yjs';
 
+// ─── Branded IDs ─────────────────────────────────────────────────────────
+
+export type UserId = string & Brand<'UserId'>;
+export const generateUserId = (): UserId => generateId<UserId>();
+
+export type PostId = string & Brand<'PostId'>;
+export const generatePostId = (): PostId => generateId<PostId>();
+
 // ─── Tables (each followed by its type export) ──────────────────────────
 
-const usersTable = defineTable(
-	type({
-		id: UserId,
-		email: 'string',
-		_v: '1',
-	}),
-);
+const usersTable = defineTable({
+  id: column.string<UserId>(),
+  email: column.string(),
+});
 export type User = InferTableRow<typeof usersTable>;
 
-const postsTable = defineTable(
-	type({
-		id: PostId,
-		authorId: UserId,
-		title: 'string',
-		_v: '1',
-	}),
-);
+const postsTable = defineTable({
+  id: column.string<PostId>(),
+  authorId: column.string<UserId>(),
+  title: column.string(),
+});
 export type Post = InferTableRow<typeof postsTable>;
 
-// Document cache + singleton
+// ─── Document cache + singleton ─────────────────────────────────────────
 
 const myDoc = createDisposableCache((id: string) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, { users: usersTable, posts: postsTable });
-	return {
-		id,
-		ydoc,
-		tables,
-		[Symbol.dispose]() {
-			ydoc.destroy();
-		},
-	};
+  const ydoc = new Y.Doc({ guid: id });
+  const tables = attachTables(ydoc, { users: usersTable, posts: postsTable });
+  return {
+    id,
+    ydoc,
+    tables,
+    [Symbol.dispose]() {
+      ydoc.destroy();
+    },
+  };
 });
 
 export const workspace = myDoc.open('my-workspace');
@@ -123,9 +164,9 @@ export const workspace = myDoc.open('my-workspace');
 
 ### Why This Structure
 
-- **Co-located types**: Each `export type` sits right below its `defineTable` — easy to verify 1:1 correspondence, easy to remove both together.
-- **Error co-location**: If you forget `_v` or `id`, the error shows on the `defineTable()` call right next to the schema — not buried inside the `attachTables` call.
-- **Schema-agnostic inference**: `InferTableRow` works with any Standard Schema (arktype, zod, etc.) and handles migrations correctly (always infers the latest version's type).
+- **Co-located types**: Each `export type` sits right below its `defineTable`: easy to verify 1:1 correspondence, easy to remove both together.
+- **Error co-location**: If you forget `id` or pass a non-flat column shape, the error surfaces on the `defineTable()` call itself, not buried inside the `attachTables` call.
+- **Single source of truth**: `InferTableRow` derives from the schema. Migrations always infer the latest version's row.
 - **Fast type inference**: `InferTableRow<typeof usersTable>` resolves against a standalone const. Avoids expensive indirection through the document handle type.
 
 ### Anti-Pattern: Inline Tables + Deep Indirection
@@ -133,22 +174,25 @@ export const workspace = myDoc.open('my-workspace');
 ```typescript
 // BAD: Tables inline, types derived through deep indirection off the handle
 const myDoc = createDisposableCache((id) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, {
-		users: defineTable(type({ id: 'string', email: 'string', _v: '1' })),
-	});
-	return { id, ydoc, tables };
+  const ydoc = new Y.Doc({ guid: id });
+  const tables = attachTables(ydoc, {
+    users: defineTable({ id: column.string<UserId>(), email: column.string() }),
+  });
+  return { id, ydoc, tables };
 });
 type Tables = ReturnType<typeof myDoc.open>['tables'];
 export type User = InferTableRow<Tables['users']>;
 
 // GOOD: Extract table, co-locate type, reference it in attachTables
-const usersTable = defineTable(type({ id: UserId, email: 'string', _v: '1' }));
+const usersTable = defineTable({
+  id: column.string<UserId>(),
+  email: column.string(),
+});
 export type User = InferTableRow<typeof usersTable>;
 
 const myDoc = createDisposableCache((id) => {
-	const ydoc = new Y.Doc({ guid: id });
-	const tables = attachTables(ydoc, { users: usersTable });
-	return { id, ydoc, tables };
+  const ydoc = new Y.Doc({ guid: id });
+  const tables = attachTables(ydoc, { users: usersTable });
+  return { id, ydoc, tables };
 });
 ```

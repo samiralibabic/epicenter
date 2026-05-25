@@ -80,15 +80,15 @@ export {
 } from './document/open-sqlite-reader.js';
 export { openWorkspaceSqlite } from './document/open-workspace-sqlite.js';
 export {
-	openWriterSqlite,
-	SqliteWriterError,
-} from './document/sqlite-writer.js';
-export {
 	markdownPath,
 	sqlitePath,
 	yjsPath,
 } from './document/workspace-paths.js';
 export { hashYDocClientId } from './shared/client-id.js';
+export type {
+	WorkspaceAuthClient,
+	WorkspaceAuthState,
+} from './workspace-apps/auth-client.js';
 export { WorkspaceAppError } from './workspace-apps/errors.js';
 export {
 	type StartDaemonWorkspaceAppsOptions,

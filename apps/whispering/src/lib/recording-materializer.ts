@@ -25,10 +25,9 @@ type RecordingMarkdownFilesAttachment = {
  * Serialize a recording row to a markdown file.
  *
  * Puts `transcript` in the body and all other metadata in YAML frontmatter.
- * Strips `_v` (workspace internal, not useful in human-readable files).
  */
 function toRecordingMarkdownFile(row: Recording) {
-	const { transcript, _v, ...frontmatter } = row;
+	const { transcript, ...frontmatter } = row;
 	const yamlStr = yaml.dump(frontmatter, { lineWidth: -1 });
 	return {
 		filename: `${row.id}.md`,

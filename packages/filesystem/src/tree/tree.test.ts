@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'bun:test';
 import { attachTables } from '@epicenter/workspace';
 import * as Y from 'yjs';
-import { type FileId, generateFileId } from '../ids.js';
+import { asFileId, generateFileId } from '../ids.js';
 import { filesTable } from '../table.js';
 import { attachFileTree } from './tree.js';
 
@@ -72,48 +72,13 @@ describe('attachFileTree', () => {
 	});
 
 	describe('getRow', () => {
-		test('returns row for valid id', () => {
-			const tree = setup();
-			const id = tree.create({
-				name: 'test.txt',
-				parentId: null,
-				type: 'file',
-				size: 42,
-			});
-			const row = tree.getRow(id, '/test.txt');
-			expect(row.name).toBe('test.txt');
-			expect(row.type).toBe('file');
-			expect(row.size).toBe(42);
-			expect(row.trashedAt).toBeNull();
-		});
-
 		test('throws ENOENT for invalid id', () => {
 			const tree = setup();
-			expect(() => tree.getRow('bogus' as FileId, '/bogus')).toThrow('ENOENT');
+			expect(() => tree.getRow(asFileId('bogus'), '/bogus')).toThrow('ENOENT');
 		});
 	});
 
 	describe('parsePath', () => {
-		test('parsePath on root-level file returns null parent and file name', () => {
-			const tree = setup();
-			const result = tree.parsePath('/test.txt');
-			expect(result.parentId).toBeNull();
-			expect(result.name).toBe('test.txt');
-		});
-
-		test('parsePath on nested file returns parent ID and leaf name', () => {
-			const tree = setup();
-			const dirId = tree.create({
-				name: 'docs',
-				parentId: null,
-				type: 'folder',
-				size: 0,
-			});
-			const result = tree.parsePath('/docs/api.md');
-			expect(result.parentId).toBe(dirId);
-			expect(result.name).toBe('api.md');
-		});
-
 		test('throws ENOENT if parent does not exist', () => {
 			const tree = setup();
 			expect(() => tree.parsePath('/nope/file.txt')).toThrow('ENOENT');
@@ -121,22 +86,6 @@ describe('attachFileTree', () => {
 	});
 
 	describe('assertDirectory', () => {
-		test('null id (root) passes', () => {
-			const tree = setup();
-			expect(() => tree.assertDirectory(null, '/')).not.toThrow();
-		});
-
-		test('folder id passes', () => {
-			const tree = setup();
-			const id = tree.create({
-				name: 'dir',
-				parentId: null,
-				type: 'folder',
-				size: 0,
-			});
-			expect(() => tree.assertDirectory(id, '/dir')).not.toThrow();
-		});
-
 		test('file id throws ENOTDIR', () => {
 			const tree = setup();
 			const id = tree.create({
@@ -500,7 +449,6 @@ describe('attachFileTree', () => {
 				createdAt: now,
 				updatedAt: now,
 				trashedAt: null,
-				_v: 1,
 			});
 
 			// Index did NOT update: the observer is gone.

@@ -70,7 +70,6 @@ export function createToolTrustState(tabManager: TabManagerBrowser) {
 			tabManager.tables.toolTrust.set({
 				id: name,
 				trust: level,
-				_v: 1,
 			});
 		},
 

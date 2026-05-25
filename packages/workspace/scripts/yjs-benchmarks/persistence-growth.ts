@@ -14,9 +14,8 @@
  * Run: bun packages/workspace/scripts/yjs-benchmarks/persistence-growth.ts
  */
 
-import { type } from 'arktype';
 import * as Y from 'yjs';
-import { attachTable, defineTable } from '../../src/index.js';
+import { attachTable, column, defineTable } from '../../src/index.js';
 import { formatBytes } from './helpers.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -35,16 +34,13 @@ const CYCLES = 5;
 // Schema
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const eventDefinition = defineTable(
-	type({
-		id: 'string',
-		_v: '1',
-		type: "'command' | 'event'",
-		name: 'string',
-		payload: 'string',
-		timestamp: 'number',
-	}),
-);
+const eventDefinition = defineTable({
+	id: column.string(),
+	type: column.enum(['command', 'event']),
+	name: column.string(),
+	payload: column.string(),
+	timestamp: column.number(),
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -141,7 +137,6 @@ function main() {
 		steadyStateIds.push(id);
 		tables.events.set({
 			id,
-			_v: 1,
 			type: i % 2 === 0 ? 'command' : 'event',
 			name: `seed_${i}`,
 			payload: samplePayload,
@@ -191,7 +186,6 @@ function main() {
 			addedIds.push(id);
 			tables.events.set({
 				id,
-				_v: 1,
 				type: i % 2 === 0 ? 'command' : 'event',
 				name: `cycle${cycle}_add_${i}`,
 				payload: samplePayload,

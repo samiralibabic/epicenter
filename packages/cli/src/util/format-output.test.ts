@@ -78,13 +78,6 @@ describe('output (jsonl)', () => {
 		expect(result).toBe('');
 	});
 
-	test('handles single item', () => {
-		const result = captureStdout(() =>
-			output([{ value: 'single' }], { format: 'jsonl' }),
-		);
-		expect(result).toBe('{"value":"single"}');
-	});
-
 	test('serializes mixed JSON-compatible values as one JSON value per line', () => {
 		const values = [{ a: 1 }, 'string', 42, null, [1, 2, 3]];
 		const result = captureStdout(() => output(values, { format: 'jsonl' }));

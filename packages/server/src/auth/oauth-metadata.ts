@@ -1,8 +1,5 @@
 import { AUTH_BASE_PATH } from './base-config';
 
-const AUTH_ISSUER_PATH = AUTH_BASE_PATH.replace(/\/+$/, '');
-const AUTH_ISSUER_SEGMENT = AUTH_ISSUER_PATH.replace(/^\/+/, '');
-
 /**
  * Return the issuer URL used in OAuth discovery and JWT verification.
  *
@@ -11,7 +8,7 @@ const AUTH_ISSUER_SEGMENT = AUTH_ISSUER_PATH.replace(/^\/+/, '');
  * tokens minted by this server are not confused with root-level API URLs.
  */
 export function createOAuthIssuerURL(baseURL: string) {
-	return `${baseURL.replace(/\/+$/, '')}${AUTH_ISSUER_PATH}`;
+	return `${baseURL.replace(/\/+$/, '')}${AUTH_BASE_PATH}`;
 }
 
 /**
@@ -25,10 +22,12 @@ export function createOAuthJwksURL(baseURL: string) {
 	return `${createOAuthIssuerURL(baseURL)}/jwks`;
 }
 
-export const OAUTH_OPENID_CONFIGURATION_PATH = `${AUTH_ISSUER_PATH}/.well-known/openid-configuration`;
-export const OAUTH_AUTHORIZATION_SERVER_METADATA_PATH = AUTH_ISSUER_SEGMENT
-	? `/.well-known/oauth-authorization-server/${AUTH_ISSUER_SEGMENT}`
-	: '/.well-known/oauth-authorization-server';
+// AUTH_BASE_PATH is hardcoded to '/auth'. The OpenID configuration sits
+// beneath that path; the auth-server metadata sits at the root with the
+// basepath as a trailing segment (RFC 8414 §3.1).
+export const OAUTH_OPENID_CONFIGURATION_PATH = `${AUTH_BASE_PATH}/.well-known/openid-configuration`;
+export const OAUTH_AUTHORIZATION_SERVER_METADATA_PATH =
+	'/.well-known/oauth-authorization-server/auth';
 export const OAUTH_PROTECTED_RESOURCE_METADATA_PATH =
 	'/.well-known/oauth-protected-resource';
 export const OAUTH_METADATA_CACHE_CONTROL =

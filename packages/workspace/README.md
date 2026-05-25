@@ -10,37 +10,45 @@ around `new Y.Doc`. Browser apps with many child Y.Docs use
 cleanup stays in app-owned helper functions that already know the parent table
 and child document guid policy.
 
-## Quick Start
+## Quick Start: local-only workspace
+
+The recipe below ships a workspace with no auth, no encryption, no cloud
+sync. It is the right shape for a single-user desktop notes app, an
+offline CLI, a test fixture, or any consumer whose data has no remote
+adversary. Cloud-synced workspaces add `attachEncryption` and swap
+`attachIndexedDb` + `attachBroadcastChannel` for the owner-scoped
+`attachLocalStorage` composite; see [Plaintext vs encrypted](#plaintext-vs-encrypted).
 
 ```bash
 bun add @epicenter/workspace
 ```
 
 ```typescript
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
+	attachBroadcastChannel,
 	attachIndexedDb,
 	attachKv,
 	attachTables,
+	column,
 	defineTable,
 } from '@epicenter/workspace';
 
-const posts = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		body: 'string',
-		published: 'boolean',
-		_v: '1',
-	}),
-);
+const posts = defineTable({
+	id: column.string(),
+	title: column.string(),
+	body: column.string(),
+	published: column.boolean(),
+});
 
 export function openBlog() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.blog' });
 	const tables = attachTables(ydoc, { posts });
 	const kv = attachKv(ydoc, {});
 	const idb = attachIndexedDb(ydoc);
+	// Cross-tab broadcast keyed by ydoc.guid. Skip this line for a Tauri
+	// or Electron app that only ever runs one window.
+	attachBroadcastChannel(ydoc);
 
 	return {
 		get id() {
@@ -68,12 +76,11 @@ async function quickStart() {
 		title: 'Hello World',
 		body: 'This row lives in the Y.Doc.',
 		published: false,
-		_v: 1,
 	});
 
-	const result = blog.tables.posts.get('welcome');
-	if (result.status === 'valid') {
-		blog.tables.posts.update(result.row.id, { published: true });
+	const { data: row, error } = blog.tables.posts.get('welcome');
+	if (!error && row) {
+		blog.tables.posts.update(row.id, { published: true });
 	}
 }
 
@@ -116,17 +123,20 @@ refcounting, and the `gcTime` grace period between last dispose and teardown.
 
 ### Plaintext vs encrypted
 
-Both variants ship from this package. Plaintext (`attachTable`, `attachTables`, `attachKv`) binds a typed helper directly to the Y.Doc. Encrypted: the methods on the `EncryptionAttachment` coordinator returned by `attachEncryption(ydoc, { keyring })` (`encryption.attachTable`, `encryption.attachTables`, `encryption.attachKv`) additionally register their backing store with that coordinator. The coordinator reads `keyring()` synchronously at each registration site, derives the per-workspace keyring, and activates the store before handing it back. Already-attached encrypted stores keep their derived keyring; same-subject key rotation needs a re-attach to affect those stores.
+Both variants ship from this package. Pick by adversary: plaintext for
+data that never leaves the device, encrypted for data the server stores.
+
+Plaintext (`attachTable`, `attachTables`, `attachKv`) binds a typed helper directly to the Y.Doc. Encrypted: the methods on the `EncryptionAttachment` coordinator returned by `attachEncryption(ydoc, { keyring })` (`encryption.attachTable`, `encryption.attachTables`, `encryption.attachKv`) additionally register their backing store with that coordinator. The coordinator reads `keyring()` synchronously at each registration site, derives the per-workspace keyring, and activates the store before handing it back. Already-attached encrypted stores keep their derived keyring; same-owner key rotation needs a re-attach to affect those stores.
 
 Don't mix plaintext and encrypted wrappers on the same slot name: Yjs hands both calls the same underlying `Y.Array` and you get a silent plaintext-over-ciphertext race. The verb (`encryption.attachTable` vs plain `attachTable`) is the primary defense; review call sites accordingly. One slot name, one attach site, one intent.
 
-Minimal encrypted browser workspace: encryption + subject-scoped IndexedDB + cross-tab + collaboration (sync + presence + dispatch) wired together:
+Minimal encrypted browser workspace: encryption + owner-scoped IndexedDB + cross-tab + collaboration (sync + presence + dispatch) wired together:
 
 ```typescript
 import {
 	attachEncryption,
 	attachLocalStorage,
-	createInstallationId,
+	createDeviceId,
 	openCollaboration,
 	roomWsUrl,
 	wipeLocalStorage,
@@ -138,10 +148,10 @@ import { appTables } from '$lib/workspace/definition';
 
 export function openApp({
 	signedIn,
-	installationId,
+	deviceId,
 }: {
 	signedIn: SignedIn;
-	installationId: string;
+	deviceId: string;
 }) {
 	const ydoc = new Y.Doc({ guid: 'epicenter.my-app', gc: true });
 
@@ -151,16 +161,16 @@ export function openApp({
 	// Server + owner scoped encrypted IDB + cross-tab BroadcastChannel in one call.
 	const idb = attachLocalStorage(ydoc, {
 		server: signedIn.server,
-		owner: signedIn.owner,
+		ownerId: signedIn.ownerId,
 		keyring: signedIn.keyring,
 	});
 
 	const collaboration = openCollaboration(ydoc, {
 		url: roomWsUrl({
 			baseURL: signedIn.auth.baseURL,
-			owner: signedIn.owner,
+			ownerId: signedIn.ownerId,
 			guid: ydoc.guid,
-			installationId,
+			deviceId,
 		}),
 		waitFor: idb.whenLoaded,
 		openWebSocket: signedIn.auth.openWebSocket,
@@ -183,7 +193,7 @@ export function openApp({
 			await Promise.all([idb.whenDisposed, collaboration.whenDisposed]);
 			await wipeLocalStorage({
 				server: signedIn.server,
-				owner: signedIn.owner,
+				ownerId: signedIn.ownerId,
 			});
 		},
 		[Symbol.dispose]() {
@@ -197,16 +207,16 @@ export const session = createSession({
 	build: ({ signedIn }) =>
 		openApp({
 			signedIn,
-			installationId: createInstallationId({ storage: localStorage }),
+			deviceId: createDeviceId({ storage: localStorage }),
 		}),
 });
 ```
 
-`attachLocalStorage(ydoc, { server, owner, keyring })` pairs the encrypted IndexedDB store with an owner-scoped BroadcastChannel: two tabs of the same owner share both persisted state and live updates, while two different owners on the same browser profile never see each other's data. On sign-out, call `wipeLocalStorage({ server, owner })` to delete every owner-scoped local database.
+`attachLocalStorage(ydoc, { server, ownerId, keyring })` pairs the encrypted IndexedDB store with an owner-scoped BroadcastChannel: two tabs of the same owner share both persisted state and live updates, while two different owners on the same browser profile never see each other's data. On sign-out, call `wipeLocalStorage({ server, ownerId })` to delete every owner-scoped local database.
 
-`openCollaboration` is the workspace primitive: it wraps the sync supervisor, mirrors the relay's server-owned presence channel as `collaboration.devices`, and runs inbound dispatch frames against the local action registry. Find an online install with `workspace.collaboration.devices.list().find((d) => d.installationId === installationId)`, then call it with `workspace.collaboration.dispatch(...)`. Content documents use the same primitive with `actions: {}`. See [SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
+`openCollaboration` is the workspace primitive: it wraps the sync supervisor, mirrors the relay's server-owned presence channel as `collaboration.devices`, and runs inbound dispatch frames against the local action registry. Find an online install with `workspace.collaboration.devices.list().find((d) => d.deviceId === deviceId)`, then call it with `workspace.collaboration.dispatch(...)`. Content documents use the same primitive with `actions: {}`. See [SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
 
-The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin. Cloud sync targets `/api/users/:userId/rooms/:roomId` (personal) or `/api/rooms/:roomId` (team): build the URL with `roomWsUrl({ baseURL, owner, guid: ydoc.guid, installationId })`. A cloud doc is owned by the authenticated `owner`, so the server resolves the DO name `users/${userId}/rooms/${room}` (personal) or `rooms/${room}` (team) from the auth token, with no workspace lookup.
+The `guid` you pass to `new Y.Doc(...)` becomes `ydoc.guid`. Namespace it to your app (e.g. `epicenter.my-app`) to avoid collisions when multiple apps share the same IndexedDB origin. Cloud sync targets the single uniform shape `/api/owners/:ownerId/rooms/:roomId` in both modes: build the URL with `roomWsUrl({ baseURL, ownerId, guid: ydoc.guid, deviceId })`. A cloud doc is owned by the authenticated `OwnerId`, so the server resolves the Durable Object name `owners/${ownerId}/rooms/${room}` from the auth token (personal: `ownerId === userId`; team: `ownerId === 'team'`), with no workspace lookup.
 
 For production-shaped browser wiring, see `apps/fuji/src/lib/browser.ts`. For auth session transitions, see `apps/fuji/src/lib/session.ts`.
 
@@ -255,7 +265,7 @@ Ordering is obvious (later `attach*` and `open*` calls see earlier ones through 
 
 ### Read-time validation beats write-time ceremony
 
-Tables validate and migrate on read, not on write. `set(...)` writes the row shape TypeScript already approved. `get(...)` is where invalid old data shows up as `{ status: 'invalid' }` and old versions are migrated to the latest schema.
+Tables validate and migrate on read, not on write. `set(...)` writes the row shape TypeScript already approved. `get(...)` returns a wellcrafted `Result<TRow | null, TableParseError>`: parse failures surface as `error`, missing rows as `data: null`, and old versions are migrated to the latest schema before being returned.
 
 That trade-off is deliberate. It keeps the write path cheap and pushes schema evolution into one place:the table definition.
 
@@ -379,10 +389,13 @@ The raw `Y.Doc` is available at `bundle.ydoc`. That is the escape hatch, not the
 
 ### Tables
 
-Tables are versioned row collections. Each row must include:
+Tables are versioned row collections. Each row must declare:
 
 - `id: string`
-- `_v: number`
+
+`_v` is library-managed: never declare it as a column, never include it in
+write calls, never expect it on returned rows. The library stamps the
+current version on write and strips it before handing the row back.
 
 At runtime, each table becomes a `Table` exposed as a direct property:
 
@@ -453,27 +466,28 @@ Reference implementations: `apps/opensidian/src/lib/opensidian/browser.ts`, `app
 
 ### Required table fields
 
-Every table row schema must include:
+Every table row schema must declare an `id` column. Version metadata (`_v`)
+is library-managed: never declare it as a column, never pass it to `set` or
+`update`, never expect it on returned rows. The library stamps the current
+version on write, routes by it on read, and strips it before handing the row
+back.
 
-- `id`
-- `_v`
-
-In arktype, `_v: '1'` means the numeric literal `1`, not the string `'1'` at runtime.
+Columns are TypeBox-native. Use the `column.*` factory helpers (`column.string`,
+`column.number`, `column.boolean`, `column.dateTime`, `column.enum`,
+`column.nullable`, `column.json`, ...) for the SQLite-flat default set, or pass
+raw `Type.*` schemas if you need a shape the helpers don't cover. The library
+enforces 1:1 SQLite-column mapping at the type level either way.
 
 ### Single-version tables
 
 ```typescript
-import { type } from 'arktype';
-import { defineTable } from '@epicenter/workspace';
+import { column, defineTable } from '@epicenter/workspace';
 
-const users = defineTable(
-	type({
-		id: 'string',
-		email: 'string',
-		name: 'string',
-		_v: '1',
-	}),
-);
+const users = defineTable({
+	id: column.string(),
+	email: column.string(),
+	name: column.string(),
+});
 
 void users;
 ```
@@ -483,56 +497,58 @@ Use the single-schema form when the table has only one version today.
 ### Versioned tables
 
 ```typescript
-import { type } from 'arktype';
-import { defineTable } from '@epicenter/workspace';
+import { column, defineTable } from '@epicenter/workspace';
 
 const posts = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		_v: '1',
-	}),
-	type({
-		id: 'string',
-		title: 'string',
-		slug: 'string',
-		_v: '2',
-	}),
-).migrate((row) => {
-		switch (row._v) {
-			case 1:
-				return {
-					...row,
-					slug: row.title.toLowerCase().replaceAll(' ', '-'),
-					_v: 2,
-				};
-
-			case 2:
-				return row;
-		}
-	});
+	{
+		id: column.string(),
+		title: column.string(),
+	},
+	{
+		id: column.string(),
+		title: column.string(),
+		slug: column.string(),
+	},
+).migrate(({ value, version }) => {
+	switch (version) {
+		case 1:
+			return {
+				...value,
+				slug: value.title.toLowerCase().replaceAll(' ', '-'),
+			};
+		case 2:
+			return value;
+	}
+});
 
 void posts;
 ```
 
-Migration runs on read. Old rows stay old in storage until you rewrite them.
+Migration runs on read. The migrate function receives `{ value, version }`
+where `value` is the user-facing row for that version (no `_v`); `version`
+is the 1-indexed position in the variadic argument list. Old rows stay old
+in storage until you rewrite them.
 
 ### KV entries
 
 ```typescript
-import { type } from 'arktype';
-import { defineKv } from '@epicenter/workspace';
+import { column, defineKv } from '@epicenter/workspace';
 
-const themeMode = defineKv(type("'light' | 'dark' | 'system'"), 'light');
-const sidebarWidth = defineKv(type('number'), 280);
-const sidebarCollapsed = defineKv(type('boolean'), false);
+const themeMode = defineKv(
+	column.enum(['light', 'dark', 'system']),
+	() => 'light' as const,
+);
+const sidebarWidth = defineKv(column.number(), () => 280);
+const sidebarCollapsed = defineKv(column.boolean(), () => false);
 
 void themeMode;
 void sidebarWidth;
 void sidebarCollapsed;
 ```
 
-KV is validate-or-default. There is no migration function.
+KV is validate-or-default. The default argument is a factory (`() => value`),
+not a bare value, so each consumer gets a fresh instance. There is no
+migration function.
 
 ### Presence
 
@@ -544,16 +560,16 @@ as `collaboration.devices`:
 
 ```typescript
 const online = workspace.collaboration.devices.list();
-// -> [{ installationId: 'phone' }, { installationId: 'laptop' }]
+// -> [{ deviceId: 'phone' }, { deviceId: 'laptop' }]
 
 const unsubscribe = workspace.collaboration.devices.subscribe((devices) => {
-	console.log('online:', devices.map((device) => device.installationId));
+	console.log('online:', devices.map((device) => device.deviceId));
 });
 ```
 
-Each entry is a `LiveDevice` (`{ installationId }`); the local install is
-excluded. Product-level data (display name, cursor, capability list) lives in
-app-owned tables, not on the presence wire. See
+Each entry is a `PresenceDevice` (`{ deviceId, connectedAt, actions }`);
+the local install is excluded. Product-level data (display name, cursor,
+capability list) lives in app-owned tables, not on the presence wire. See
 [SYNC_ARCHITECTURE.md](./SYNC_ARCHITECTURE.md) for the full model.
 
 Cursor and selection sync (genuine ephemeral peer-to-peer state) is future
@@ -568,12 +584,12 @@ the cache owns live content Y.Docs. App-local helpers own browser cleanup.
 Node one-shot code can open the content document directly for one operation.
 
 ```typescript
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
 	attachIndexedDb,
 	attachPlainText,
 	attachTables,
+	column,
 	createDisposableCache,
 	defineTable,
 	docGuid,
@@ -581,14 +597,11 @@ import {
 } from '@epicenter/workspace';
 import { clearDocument } from 'y-indexeddb';
 
-const files = defineTable(
-	type({
-		id: 'string',
-		name: 'string',
-		updatedAt: 'number',
-		_v: '1',
-	}),
-);
+const files = defineTable({
+	id: column.string(),
+	name: column.string(),
+	updatedAt: column.number(),
+});
 
 function openFilesWorkspace() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.files' });
@@ -649,7 +662,6 @@ async function documentExample() {
 		id: 'file-1',
 		name: 'hello.md',
 		updatedAt: Date.now(),
-		_v: 1,
 	});
 
 	// Load a content handle for the row. Dispose when done.
@@ -678,14 +690,12 @@ workspace.tables.posts.set({
 	id: 'post-1',
 	title: 'First post',
 	published: false,
-	_v: 1,
 });
 
 workspace.tables.posts.set({
 	id: 'post-1',
 	title: 'First post, replaced',
 	published: true,
-	_v: 1,
 });
 ```
 
@@ -693,20 +703,22 @@ workspace.tables.posts.set({
 
 `update(id, partial)` reads the row, merges the partial fields, validates the merged result, and writes it back.
 
-Possible return values:
+Returns a wellcrafted `Result<TRow | null, TableParseError>`:
 
-- `{ status: 'updated', row }`
-- `{ status: 'not_found', id, row: undefined }`
-- `{ status: 'invalid', id, errors, row }`
+- `{ data: TRow, error: null }` on success
+- `{ data: null, error: null }` when no row exists for `id`
+- `{ data: null, error: TableParseError }` if the stored row failed schema validation, or if the merged result fails validation
 
 ```typescript
-const updateResult = workspace.tables.posts.update('post-1', {
+const { data: row, error } = workspace.tables.posts.update('post-1', {
 	published: true,
 	views: 1,
 });
 
-if (updateResult.status === 'updated') {
-	console.log(updateResult.row.views);
+if (error) {
+	console.error(error.message);
+} else if (row) {
+	console.log(row.views);
 }
 ```
 
@@ -714,19 +726,21 @@ if (updateResult.status === 'updated') {
 
 | Method | Return type | Notes |
 | --- | --- | --- |
-| `get(id)` | `GetResult<TRow>` | Returns `valid`, `invalid`, or `not_found` |
-| `getAll()` | `RowResult<TRow>[]` | Includes invalid rows |
+| `get(id)` | `Result<TRow \| null, TableParseError>` | `data: null` for "not found"; `error` for parse/validation failures |
+| `getAll()` | `Array<Result<TRow, TableParseError>>` | One Result per stored row |
 | `getAllValid()` | `TRow[]` | Skips invalid rows |
 | `getAllInvalid()` | `TableParseError[]` | Debug schema drift or corrupt data |
 | `filter(predicate)` | `TRow[]` | Runs only on valid rows |
 | `find(predicate)` | `TRow \| undefined` | First valid match |
 | `has(id)` | `boolean` | Existence only |
-| `count()` | `number` | Counts valid and invalid rows |
+| `count()` | `number` | Counts every stored row |
 
 ```typescript
-const one = workspace.tables.posts.get('1');
-if (one.status === 'valid') {
-	console.log(one.row.title);
+const { data: row, error } = workspace.tables.posts.get('1');
+if (error) {
+	console.error('parse failed:', error.message);
+} else if (row) {
+	console.log(row.title);
 }
 
 const all = workspace.tables.posts.getAll();
@@ -745,7 +759,7 @@ const count = workspace.tables.posts.count();
 | `clear()` | Deletes all rows in the table |
 
 ```typescript
-workspace.tables.tags.set({ id: 'tag-1', name: 'important', _v: 1 });
+workspace.tables.tags.set({ id: 'tag-1', name: 'important' });
 workspace.tables.tags.delete('tag-1');
 workspace.tables.tags.clear();
 ```
@@ -757,19 +771,20 @@ workspace.tables.tags.clear();
 ```typescript
 const unsubscribe = workspace.tables.files.observe((changedIds, origin) => {
 	for (const id of changedIds) {
-		const result = workspace.tables.files.get(id);
-		if (result.status === 'not_found') {
+		const { data: row, error } = workspace.tables.files.get(id);
+		if (error) {
+			console.error('parse failed:', id, error.message);
+			continue;
+		}
+		if (row === null) {
 			console.log('deleted:', id);
 			continue;
 		}
-
-		if (result.status === 'valid') {
-			console.log('present:', result.row.name);
-		}
+		console.log('present:', row.name);
 	}
 });
 
-workspace.tables.files.set({ id: 'file-1', name: 'notes.md', _v: 1 });
+workspace.tables.files.set({ id: 'file-1', name: 'notes.md' });
 workspace.tables.files.delete('file-1');
 unsubscribe();
 ```
@@ -780,7 +795,7 @@ The `origin` argument is whatever the caller passed to `ydoc.transact(fn, origin
 const APP_ORIGIN = Symbol('my-app');
 
 ydoc.transact(() => {
-	workspace.tables.posts.set({ id: 'p1', title: 'Tagged', _v: 1 });
+	workspace.tables.posts.set({ id: 'p1', title: 'Tagged' });
 }, APP_ORIGIN);
 
 workspace.tables.posts.observe((_ids, origin) => {
@@ -807,15 +822,15 @@ import { attachYjsLog } from '@epicenter/workspace/node';
 
 ### Persistence
 
-Browser apps use `attachIndexedDb(ydoc)` for unauthenticated docs, or `attachLocalStorage(ydoc, { server, owner, keyring })` for an authenticated workspace that needs encrypted persistence plus cross-tab pairing. Bun/Node daemons use `attachYjsLog(ydoc, { filePath })`. All bind to the Y.Doc and tear down on `ydoc.destroy()`.
+Browser apps use `attachIndexedDb(ydoc)` for unauthenticated docs, or `attachLocalStorage(ydoc, { server, ownerId, keyring })` for an authenticated workspace that needs encrypted persistence plus cross-tab pairing. Bun/Node daemons use `attachYjsLog(ydoc, { filePath })`. All bind to the Y.Doc and tear down on `ydoc.destroy()`.
 
 | Primitive | Runtime | Barrier | Other | Purpose |
 |---|---|---|---|---|
 | `attachIndexedDb(ydoc)` | browser | `whenLoaded`, `whenDisposed` | `clearLocal()` | Local Yjs persistence via `y-indexeddb` |
-| `attachLocalStorage(ydoc, { server, owner, keyring })` | browser | `whenLoaded`, `whenDisposed` | paired BroadcastChannel | Owner-scoped encrypted IDB plus cross-tab pairing |
+| `attachLocalStorage(ydoc, { server, ownerId, keyring })` | browser | `whenLoaded`, `whenDisposed` | paired BroadcastChannel | Owner-scoped encrypted IDB plus cross-tab pairing |
 | `attachYjsLog(ydoc, { filePath })` | Bun/Node | `whenDisposed` (sync replay; no `whenLoaded` needed) | `clearLocal()` | Append-log SQLite file the daemon writes |
 
-For authenticated apps, call `await wipeLocalStorage({ server, owner })` after disposing the bundle to delete every owner-scoped encrypted IDB database on the current browser profile (sign-out, "delete my local data", account switch).
+For authenticated apps, call `await wipeLocalStorage({ server, ownerId })` after disposing the bundle to delete every owner-scoped encrypted IDB database on the current browser profile (sign-out, "delete my local data", account switch).
 
 `attachSqliteMaterializer` and `attachMarkdownMaterializer` are not persistence: they project workspace rows into queryable SQLite tables or `.md` files. See the materializer subsections below.
 
@@ -823,12 +838,15 @@ For authenticated apps, call `await wipeLocalStorage({ server, owner })` after d
 import * as Y from 'yjs';
 import {
 	attachTables,
+	column,
 	defineTable,
 } from '@epicenter/workspace';
 import { attachYjsLog } from '@epicenter/workspace/node';
-import { type } from 'arktype';
 
-const notes = defineTable(type({ id: 'string', title: 'string', _v: '1' }));
+const notes = defineTable({
+	id: column.string(),
+	title: column.string(),
+});
 
 function openNotes() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.notes' });
@@ -849,7 +867,7 @@ void openNotes;
 
 ### Sync
 
-One primitive wraps the WebSocket transport: `openCollaboration`. The workspace document passes a real `actions` registry; content documents that only need bytes-on-the-wire pass `actions: {}`. Compose it with `attachBroadcastChannel(ydoc)` for unauthenticated local-only documents. Authenticated browser workspaces use `attachLocalStorage(ydoc, { server, owner, keyring })`, which pairs encrypted IDB with an owner-scoped BroadcastChannel in one call.
+One primitive wraps the WebSocket transport: `openCollaboration`. The workspace document passes a real `actions` registry; content documents that only need bytes-on-the-wire pass `actions: {}`. Compose it with `attachBroadcastChannel(ydoc)` for unauthenticated local-only documents. Authenticated browser workspaces use `attachLocalStorage(ydoc, { server, ownerId, keyring })`, which pairs encrypted IDB with an owner-scoped BroadcastChannel in one call.
 
 ```typescript
 import * as Y from 'yjs';
@@ -857,22 +875,26 @@ import {
 	attachBroadcastChannel,
 	attachIndexedDb,
 	attachTables,
-	createInstallationId,
+	column,
+	createDeviceId,
 	defineTable,
 	openCollaboration,
 	roomWsUrl,
 } from '@epicenter/workspace';
-import type { AuthClient, Owner } from '@epicenter/auth';
-import { type } from 'arktype';
+import type { AuthClient } from '@epicenter/auth';
+import type { OwnerId } from '@epicenter/constants/identity';
 
-const tabs = defineTable(type({ id: 'string', url: 'string', _v: '1' }));
+const tabs = defineTable({
+	id: column.string(),
+	url: column.string(),
+});
 
 function openTabs({
-	owner,
+	ownerId,
 	openWebSocket,
 	onReconnectSignal,
 }: {
-	owner: Owner;
+	ownerId: OwnerId;
 	openWebSocket: AuthClient['openWebSocket'];
 	onReconnectSignal: AuthClient['onStateChange'];
 }) {
@@ -880,13 +902,13 @@ function openTabs({
 	const tables = attachTables(ydoc, { tabs });
 	const idb = attachIndexedDb(ydoc);
 	attachBroadcastChannel(ydoc);
-	const installationId = createInstallationId({ storage: localStorage });
+	const deviceId = createDeviceId({ storage: localStorage });
 	const collaboration = openCollaboration(ydoc, {
 		url: roomWsUrl({
 			baseURL: 'https://api.epicenter.so',
-			owner,
+			ownerId,
 			guid: ydoc.guid,
-			installationId,
+			deviceId,
 		}),
 		waitFor: idb.whenLoaded,
 		openWebSocket,
@@ -914,10 +936,10 @@ Ordering is just lexical: `collaboration` reads `idb.whenLoaded` as `waitFor` be
 The markdown materializer is exported from `@epicenter/workspace/document/materializer/markdown`. Compose it inside your builder alongside the other attachments: it needs `tables` and `ydoc`, both of which are already in lexical scope.
 
 ```typescript
-import { type } from 'arktype';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	column,
 	defineTable,
 } from '@epicenter/workspace';
 import { attachYjsLog } from '@epicenter/workspace/node';
@@ -926,9 +948,11 @@ import {
 	slugFilename,
 } from '@epicenter/workspace/document/materializer/markdown';
 
-const notes = defineTable(
-	type({ id: 'string', title: 'string', body: 'string', _v: '1' }),
-);
+const notes = defineTable({
+	id: column.string(),
+	title: column.string(),
+	body: column.string(),
+});
 
 function openNotes() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.notes' });
@@ -962,20 +986,17 @@ import { Database } from 'bun:sqlite';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	column,
 	defineTable,
 } from '@epicenter/workspace';
 import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
-import { type } from 'arktype';
 
-const posts = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		body: 'string',
-		published: 'boolean',
-		_v: '1',
-	}),
-);
+const posts = defineTable({
+	id: column.string(),
+	title: column.string(),
+	body: column.string(),
+	published: column.boolean(),
+});
 
 function openBlog() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.blog' });
@@ -1027,7 +1048,6 @@ declare const blogWorkspace: {
 				id: string;
 				title: string;
 				authorId: string;
-				_v: 1;
 			}) => void;
 		};
 	};
@@ -1049,7 +1069,6 @@ const createPost = defineMutation({
 			id,
 			title,
 			authorId,
-			_v: 1,
 		});
 
 		return { id };
@@ -1077,24 +1096,21 @@ They have four important properties:
 Use `defineQuery(...)` for reads.
 
 ```typescript
-import { type } from 'arktype';
 import Type from 'typebox';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	column,
 	defineActions,
 	defineQuery,
 	defineTable,
 } from '@epicenter/workspace';
 
-const posts = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		published: 'boolean',
-		_v: '1',
-	}),
-);
+const posts = defineTable({
+	id: column.string(),
+	title: column.string(),
+	published: column.boolean(),
+});
 
 function openPosts() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.actions.queries' });
@@ -1109,7 +1125,7 @@ function openPosts() {
 		posts_get_by_id: defineQuery({
 			title: 'Get Post',
 			description: 'Get one post by ID.',
-			input: Type.Object({ id: Type.String() }),
+			input: Type.Object({ id: tables.posts.schema.properties.id }),
 			handler: ({ id }) => tables.posts.get(id),
 		}),
 	});
@@ -1133,25 +1149,22 @@ void actionType;
 Use `defineMutation(...)` for writes or side effects.
 
 ```typescript
-import { type } from 'arktype';
 import Type from 'typebox';
 import * as Y from 'yjs';
 import {
 	attachTables,
+	column,
 	defineActions,
 	defineMutation,
 	defineTable,
 	generateId,
 } from '@epicenter/workspace';
 
-const posts = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		published: 'boolean',
-		_v: '1',
-	}),
-);
+const posts = defineTable({
+	id: column.string(),
+	title: column.string(),
+	published: column.boolean(),
+});
 
 function openPosts() {
 	const ydoc = new Y.Doc({ guid: 'epicenter.actions.mutations' });
@@ -1161,10 +1174,10 @@ function openPosts() {
 		posts_create: defineMutation({
 			title: 'Create Post',
 			description: 'Create a new post row.',
-			input: Type.Object({ title: Type.String() }),
+			input: Type.Object({ title: tables.posts.schema.properties.title }),
 			handler: ({ title }) => {
 				const id = generateId();
-				tables.posts.set({ id, title, published: false, _v: 1 });
+				tables.posts.set({ id, title, published: false });
 				return { id };
 			},
 		}),
@@ -1348,8 +1361,8 @@ A `batch(fn)` helper groups mutations into a single Yjs transaction. The framewo
 
 ```typescript
 workspace.batch(() => {
-	workspace.tables.posts.set({ id: 'p1', title: 'One transaction', _v: 1 });
-	workspace.tables.tags.set({ id: 't1', name: 'docs', _v: 1 });
+	workspace.tables.posts.set({ id: 'p1', title: 'One transaction' });
+	workspace.tables.tags.set({ id: 't1', name: 'docs' });
 });
 ```
 
@@ -1553,15 +1566,15 @@ import {
 	type Collaboration,
 	DispatchError,
 	type DispatchRequest,
-	type LiveDevice,
+	type PresenceDevice,
 	type TypedDispatch,
 	typedDispatch,
 } from '@epicenter/workspace';
 ```
 
-`openCollaboration` returns a `Collaboration`. Online devices (relay-owned presence, with each device's `installationId`, `connectedAt`, and published `actions` manifest):
+`openCollaboration` returns a `Collaboration`. Online devices (relay-owned presence, with each device's `deviceId`, `connectedAt`, and published `actions` manifest):
 
-- `collaboration.devices.list()`: `LiveDevice[]`, the local install excluded
+- `collaboration.devices.list()`: `PresenceDevice[]`, the local install excluded
 - `collaboration.devices.subscribe(fn)`: returns an unsubscribe function
 
 Cross-device calls:

@@ -38,12 +38,12 @@ export const ActionManifestSchema = Type.Record(
 /**
  * One device's entry on the wire.
  *
- * `installationId` routes dispatches; `connectedAt` lets receivers render an
+ * `deviceId` routes dispatches; `connectedAt` lets receivers render an
  * "online since" affordance; `actions` is the device's published manifest, or
  * `{}` if the device has not (yet) published one.
  */
 export const PresenceDeviceSchema = Type.Object({
-	installationId: Type.String(),
+	deviceId: Type.String(),
 	connectedAt: Type.Number(),
 	actions: ActionManifestSchema,
 });
@@ -63,7 +63,7 @@ export type PresenceFrame = Static<typeof PresenceFrameSchema>;
 
 /**
  * Client -> server: publish this device's action manifest. The relay stores
- * the manifest against the sending socket's installationId and rebroadcasts
+ * the manifest against the sending socket's deviceId and rebroadcasts
  * presence so peers see the update. Sent once on connect; re-sent if the
  * local action registry changes.
  */

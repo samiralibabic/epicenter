@@ -10,14 +10,23 @@
  */
 
 import {
+	asDeviceId,
+	column,
+	type DeviceId,
 	defineTable,
 	generateId,
 	type Id,
 	type InferTableRow,
 } from '@epicenter/workspace';
-import { type } from 'arktype';
+import { Type } from 'typebox';
 import type { Brand } from 'wellcrafted/brand';
 import type { JsonValue } from 'wellcrafted/json';
+
+export type { DeviceId };
+// `DeviceId` and `asDeviceId` are the canonical brand from `@epicenter/workspace`.
+// Tab-manager reuses them so the wire-level device identity, the local table
+// row keys, and the dispatch addresses all share one type.
+export { asDeviceId };
 
 export const TAB_MANAGER_ID = 'epicenter.tab-manager';
 
@@ -26,20 +35,11 @@ export const TAB_MANAGER_ID = 'epicenter.tab-manager';
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Branded device ID — nanoid generated once per browser installation.
- *
- * Prevents accidental mixing with other string IDs (conversation, tab, etc.).
- */
-export type DeviceId = string & Brand<'DeviceId'>;
-export const DeviceId = type('string').as<DeviceId>();
-
-/**
  * Branded saved tab ID — nanoid generated when a tab is explicitly saved.
  *
  * Prevents accidental mixing with composite tab IDs or other string IDs.
  */
 export type SavedTabId = Id & Brand<'SavedTabId'>;
-export const SavedTabId = type('string').as<SavedTabId>();
 /**
  * Generate a unique {@link SavedTabId} for a newly saved tab.
  *
@@ -61,11 +61,10 @@ export const generateSavedTabId = (): SavedTabId => generateId() as SavedTabId;
 /**
  * Branded bookmark ID — nanoid generated when a URL is bookmarked.
  *
- * Unlike {@link SavedTabId}, bookmarks persist indefinitely—opening a
- * bookmarked URL does NOT delete the record.
+ * Unlike {@link SavedTabId}, bookmarks persist indefinitely (opening a
+ * bookmarked URL does NOT delete the record).
  */
 export type BookmarkId = Id & Brand<'BookmarkId'>;
-export const BookmarkId = type('string').as<BookmarkId>();
 /**
  * Generate a unique {@link BookmarkId} for a newly created bookmark.
  *
@@ -91,7 +90,6 @@ export const generateBookmarkId = (): BookmarkId => generateId() as BookmarkId;
  * Prevents accidental mixing with message IDs or other string IDs.
  */
 export type ConversationId = Id & Brand<'ConversationId'>;
-export const ConversationId = type('string').as<ConversationId>();
 /**
  * Generate a unique {@link ConversationId} for a new chat conversation.
  *
@@ -114,6 +112,13 @@ export const ConversationId = type('string').as<ConversationId>();
  */
 export const generateConversationId = (): ConversationId =>
 	generateId() as ConversationId;
+/**
+ * Syntactic sugar for `value as ConversationId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as ConversationId` should appear.
+ */
+export const asConversationId = (value: string): ConversationId =>
+	value as ConversationId;
 
 /**
  * Branded chat message ID — nanoid generated when a message is created.
@@ -121,7 +126,6 @@ export const generateConversationId = (): ConversationId =>
  * Prevents accidental mixing with conversation IDs or other string IDs.
  */
 export type ChatMessageId = Id & Brand<'ChatMessageId'>;
-export const ChatMessageId = type('string').as<ChatMessageId>();
 /**
  * Generate a unique {@link ChatMessageId} for a new chat message.
  *
@@ -143,26 +147,32 @@ export const ChatMessageId = type('string').as<ChatMessageId>();
  */
 export const generateChatMessageId = (): ChatMessageId =>
 	generateId() as ChatMessageId;
+/**
+ * Syntactic sugar for `value as ChatMessageId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as ChatMessageId` should appear.
+ */
+export const asChatMessageId = (value: string): ChatMessageId =>
+	value as ChatMessageId;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Table Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Devices — tracks browser installations for multi-device sync.
+ * Devices — tracks browser-scoped devices (one per persistent storage scope)
+ * for multi-device sync.
  *
  * Each device generates a unique ID on first install, stored in storage.local.
- * This enables syncing tabs across multiple computers while preventing ID collisions.
+ * This enables syncing tabs across multiple computers while preventing ID
+ * collisions.
  */
-const devicesTable = defineTable(
-	type({
-		id: DeviceId, // NanoID, generated once on install
-		name: 'string', // User-editable: "Chrome on macOS", "Firefox on Windows"
-		lastSeen: 'string', // ISO timestamp, updated on each sync
-		browser: 'string', // 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera'
-		_v: '1',
-	}),
-);
+const devicesTable = defineTable({
+	id: column.string<DeviceId>(), // NanoID, generated once on install
+	name: column.string(), // User-editable: "Chrome on macOS", "Firefox on Windows"
+	lastSeen: column.string(), // ISO timestamp, updated on each sync
+	browser: column.string(), // 'chrome' | 'firefox' | 'safari' | 'edge' | 'opera'
+});
 export type Device = InferTableRow<typeof devicesTable>;
 
 /**
@@ -175,18 +185,15 @@ export type Device = InferTableRow<typeof devicesTable>;
  * Created when a user explicitly saves a tab (close + persist).
  * Deleted when a user restores the tab (opens URL locally + deletes row).
  */
-const savedTabsTable = defineTable(
-	type({
-		id: SavedTabId, // nanoid, generated on save
-		url: 'string', // The tab URL
-		title: 'string', // Tab title at time of save
-		'favIconUrl?': 'string | undefined', // Favicon URL (nullable)
-		pinned: 'boolean', // Whether tab was pinned
-		sourceDeviceId: DeviceId, // Device that saved this tab
-		savedAt: 'number', // Timestamp (ms since epoch)
-		_v: '1',
-	}),
-);
+const savedTabsTable = defineTable({
+	id: column.string<SavedTabId>(), // nanoid, generated on save
+	url: column.string(), // The tab URL
+	title: column.string(), // Tab title at time of save
+	favIconUrl: column.nullable(column.string()), // Favicon URL (null when missing)
+	pinned: column.boolean(), // Whether tab was pinned
+	sourceDeviceId: column.string<DeviceId>(), // Device that saved this tab
+	savedAt: column.number(), // Timestamp (ms since epoch)
+});
 export type SavedTab = InferTableRow<typeof savedTabsTable>;
 
 /**
@@ -196,18 +203,15 @@ export type SavedTab = InferTableRow<typeof savedTabsTable>;
  * indefinitely. Opening a bookmark creates a new browser tab but does NOT
  * delete the record. Synced across devices via Y.Doc CRDT.
  */
-const bookmarksTable = defineTable(
-	type({
-		id: BookmarkId, // nanoid, generated on bookmark
-		url: 'string', // The bookmarked URL
-		title: 'string', // Title at time of bookmark
-		'favIconUrl?': 'string | undefined', // Favicon URL (nullable)
-		'description?': 'string | undefined', // Optional user note
-		sourceDeviceId: DeviceId, // Device that created the bookmark
-		createdAt: 'number', // Timestamp (ms since epoch)
-		_v: '1',
-	}),
-);
+const bookmarksTable = defineTable({
+	id: column.string<BookmarkId>(), // nanoid, generated on bookmark
+	url: column.string(), // The bookmarked URL
+	title: column.string(), // Title at time of bookmark
+	favIconUrl: column.nullable(column.string()), // Favicon URL (null when missing)
+	description: column.nullable(column.string()), // Optional user note (null when absent)
+	sourceDeviceId: column.string<DeviceId>(), // Device that created the bookmark
+	createdAt: column.number(), // Timestamp (ms since epoch)
+});
 export type Bookmark = InferTableRow<typeof bookmarksTable>;
 
 /**
@@ -215,46 +219,39 @@ export type Bookmark = InferTableRow<typeof bookmarksTable>;
  *
  * Each conversation has its own message history (linked via
  * chatMessages.conversationId). Subpages use `parentId` to form
- * a tree — e.g. a deep research thread spawned from a specific
+ * a tree, e.g. a deep research thread spawned from a specific
  * message in a parent conversation.
  */
-const conversationsTable = defineTable(
-	type({
-		id: ConversationId,
-		title: 'string',
-		'parentId?': ConversationId.or('undefined'),
-		'sourceMessageId?': ChatMessageId.or('undefined'),
-		'systemPrompt?': 'string | undefined',
-		provider: 'string',
-		model: 'string',
-		createdAt: 'number',
-		updatedAt: 'number',
-		_v: '1',
-	}),
-);
+const conversationsTable = defineTable({
+	id: column.string<ConversationId>(),
+	title: column.string(),
+	parentId: column.nullable(column.string<ConversationId>()),
+	sourceMessageId: column.nullable(column.string<ChatMessageId>()),
+	systemPrompt: column.nullable(column.string()),
+	provider: column.string(),
+	model: column.string(),
+	createdAt: column.number(),
+	updatedAt: column.number(),
+});
 export type Conversation = InferTableRow<typeof conversationsTable>;
 
 /**
  * Chat messages — TanStack AI UIMessage data persisted per conversation.
  *
- * The `parts` field stores MessagePart[] as a native array (no JSON
- * serialization). Runtime validation is skipped for parts because
- * they are always produced by TanStack AI — compile-time drift
- * detection in `ui-message.ts` catches type mismatches on
- * TanStack AI upgrades instead.
+ * The `parts` field stores MessagePart[] as a JSON-encoded array. Runtime
+ * validation of the inner shape is skipped (typed as `JsonValue[]`) because
+ * parts are always produced by TanStack AI: compile-time drift detection in
+ * `ui-message.ts` catches type mismatches on TanStack AI upgrades instead.
  *
  * @see {@link file://./ai/ui-message.ts} — drift detection + toUiMessage boundary
  */
-const chatMessagesTable = defineTable(
-	type({
-		id: ChatMessageId,
-		conversationId: ConversationId,
-		role: "'user' | 'assistant' | 'system'",
-		parts: type({} as type.cast<JsonValue[]>),
-		createdAt: 'number',
-		_v: '1',
-	}),
-);
+const chatMessagesTable = defineTable({
+	id: column.string<ChatMessageId>(),
+	conversationId: column.string<ConversationId>(),
+	role: column.enum(['user', 'assistant', 'system']),
+	parts: column.json(Type.Unsafe<JsonValue[]>(Type.Array(Type.Any()))),
+	createdAt: column.number(),
+});
 export type ChatMessage = InferTableRow<typeof chatMessagesTable>;
 
 /**
@@ -267,13 +264,10 @@ export type ChatMessage = InferTableRow<typeof chatMessagesTable>;
  * The `id` is the flat action name used by CLI and RPC surfaces
  * (e.g. `tabs_close`).
  */
-const toolTrustTable = defineTable(
-	type({
-		id: 'string',
-		trust: "'ask' | 'always'",
-		_v: '1',
-	}),
-);
+const toolTrustTable = defineTable({
+	id: column.string(),
+	trust: column.enum(['ask', 'always']),
+});
 export type ToolTrust = InferTableRow<typeof toolTrustTable>;
 
 // ─────────────────────────────────────────────────────────────────────────────

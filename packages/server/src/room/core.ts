@@ -67,11 +67,14 @@ import {
 	type PresenceFrame,
 } from '@epicenter/workspace/document/presence';
 import * as decoding from 'lib0/decoding';
+import { createLogger } from 'wellcrafted/logger';
 import { Err, Ok, type Result, trySync } from 'wellcrafted/result';
 import * as Y from 'yjs';
 import { MAX_PAYLOAD_BYTES } from '../constants.js';
 import type { Connection } from '../types.js';
 import { RoomError, type RoomSocket, type RoomUpdateLog } from './contracts.js';
+
+const log = createLogger('server/room/core');
 
 // ============================================================================
 // Constants
@@ -224,44 +227,44 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 
 	/**
 	 * Deduped snapshot of currently-connected devices, newest-wins per
-	 * `installationId`. Pass `exclude` to omit the caller's own socket; if the
-	 * caller's install still has other open sockets (multi-tab one-install
+	 * `deviceId`. Pass `exclude` to omit the caller's own socket; if the
+	 * caller's device still has other open sockets (multi-tab same-device
 	 * edge case), those siblings are excluded too. The result is "remote
 	 * devices" from the perspective of the receiver, sorted by
-	 * `installationId` for deterministic output.
+	 * `deviceId` for deterministic output.
 	 */
 	function snapshotDevices(exclude?: RoomSocket): PresenceDevice[] {
-		const excludeInstall = exclude
-			? connections.get(exclude)?.installationId
+		const excludeDevice = exclude
+			? connections.get(exclude)?.deviceId
 			: undefined;
 		const seen = new Map<string, PresenceDevice>();
 		for (const [ws, attachment] of connections) {
 			if (ws === exclude) continue;
-			if (excludeInstall && attachment.installationId === excludeInstall) {
+			if (excludeDevice && attachment.deviceId === excludeDevice) {
 				continue;
 			}
-			const existing = seen.get(attachment.installationId);
+			const existing = seen.get(attachment.deviceId);
 			if (existing && existing.connectedAt >= attachment.connectedAt) continue;
-			seen.set(attachment.installationId, {
-				installationId: attachment.installationId,
+			seen.set(attachment.deviceId, {
+				deviceId: attachment.deviceId,
 				connectedAt: attachment.connectedAt,
 				actions: attachment.actions,
 			});
 		}
 		return Array.from(seen.values()).sort((a, b) =>
-			a.installationId.localeCompare(b.installationId),
+			a.deviceId.localeCompare(b.deviceId),
 		);
 	}
 
 	/**
-	 * Count OPEN sockets currently associated with `installationId`. Used to
-	 * detect the first socket for an install (on connect) and the last (on
+	 * Count OPEN sockets currently associated with `deviceId`. Used to
+	 * detect the first socket for a device (on connect) and the last (on
 	 * close): the two events that change room membership.
 	 */
-	function countInstallationSockets(installationId: string): number {
+	function countDeviceSockets(deviceId: string): number {
 		let count = 0;
 		for (const [, data] of connections) {
-			if (data.installationId === installationId) count++;
+			if (data.deviceId === deviceId) count++;
 		}
 		return count;
 	}
@@ -319,17 +322,14 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 	}
 
 	/**
-	 * Resolve a recipient `installationId` to the most-recently-connected open
+	 * Resolve a recipient `deviceId` to the most-recently-connected open
 	 * socket, if any. `Map` iteration is insertion order, so the LAST
 	 * matching socket in a forward scan is the newest.
 	 */
-	function pickRecipient(installationId: string): RoomSocket | null {
+	function pickRecipient(deviceId: string): RoomSocket | null {
 		let newest: RoomSocket | null = null;
 		for (const [ws, data] of connections) {
-			if (
-				data.installationId === installationId &&
-				ws.readyState === WS_READY_OPEN
-			) {
+			if (data.deviceId === deviceId && ws.readyState === WS_READY_OPEN) {
 				newest = ws;
 			}
 		}
@@ -498,8 +498,8 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 		 *
 		 * Sends the new socket its initial Yjs `SyncStep1` and a device
 		 * snapshot (the receiver's "remote devices"). If this is the FIRST
-		 * socket for `installationId`, room membership changed, so peers are
-		 * rebroadcast the live list. Subsequent tabs of the same install
+		 * socket for `deviceId`, room membership changed, so peers are
+		 * rebroadcast the live list. Subsequent tabs of the same device
 		 * leave the list unchanged and need no rebroadcast.
 		 *
 		 * A connect supersedes any pending debounced rebroadcast (the
@@ -509,7 +509,7 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 		 *   responsible for the runtime-specific accept (hibernation API
 		 *   or `Bun.serve` upgrade) before calling this.
 		 * @param connection - The connection attachment URL-stamped at
-		 *   upgrade. `installationId` is the dispatch address; `userId`
+		 *   upgrade. `deviceId` is the dispatch address; `userId`
 		 *   is the auth principal; `connectedAt` and `actions` are mirrored
 		 *   on the wire so receivers can render device affordances.
 		 */
@@ -524,7 +524,7 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 				} satisfies PresenceFrame),
 			);
 
-			if (countInstallationSockets(connection.installationId) === 1) {
+			if (countDeviceSockets(connection.deviceId) === 1) {
 				cancelPendingRebroadcast();
 				broadcastPresence(socket);
 			}
@@ -556,7 +556,7 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 					sendDispatchResult(
 						pending.callerWs,
 						id,
-						recipientOffline(data.installationId),
+						recipientOffline(data.deviceId),
 					);
 				} else if (pending.callerWs === socket) {
 					clearTimeout(pending.timeout);
@@ -566,7 +566,7 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 
 			connections.delete(socket);
 
-			if (countInstallationSockets(data.installationId) === 0) {
+			if (countDeviceSockets(data.deviceId) === 0) {
 				if (code === CLOSE_CODE_AUTH_FAILED) {
 					cancelPendingRebroadcast();
 					broadcastPresence();
@@ -620,7 +620,7 @@ export function createRoomCore({ updateLog }: { updateLog: RoomUpdateLog }) {
 				catch: (cause) => RoomError.MessageDecode({ cause }),
 			});
 			if (error) {
-				console.error(error.message);
+				log.warn(error);
 				return;
 			}
 			if (reply) socket.send(reply);
@@ -731,7 +731,10 @@ function compactUpdateLog(doc: Y.Doc, updateLog: RoomUpdateLog): void {
 
 	updateLog.replaceAll(compacted);
 
-	console.log(`[compaction] ${count} entries to ${compacted.byteLength} bytes`);
+	log.info('update log compacted', {
+		entries: count,
+		compactedBytes: compacted.byteLength,
+	});
 }
 
 /**

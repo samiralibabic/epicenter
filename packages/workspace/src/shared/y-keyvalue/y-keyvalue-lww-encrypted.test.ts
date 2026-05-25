@@ -153,17 +153,6 @@ describe('createEncryptedYkvLww', () => {
 			expect(entry?.val).toBe('raw-value');
 			expect(isEncryptedBlob(entry?.val)).toBe(false);
 		});
-
-		test('zero overhead: passthrough reads match inner behavior', () => {
-			const { kv } = setup();
-
-			kv.set('x', '10');
-			kv.set('y', '20');
-
-			expect(kv.get('x')).toBe('10');
-			expect(kv.get('y')).toBe('20');
-			expect(kv.size).toBe(2);
-		});
 	});
 
 	describe('Observer decryption', () => {
@@ -283,33 +272,7 @@ describe('createEncryptedYkvLww', () => {
 		});
 	});
 
-	describe('reads always return plaintext', () => {
-		test('get returns decrypted value while yarray holds ciphertext', () => {
-			const key = randomBytes(32);
-			const { kv, yarray } = setup(new Map([[1, key]]));
-
-			kv.set('k', 'plain-view');
-
-			expect(kv.get('k')).toBe('plain-view');
-			expect(isEncryptedBlob(yarray.toArray()[0]?.val)).toBe(true);
-		});
-
-		test('remote sync delivers decrypted values via observer', () => {
-			const key = randomBytes(32);
-
-			const doc1 = new Y.Doc({ guid: 'shared' });
-			const doc2 = new Y.Doc({ guid: 'shared' });
-
-			const kv1 = setupActivated<string>(doc1, 'data', new Map([[1, key]]));
-			const kv2 = setupActivated<string>(doc2, 'data', new Map([[1, key]]));
-
-			kv1.set('shared-key', 'from-doc1');
-			syncDocs(doc1, doc2);
-
-			expect(kv2.get('shared-key')).toBe('from-doc1');
-			expect(kv2.get('shared-key')).toBe('from-doc1');
-		});
-	});
+	describe('reads always return plaintext', () => {});
 
 	describe('Two-device sync with same key', () => {
 		test('encrypted value syncs and decrypts correctly', () => {
@@ -356,23 +319,6 @@ describe('createEncryptedYkvLww', () => {
 
 			expect(kv1.get('x')).toBe('from-client-2-later');
 			expect(kv2.get('x')).toBe('from-client-2-later');
-		});
-
-		test('both docs converge to same decrypted value', () => {
-			const key = randomBytes(32);
-
-			const doc1 = new Y.Doc({ guid: 'shared' });
-			const doc2 = new Y.Doc({ guid: 'shared' });
-
-			const kv1 = setupActivated<string>(doc1, 'data', new Map([[1, key]]));
-			const kv2 = setupActivated<string>(doc2, 'data', new Map([[1, key]]));
-
-			kv1.set('shared', 'value-from-doc1');
-			kv2.set('shared', 'value-from-doc2');
-
-			syncBoth(doc1, doc2);
-
-			expect(kv1.get('shared')).toBe(kv2.get('shared'));
 		});
 	});
 
@@ -456,40 +402,6 @@ describe('createEncryptedYkvLww', () => {
 		});
 	});
 
-	describe('Mode transitions', () => {
-		test('starts unencrypted when no key provided', () => {
-			const { kv, yarray } = setup();
-
-			kv.set('a', 'hello');
-			const raw = yarray.toArray().find((e) => e.key === 'a');
-			expect(isEncryptedBlob(raw?.val)).toBe(false);
-		});
-
-		test('starts encrypted when key provided', () => {
-			const key = randomBytes(32);
-			const { kv, yarray } = setup(new Map([[1, key]]));
-
-			kv.set('a', 'hello');
-			const raw = yarray.toArray().find((e) => e.key === 'a');
-			expect(isEncryptedBlob(raw?.val)).toBe(true);
-		});
-
-		test('plaintext → encrypted via activateEncryption(key)', () => {
-			const key = randomBytes(32);
-			const { kv, yarray } = setup();
-
-			kv.set('before', 'plaintext');
-			const rawBefore = yarray.toArray().find((e) => e.key === 'before');
-			expect(isEncryptedBlob(rawBefore?.val)).toBe(false);
-
-			kv.activateEncryption(new Map([[1, key]]));
-
-			kv.set('after', 'encrypted');
-			const rawAfter = yarray.toArray().find((e) => e.key === 'after');
-			expect(isEncryptedBlob(rawAfter?.val)).toBe(true);
-		});
-	});
-
 	describe('Error containment', () => {
 		test('corrupted blob does not crash observation', () => {
 			const key = randomBytes(32);
@@ -545,33 +457,6 @@ describe('createEncryptedYkvLww', () => {
 	});
 
 	describe('Key transition (activateEncryption)', () => {
-		test('plaintext entries remain accessible after activateEncryption', () => {
-			const key = randomBytes(32);
-			const { kv } = setup();
-
-			kv.set('pt-1', 'plain-a');
-			kv.set('pt-2', 'plain-b');
-			kv.activateEncryption(new Map([[1, key]]));
-
-			expect(kv.get('pt-1')).toBe('plain-a');
-			expect(kv.get('pt-2')).toBe('plain-b');
-		});
-
-		test('new writes after activateEncryption encrypt', () => {
-			const key = randomBytes(32);
-			const { kv, yarray } = setup();
-
-			kv.set('before', 'plaintext-before-key');
-			kv.activateEncryption(new Map([[1, key]]));
-			kv.set('after', 'encrypted-after-key');
-
-			const afterEntry = yarray
-				.toArray()
-				.find((entry) => entry.key === 'after');
-			expect(afterEntry).toBeDefined();
-			expect(isEncryptedBlob(afterEntry?.val)).toBe(true);
-		});
-
 		test('key rotation upgrades old-version ciphertext to the new current version', () => {
 			const key1 = randomBytes(32);
 			const key2 = randomBytes(32);

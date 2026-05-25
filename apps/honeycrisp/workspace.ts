@@ -9,20 +9,20 @@
  * canonical schema.
  *
  * Composition lives elsewhere:
- *  - `apps/honeycrisp/browser.ts`  -> `openHoneycrispBrowser({ signedIn, installationId })`
+ *  - `apps/honeycrisp/browser.ts`  -> `openHoneycrispBrowser({ signedIn, deviceId })`
  *  - `apps/honeycrisp/daemon.ts`   -> `openHoneycrispDaemon(ctx)`
  */
 
 import {
-	DateTimeString,
+	column,
 	defineActions,
 	defineMutation,
 	defineTable,
 	docGuid,
+	generateId,
 	type InferTableRow,
 	type Tables,
 } from '@epicenter/workspace';
-import { type } from 'arktype';
 import Type from 'typebox';
 import type { Brand } from 'wellcrafted/brand';
 
@@ -36,7 +36,16 @@ export const HONEYCRISP_ID = 'epicenter.honeycrisp';
  * Prevents accidental mixing with other string IDs at compile time.
  */
 export type NoteId = string & Brand<'NoteId'>;
-export const NoteId = type('string').pipe((s): NoteId => s as NoteId);
+
+/**
+ * Syntactic sugar for `value as NoteId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as NoteId` should appear.
+ */
+export const asNoteId = (value: string): NoteId => value as NoteId;
+
+/** Generate a unique {@link NoteId} for a new note row. */
+export const generateNoteId = (): NoteId => generateId<NoteId>();
 
 /**
  * Branded folder ID: nanoid generated when a folder is created.
@@ -44,7 +53,16 @@ export const NoteId = type('string').pipe((s): NoteId => s as NoteId);
  * Prevents accidental mixing with other string IDs at compile time.
  */
 export type FolderId = string & Brand<'FolderId'>;
-export const FolderId = type('string').pipe((s): FolderId => s as FolderId);
+
+/**
+ * Syntactic sugar for `value as FolderId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as FolderId` should appear.
+ */
+export const asFolderId = (value: string): FolderId => value as FolderId;
+
+/** Generate a unique {@link FolderId} for a new folder row. */
+export const generateFolderId = (): FolderId => generateId<FolderId>();
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -54,57 +72,56 @@ export const FolderId = type('string').pipe((s): FolderId => s as FolderId);
  * Each folder has a name, optional emoji icon, and sort order for manual
  * reordering in the sidebar. Notes reference folders via `folderId`.
  */
-const foldersTable = defineTable(
-	type({
-		id: FolderId,
-		name: 'string',
-		'icon?': 'string | undefined',
-		sortOrder: 'number',
-		_v: '1',
-	}),
-);
-export type Folder = InferTableRow<typeof foldersTable>;
-
-const noteBase = type({
-	id: NoteId,
-	'folderId?': FolderId.or('undefined'),
-	title: 'string',
-	preview: 'string',
-	pinned: 'boolean',
-	createdAt: DateTimeString,
-	updatedAt: DateTimeString,
+const foldersTable = defineTable({
+	id: column.string<FolderId>(),
+	name: column.string(),
+	icon: column.nullable(column.string()),
+	sortOrder: column.number(),
 });
+export type Folder = InferTableRow<typeof foldersTable>;
 
 /**
  * Notes table: individual notes with rich-text bodies.
  *
- * Each note belongs to an optional folder (unfiled if `folderId` is undefined),
+ * Each note belongs to an optional folder (unfiled if `folderId` is null),
  * has a title auto-populated from the first line of content, a preview for the
  * list view, and can be pinned to appear at the top of the note list.
  *
  * v2 adds `deletedAt` for soft delete: notes move to "Recently Deleted"
- * instead of being permanently destroyed. The field is `undefined` for active
+ * instead of being permanently destroyed. The field is `null` for active
  * notes and a `DateTimeString` for deleted ones. Also adds optional `wordCount`
- * (computed on each editor update, `undefined` for legacy notes).
+ * (computed on each editor update, `null` for legacy notes).
  *
  * The Y.XmlFragment document (`body`) lives in a separate Y.Doc per note.
  * The browser opener constructs it and bumps `updatedAt` via `onLocalUpdate`.
  */
 const notesTable = defineTable(
-	noteBase.merge({
-		_v: '1',
-	}),
-	noteBase.merge({
-		'deletedAt?': DateTimeString.or('undefined'),
-		'wordCount?': 'number | undefined',
-		_v: '2',
-	}),
-).migrate((row) => {
-	switch (row._v) {
+	{
+		id: column.string<NoteId>(),
+		folderId: column.nullable(column.string<FolderId>()),
+		title: column.string(),
+		preview: column.string(),
+		pinned: column.boolean(),
+		createdAt: column.dateTime(),
+		updatedAt: column.dateTime(),
+	},
+	{
+		id: column.string<NoteId>(),
+		folderId: column.nullable(column.string<FolderId>()),
+		title: column.string(),
+		preview: column.string(),
+		pinned: column.boolean(),
+		createdAt: column.dateTime(),
+		updatedAt: column.dateTime(),
+		deletedAt: column.nullable(column.dateTime()),
+		wordCount: column.nullable(column.number()),
+	},
+).migrate(({ value, version }) => {
+	switch (version) {
 		case 1:
-			return { ...row, deletedAt: undefined, _v: 2 };
+			return { ...value, deletedAt: null, wordCount: null };
 		case 2:
-			return row;
+			return value;
 	}
 });
 export type Note = InferTableRow<typeof notesTable>;
@@ -143,7 +160,7 @@ export function createHoneycrispActions(tables: HoneycrispTables) {
 		/**
 		 * Delete a folder and move all its notes to unfiled.
 		 *
-		 * Re-parents every note in the folder (sets `folderId` to undefined)
+		 * Re-parents every note in the folder (sets `folderId` to null)
 		 * and deletes the folder row. Selection clearing is handled by the
 		 * Svelte state layer (folders) via URL search params.
 		 */
@@ -151,12 +168,12 @@ export function createHoneycrispActions(tables: HoneycrispTables) {
 			description: 'Delete a folder and re-parent its notes to unfiled',
 			input: Type.Object({ folderId: Type.String() }),
 			handler: ({ folderId: rawId }) => {
-				const folderId = rawId as FolderId;
+				const folderId = asFolderId(rawId);
 				const folderNotes = tables.notes
 					.getAllValid()
 					.filter((n) => n.folderId === folderId);
 				for (const note of folderNotes) {
-					tables.notes.update(note.id, { folderId: undefined });
+					tables.notes.update(note.id, { folderId: null });
 				}
 				tables.folders.delete(folderId);
 			},

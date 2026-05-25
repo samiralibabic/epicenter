@@ -5,9 +5,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"exports": {
-		".": "./src/index.ts",
-		"./billing-contract": "./src/billing-contract.ts",
-		"./billing-plans": "./src/billing-plans.ts"
+		".": "./src/index.ts"
 	},
 	"license": "AGPL-3.0-or-later",
 	"scripts": {
@@ -29,6 +27,7 @@
 		"@better-auth/drizzle-adapter": "catalog:",
 		"@better-auth/oauth-provider": "catalog:",
 		"@epicenter/auth": "workspace:*",
+		"@epicenter/billing": "workspace:*",
 		"@epicenter/constants": "workspace:*",
 		"@epicenter/encryption": "workspace:*",
 		"@epicenter/server": "workspace:*",

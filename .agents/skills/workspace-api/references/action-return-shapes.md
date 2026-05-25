@@ -47,7 +47,7 @@ attachActionRunner                     collaboration.dispatch
 ```
 
 Target-side normalization runs inside `attachActionRunner` in
-`packages/workspace/src/document/rpc.ts`. The caller receives exactly the
+`packages/workspace/src/document/dispatch.ts`. The caller receives exactly the
 response row through `collaboration.dispatch()`.
 
 ## Handler Rule
@@ -96,4 +96,4 @@ surface later. The current peer dispatch API intentionally exposes
 2. Handlers can be sync, async, return raw, return `Result`, or throw.
 3. Remote normalization runs exactly once per RPC, inside `attachActionRunner`.
 4. Remote receivers expect `{ data, error }` from `collaboration.dispatch()`.
-5. `DispatchError` lives in `packages/workspace/src/document/rpc.ts` and is re-exported from `@epicenter/workspace`.
+5. `DispatchError` lives in `packages/workspace/src/document/dispatch.ts` and is re-exported from `@epicenter/workspace`.

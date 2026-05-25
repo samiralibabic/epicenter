@@ -94,12 +94,11 @@ function createSkillsState() {
 				id,
 				name,
 				description: 'TODO: describe when and why to use this skill.',
-				license: undefined,
-				compatibility: undefined,
-				metadata: undefined,
-				allowedTools: undefined,
+				license: null,
+				compatibility: null,
+				metadata: null,
+				allowedTools: null,
 				updatedAt: Date.now(),
-				_v: 1,
 			});
 			selectedSkillId = id;
 			return id;
@@ -153,7 +152,6 @@ function createSkillsState() {
 				skillId,
 				path,
 				updatedAt: Date.now(),
-				_v: 1,
 			});
 			return id;
 		},

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { type AuthClient, ownerId } from '@epicenter/auth-svelte';
+	import type { AuthClient } from '@epicenter/auth';
 	import { Button } from '@epicenter/ui/button';
 	import { confirmationDialog } from '@epicenter/ui/confirmation-dialog';
 	import * as Popover from '@epicenter/ui/popover';
@@ -76,7 +76,7 @@
 	let forgettingDevice = $state(false);
 	const isSignedIn = $derived(auth.state.status === 'signed-in');
 	const accountCacheKey = $derived(
-		auth.state.status === 'signed-out' ? null : ownerId(auth.state.owner),
+		auth.state.status === 'signed-out' ? null : auth.state.ownerId,
 	);
 	const profile = createQuery(
 		() => ({

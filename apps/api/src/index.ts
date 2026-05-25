@@ -1,93 +1,72 @@
 /**
  * Epicenter Cloud Worker entry.
  *
- * Composes the `@epicenter/server` library in `personal` ownership mode and
- * layers cloud-only billing, admin, and dashboard surfaces on top. Self-
- * hosted team deployments live in a sibling apps/* folder and compose the
- * same library with `ownerKind: 'team'` and no Autumn middleware.
+ * Composes `@epicenter/server` with the `personal` ownership rule and
+ * layers cloud-only billing, admin, and dashboard surfaces on top.
+ * Self-hosted team deployments live in a sibling apps/* folder and
+ * compose the same library with `team({ isMember })` and no Autumn
+ * policies.
  *
- * Read top to bottom for the full URL surface of cloud.
+ * Read top to bottom for the full URL surface of cloud. Each `mount*`
+ * call bundles the auth + ownership + policies + route mount for one
+ * reusable surface; the deployment passes only the deployment-controlled
+ * knobs (ownership rule, optional cloud policies, auth choice for AI).
  */
 
 import {
-	createServer,
+	authApp,
+	createServerApp,
+	mountAiApp,
+	mountAssetsApp,
+	mountRoomsApp,
+	mountSessionApp,
+	personal,
 	Room,
 	requireBearerUser,
 	requireCookieOrBearerUser,
-	requireUrlUserIdMatchesAuth,
 } from '@epicenter/server';
-import { Hono } from 'hono';
 import { describeRoute } from 'hono-openapi';
 import {
-	autumnAiGate,
-	autumnStorageGate,
-	type Env,
-	ensurePlanId,
-} from './autumn-gates.js';
-import { billingRoutes } from './billing-routes.js';
+	chargeAiCreditsWithAutumn,
+	trackAssetStorageWithAutumn,
+} from './billing/policies.js';
+import { mountBillingApi } from './billing/routes.js';
 
-const s = createServer({ ownerKind: 'personal', signUpPolicy: 'open' });
+const ownership = personal();
 
-// Cast each library sub-app into cloud's extended Env so the chained
-// `.route(...)` calls below typecheck against `Hono<Env>`. The runtime
-// shape is identical; cloud just adds `planId` to Variables.
-const base = s.base as unknown as Hono<Env>;
-const auth = s.auth as unknown as Hono<Env>;
-const session = s.session as unknown as Hono<Env>;
-const rooms = s.rooms as unknown as Hono<Env>;
-const assets = s.assets as unknown as Hono<Env>;
-const ai = s.ai as unknown as Hono<Env>;
+const app = createServerApp();
 
 // Public health endpoint at root.
-base.get('/', (c) =>
+app.get('/', (c) =>
 	c.json({ mode: 'hub', version: '0.1.0', runtime: 'cloudflare' }),
 );
 
-// Auth surface (no /api prefix; these render HTML and OAuth metadata).
-base.route('/sign-in', auth).route('/consent', auth).route('/auth', auth);
+// Auth surface (HTML pages + OAuth metadata; no /api prefix by design,
+// no deployment knobs).
+app.route('/', authApp);
 
-// Session: authed via library middleware, no cloud-specific wrapping.
-base.route('/api/session', session);
+// Owner-partitioned reusable surfaces. Each primitive owns its own
+// auth + ownership wiring; the deployment passes only the rule and any
+// deployment policies.
+mountSessionApp(app, { ownership });
+mountRoomsApp(app, { ownership });
+mountAssetsApp(app, {
+	ownership,
+	policies: [trackAssetStorageWithAutumn],
+});
+mountAiApp(app, {
+	auth: requireBearerUser,
+	policies: [chargeAiCreditsWithAutumn],
+});
 
-// Rooms: bearer auth + URL userId safety, then library handler. No billing
-// gate for rooms today; bandwidth and DO storage are not metered.
-const cloudRooms = new Hono<Env>()
-	.use('/users/:userId/rooms/*', requireBearerUser, requireUrlUserIdMatchesAuth)
-	.route('/', rooms);
-base.route('/api', cloudRooms);
+// Cloud-only billing data plane. Auth is bundled into the mount so the
+// dashboard endpoints can't be mounted without it.
+mountBillingApi(app, { auth: requireCookieOrBearerUser });
 
-// Assets: cookie-or-bearer (dashboard SPA uses cookies), URL userId safety,
-// Autumn storage gate, then library handlers. Public read is registered
-// inside the library sub-app and matches before the authed paths because
-// of its `{15-char id}` regex.
-const cloudAssets = new Hono<Env>()
-	.use(
-		'/users/:userId/assets',
-		requireCookieOrBearerUser,
-		requireUrlUserIdMatchesAuth,
-		autumnStorageGate,
-	)
-	.use(
-		'/users/:userId/assets/*',
-		requireCookieOrBearerUser,
-		requireUrlUserIdMatchesAuth,
-		autumnStorageGate,
-	)
-	.route('/', assets);
-base.route('/api', cloudAssets);
-
-// AI chat: bearer-only, plan-aware credit gate, then library handler.
-const cloudAi = new Hono<Env>()
-	.use('*', requireBearerUser, ensurePlanId, autumnAiGate)
-	.route('/', ai);
-base.route('/api/ai', cloudAi);
-
-// Billing dashboard data plane.
-base.use('/api/billing/*', requireCookieOrBearerUser);
-base.route('/api/billing', billingRoutes);
-
-// Dashboard SPA: Workers Static Assets binding serves the SvelteKit build.
-base.on(
+// Dashboard SPA: Workers Static Assets binding serves the SvelteKit
+// build. Cloud-only because the `ASSETS` binding lives in this worker's
+// wrangler config; self-hosted deployments ship their own UI surface.
+app.on(
 	'GET',
 	['/dashboard', '/dashboard/*'],
 	describeRoute({
@@ -103,10 +82,7 @@ base.on(
 );
 
 // Legacy redirect: /billing -> /dashboard.
-base.get('/billing', (c) => c.redirect('/dashboard'));
+app.get('/billing', (c) => c.redirect('/dashboard'));
 
-/** App type for hc<AppType> in the dashboard. */
-export type AppType = typeof base;
-
-export default base;
+export default app;
 export { Room };

@@ -16,7 +16,7 @@ export const RootKeyringEntry = type({
  * Non-empty root keyring.
  *
  * The parsed keyring is canonicalized by descending version so the first entry
- * is the current secret for new per-subject key derivations.
+ * is the current secret for new per-label key derivations.
  */
 export const RootKeyring = type([
 	RootKeyringEntry,
@@ -88,30 +88,4 @@ export function parseRootKeyring(value: string): RootKeyring {
 	}
 	assertNoDuplicateVersions(parsed);
 	return sortRootKeyring(parsed);
-}
-
-/**
- * Format a root keyring back to canonical env-var text.
- *
- * The output is sorted by descending version to make the current secret visible
- * at the front of the string. This does not preserve input order by design.
- *
- * @example
- * ```typescript
- * formatRootKeyring([
- *   { version: 1, secret: 'oldBase64' },
- *   { version: 2, secret: 'newBase64' },
- * ]);
- * // "2:newBase64,1:oldBase64"
- * ```
- */
-export function formatRootKeyring(rootKeyring: RootKeyring): string {
-	const parsed = RootKeyring(rootKeyring);
-	if (parsed instanceof type.errors) {
-		throw new Error(parsed.summary);
-	}
-	assertNoDuplicateVersions(parsed);
-	return sortRootKeyring(parsed)
-		.map(({ version, secret }) => `${version}:${secret}`)
-		.join(',');
 }

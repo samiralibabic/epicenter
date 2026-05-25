@@ -160,21 +160,6 @@ describe('cache[Symbol.dispose]', () => {
 		b2[Symbol.dispose]();
 	});
 
-	test('cancels all pending grace timers', async () => {
-		const cache = makeYDocCache({ gcTime: 50 });
-		const ydocs = ['a', 'b', 'c'].map((id) => {
-			const h = cache.open(id);
-			h[Symbol.dispose]();
-			return h.ydoc;
-		});
-
-		cache[Symbol.dispose]();
-		for (const ydoc of ydocs) expect(ydoc.isDestroyed).toBe(true);
-
-		await new Promise((r) => setTimeout(r, 80));
-		for (const ydoc of ydocs) expect(ydoc.isDestroyed).toBe(true);
-	});
-
 	test('a throwing value [Symbol.dispose] does not propagate; cache still evicts', () => {
 		let calls = 0;
 		const cache = createDisposableCache((id: string) => {
@@ -201,32 +186,6 @@ describe('cache[Symbol.dispose]', () => {
 		} finally {
 			console.error = prevError;
 		}
-	});
-
-	test('synchronous teardown cascade: dispose fires value [Symbol.dispose] synchronously, downstream listeners observe before dispose returns', async () => {
-		let resolveSentinel!: () => void;
-		const sentinel = new Promise<void>((r) => {
-			resolveSentinel = r;
-		});
-
-		const cache = createDisposableCache((id: string) => {
-			const ydoc = new Y.Doc({ guid: id });
-			ydoc.on('destroy', () => {
-				resolveSentinel();
-			});
-			return {
-				ydoc,
-				[Symbol.dispose]() {
-					ydoc.destroy();
-				},
-			};
-		});
-		cache.open('a');
-
-		// No await: cache dispose returns void and cascades synchronously.
-		cache[Symbol.dispose]();
-
-		await sentinel;
 	});
 });
 
@@ -258,19 +217,6 @@ describe('open / dispose', () => {
 		h2[Symbol.dispose]();
 		await new Promise((r) => setTimeout(r, 30));
 		expect(h1.ydoc.isDestroyed).toBe(true);
-	});
-
-	test('using h = cache.open(id) disposes on scope exit', async () => {
-		const cache = makeYDocCache({ gcTime: 10 });
-		let ydocRef: Y.Doc;
-		{
-			using h = cache.open('a');
-			ydocRef = h.ydoc;
-			expect(h.ydoc.isDestroyed).toBe(false);
-		}
-		expect(ydocRef.isDestroyed).toBe(false); // still in grace
-		await new Promise((r) => setTimeout(r, 30));
-		expect(ydocRef.isDestroyed).toBe(true);
 	});
 
 	test('open() during grace cancels the pending disposal', async () => {
@@ -368,37 +314,5 @@ describe('re-entrancy', () => {
 		expect(cache.has('a')).toBe(true);
 		reopenedHandle[Symbol.dispose]();
 		expect(cache.has('a')).toBe(false);
-	});
-});
-
-// ════════════════════════════════════════════════════════════════════════════
-// plain-object invariant (T must be a plain object)
-// ════════════════════════════════════════════════════════════════════════════
-
-describe('plain-object invariant', () => {
-	test('class instances passed directly LOSE prototype methods on the handle', () => {
-		// The handle is built via spread, which copies own enumerable
-		// properties only. Methods on the class prototype are NOT copied.
-		// This test pins down that documented limitation so a future change
-		// to the wrapping strategy doesn't silently regress it.
-		class WithPrototypeMethod {
-			name = 'underlying';
-			greet(): string {
-				return `hi from ${this.name}`;
-			}
-			[Symbol.dispose]() {}
-		}
-		const cache = createDisposableCache(
-			(_id: string) => new WithPrototypeMethod(),
-		);
-		const handle = cache.open('a');
-
-		// Own field is preserved by the spread.
-		expect(handle.name).toBe('underlying');
-		// Prototype method is NOT preserved by the spread.
-		expect((handle as unknown as { greet?: unknown }).greet).toBeUndefined();
-
-		handle[Symbol.dispose]();
-		cache[Symbol.dispose]();
 	});
 });

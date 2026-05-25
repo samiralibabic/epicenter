@@ -1,43 +1,39 @@
 import { type } from 'arktype';
 
 /**
- * Transport-safe per-subject key material delivered through auth sessions.
+ * Transport-safe per-label key material delivered through auth sessions.
  *
  * The version is capped at 255 because encrypted blobs store the key version
- * in a single byte. `subjectKeyBase64` is actual key material, not a fingerprint
+ * in a single byte. `keyBytesBase64` is actual key material, not a fingerprint
  * or public identifier, so callers should treat values matching this schema as
  * secrets.
  */
-export const SubjectKeyringEntry = type({
+export const KeyringEntry = type({
 	version: '1 <= number.integer <= 255',
-	subjectKeyBase64: 'string',
+	keyBytesBase64: 'string',
 });
 
 /**
- * Non-empty keyring of per-subject keys.
+ * Non-empty keyring.
  *
  * New writes use the highest version after workspace activation. Older entries
  * stay in the keyring so activation can decrypt old-version blobs and rewrite
  * them under the current version.
  */
-export const SubjectKeyring = type([
-	SubjectKeyringEntry,
-	'...',
-	SubjectKeyringEntry.array(),
-]);
+export const Keyring = type([KeyringEntry, '...', KeyringEntry.array()]);
 
-export type SubjectKeyringEntry = typeof SubjectKeyringEntry.infer;
-export type SubjectKeyring = typeof SubjectKeyring.infer;
+export type KeyringEntry = typeof KeyringEntry.infer;
+export type Keyring = typeof Keyring.infer;
 
 /**
- * Per-workspace HKDF keyring derived locally from a `SubjectKeyring`.
+ * Per-workspace HKDF keyring derived locally from a `Keyring`.
  *
  * Each entry maps a key version to the raw 32-byte workspace key derived via
- * `deriveWorkspaceKey(subjectKey, workspaceId)`. The map is rebuilt at every
+ * `deriveWorkspaceKey(keyBytes, workspaceId)`. The map is rebuilt at every
  * `attachEncryption` site so workspace key bytes do not outlive the Y.Doc.
  *
- * The version axis equals the version axis of the source `SubjectKeyring`:
- * one workspace key per subject keyring entry, never persisted.
+ * The version axis equals the version axis of the source `Keyring`: one
+ * workspace key per keyring entry, never persisted.
  */
 export type WorkspaceKeyring = Map<number, Uint8Array>;
 
@@ -60,7 +56,7 @@ export function assertEncryptionKeyVersion(version: number): void {
 }
 
 /**
- * Compare two subject keyrings without creating a secret-bearing string.
+ * Compare two keyrings without creating a secret-bearing string.
  *
  * This is intentionally structural and order-independent. Use it for cache or
  * state dedup checks where the old `fingerprint` helper was tempting, but do
@@ -68,15 +64,12 @@ export function assertEncryptionKeyVersion(version: number): void {
  *
  * @example
  * ```typescript
- * if (!subjectKeyringsEqual(nextKeyring, currentKeyring)) {
+ * if (!keyringsEqual(nextKeyring, currentKeyring)) {
  *   currentKeyring = nextKeyring;
  * }
  * ```
  */
-export function subjectKeyringsEqual(
-	left: SubjectKeyring,
-	right: SubjectKeyring,
-): boolean {
+export function keyringsEqual(left: Keyring, right: Keyring): boolean {
 	if (left.length !== right.length) return false;
 	const sortedLeft = [...left].sort((a, b) => a.version - b.version);
 	const sortedRight = [...right].sort((a, b) => a.version - b.version);
@@ -85,7 +78,7 @@ export function subjectKeyringsEqual(
 		return (
 			rightKey !== undefined &&
 			leftKey.version === rightKey.version &&
-			leftKey.subjectKeyBase64 === rightKey.subjectKeyBase64
+			leftKey.keyBytesBase64 === rightKey.keyBytesBase64
 		);
 	});
 }

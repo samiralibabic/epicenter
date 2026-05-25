@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ANNUAL_PLANS, PLAN_IDS, PLANS } from '@epicenter/api/billing-plans';
+	import type { BillingPlanCard } from '@epicenter/billing/contracts';
 	import { Badge } from '@epicenter/ui/badge';
 	import { Button } from '@epicenter/ui/button';
 	import * as Card from '@epicenter/ui/card';
@@ -9,124 +9,50 @@
 	import { createMutation, createQuery } from '@tanstack/svelte-query';
 	import { toast } from 'svelte-sonner';
 	import { extractErrorMessage } from 'wellcrafted/error';
-	import { billing, billingKeys } from '$lib/query/billing';
+	import { billing, billingKeys } from '$lib/billing/queries';
 	import { queryClient } from '$lib/query/client';
 
-	/** Visible plan IDs in display order. Free is NOT shown as a card. */
-	const VISIBLE_PLAN_IDS = {
-		monthly: ['pro', 'ultra', 'max'] as const,
-		annual: ['pro_annual', 'ultra_annual', 'max_annual'] as const,
-	};
-
-	function formatPrice(amount: number, interval: 'month' | 'year'): string {
-		return `$${amount.toLocaleString()}/${interval === 'month' ? 'mo' : 'yr'}`;
-	}
-
-	function formatOverage(overage: {
-		amount: number;
-		billingUnits: number;
-	}): string {
-		const amt = Number.isInteger(overage.amount)
-			? `${overage.amount}`
-			: overage.amount.toFixed(2);
-		return `$${amt}/${overage.billingUnits}`;
-	}
-
-	/** Display metadata derived from plan constants in @epicenter/api/billing-plans. */
-	const PLAN_DISPLAY = Object.fromEntries([
-		...VISIBLE_PLAN_IDS.monthly.map((id) => {
-			const plan = PLANS[id];
-			const annual = Object.values(ANNUAL_PLANS).find(
-				(p) => p.monthlyEquivalent === id,
-			);
-			return [
-				id,
-				{
-					name: plan.name,
-					price: formatPrice(plan.price.amount, plan.price.interval),
-					annualPrice: annual
-						? `$${Math.round(annual.price.amount / 12)}/mo`
-						: formatPrice(plan.price.amount, plan.price.interval),
-					credits: plan.credits.included.toLocaleString(),
-					overage: formatOverage(plan.credits.overage),
-					rollover: id === PLAN_IDS.ultra || id === PLAN_IDS.max,
-					isRecommended: id === PLAN_IDS.ultra,
-				},
-			];
-		}),
-		...VISIBLE_PLAN_IDS.annual.map((id) => {
-			const plan = ANNUAL_PLANS[id];
-			return [
-				id,
-				{
-					name: plan.name.replace(' (Annual)', ''),
-					price: formatPrice(plan.price.amount, plan.price.interval),
-					annualPrice: formatPrice(plan.price.amount, plan.price.interval),
-					credits: plan.credits.included.toLocaleString(),
-					overage: formatOverage(plan.credits.overage),
-					rollover:
-						plan.monthlyEquivalent === PLAN_IDS.ultra ||
-						plan.monthlyEquivalent === PLAN_IDS.max,
-					isRecommended: plan.monthlyEquivalent === PLAN_IDS.ultra,
-				},
-			];
-		}),
-	]);
-
 	let isAnnual = $state(false);
-	let confirmDialog = $state<{ planId: string; planName: string } | null>(null);
-	let previewData = $state<{
-		prorationAmount?: number;
-		currency?: string;
-	} | null>(null);
+	let confirmDialog = $state<{ card: BillingPlanCard } | null>(null);
 
-	const balance = createQuery(() => billing.balance.options);
+	const overview = createQuery(() => billing.overview.options);
 	const plans = createQuery(() => billing.plans.options);
 
-	const currentPlanId = $derived(
-		balance.data?.subscriptions?.find((s) => !s.addOn)?.planId ?? 'free',
+	const visibleCards = $derived<BillingPlanCard[]>(
+		isAnnual
+			? (plans.data?.cards.annual ?? [])
+			: (plans.data?.cards.monthly ?? []),
 	);
 
-	const subscription = $derived(
-		balance.data?.subscriptions?.find((s) => !s.addOn) ?? null,
+	const currentPlanDisplayName = $derived(
+		overview.data?.planDisplayName ?? null,
 	);
-	const trialEndsAt = $derived(subscription?.trialEndsAt ?? null);
+	const trial = $derived(overview.data?.trial ?? null);
 	const trialEndDate = $derived(
-		trialEndsAt
-			? new Date(trialEndsAt).toLocaleDateString('en-US', {
+		trial
+			? new Date(trial.endsAtMs).toLocaleDateString('en-US', {
 					month: 'short',
 					day: 'numeric',
 				})
 			: null,
 	);
 
-	const visiblePlanIds = $derived(
-		isAnnual ? VISIBLE_PLAN_IDS.annual : VISIBLE_PLAN_IDS.monthly,
+	const previewMutation = createMutation(
+		() => billing.previewPlanChange.options,
+	);
+	const checkoutMutation = createMutation(() => billing.checkoutPlan.options);
+
+	const previewSummary = $derived(
+		previewMutation.data?.displayedSummary ?? null,
 	);
 
-	const eligibilityMap = $derived(
-		new Map(
-			(plans.data?.list ?? []).map((p) => [
-				p.id,
-				p.customerEligibility?.attachAction,
-			]),
-		),
-	);
-
-	const previewMutation = createMutation(() => billing.previewUpgrade.options);
-
-	const upgradeMutation = createMutation(() => billing.upgradePlan.options);
-
-	async function handleUpgradeClick(planId: string, planName: string) {
-		confirmDialog = { planId, planName };
-		previewData = null;
-		previewMutation.mutate(planId, {
-			onSuccess: (data) => {
-				previewData = data;
-			},
-		});
+	function handleUpgradeClick(card: BillingPlanCard) {
+		confirmDialog = { card };
+		previewMutation.reset();
+		previewMutation.mutate({ planId: card.id });
 	}
 </script>
+
 <section class="mt-10 mb-8">
 	<div class="flex items-center justify-between mb-4">
 		<h2 class="text-lg font-semibold">Plans</h2>
@@ -156,55 +82,49 @@
 		</div>
 	{:else}
 		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-			{#each visiblePlanIds as planId}
-				{@const display = PLAN_DISPLAY[planId]}
-				{@const isCurrent = currentPlanId === planId || (isAnnual && currentPlanId === planId.replace('_annual', ''))}
-				{@const eligibility = eligibilityMap.get(planId)}
-				{@const isRecommended = 'isRecommended' in display && display.isRecommended}
-
+			{#each visibleCards as card (card.id)}
 				<Card.Root
-					class="{isRecommended ? 'border-primary ring-1 ring-primary' : ''} {isCurrent ? 'border-emerald-700 bg-emerald-950/20' : ''} flex flex-col"
+					class="{card.isRecommended ? 'border-primary ring-1 ring-primary' : ''} {card.cta === 'Current' ? 'border-emerald-700 bg-emerald-950/20' : ''} flex flex-col"
 				>
 					<Card.Header class="pb-2">
 						<div class="flex items-center gap-2">
-							<Card.Title>{display.name}</Card.Title>
-							{#if isRecommended}
+							<Card.Title>{card.displayName}</Card.Title>
+							{#if card.isRecommended}
 								<Badge variant="default" class="text-xs">Recommended</Badge>
 							{/if}
 						</div>
 						<p class="text-2xl font-bold">
-							{isAnnual ? display.annualPrice : display.price}
+							{isAnnual ? card.displayedPricePerMonth : card.displayedPrice}
 						</p>
 					</Card.Header>
 					<Card.Content class="flex-1 space-y-2 text-sm text-muted-foreground">
-						<p>{display.credits} credits/mo</p>
-						<p>{display.overage} overage</p>
+						<p>{card.displayedCreditsPerCycle}</p>
+						{#if card.displayedOverage}
+							<p>{card.displayedOverage}</p>
+						{/if}
 						<p>All AI models</p>
-						{#if display.rollover}
+						{#if card.rollover}
 							<p class="text-emerald-400">∞ credit rollover</p>
 						{:else}
 							<p>Credits reset monthly</p>
 						{/if}
 					</Card.Content>
 					<Card.Footer>
-						{#if isCurrent}
+						{#if card.cta === 'Current'}
 							<Button variant="outline" class="w-full" disabled>
 								Current plan
-								{#if trialEndsAt}
+								{#if card.isTrialing}
 									&nbsp;(trial)
 								{/if}
 							</Button>
 						{:else}
 							<Button
 								class="w-full"
-								variant={eligibility === 'upgrade' ? 'default' : 'secondary'}
-								onclick={() => handleUpgradeClick(planId, display.name)}
+								variant={card.cta === 'Upgrade' ? 'default' : 'secondary'}
+								onclick={() => handleUpgradeClick(card)}
 							>
-								{eligibility === 'upgrade'
-									? `Upgrade to ${display.name}`
-									: eligibility === 'downgrade'
-										? `Downgrade to ${display.name}`
-										: `Switch to ${display.name}`}
+								{card.cta}
+								to {card.displayName}
 							</Button>
 						{/if}
 					</Card.Footer>
@@ -213,12 +133,10 @@
 		</div>
 
 		<p class="mt-4 text-xs text-muted-foreground text-center">
-			{#if trialEndDate}
-				Currently on {PLAN_DISPLAY[currentPlanId]?.name ?? currentPlanId} trial
-				— ends {trialEndDate}.
-			{:else}
-				Currently on
-				{currentPlanId === 'free' ? 'Free (50 credits/mo)' : currentPlanId}.
+			{#if trialEndDate && currentPlanDisplayName}
+				Currently on {currentPlanDisplayName} trial: ends {trialEndDate}.
+			{:else if currentPlanDisplayName}
+				Currently on {currentPlanDisplayName}.
 			{/if}
 			All plans include cloud sync, unlimited workspaces, unlimited history, and
 			encryption.
@@ -229,17 +147,22 @@
 <!-- Upgrade confirmation dialog -->
 <Dialog.Root
 	open={!!confirmDialog}
-	onOpenChange={(open) => { if (!open) confirmDialog = null; }}
+	onOpenChange={(open) => {
+		if (!open) confirmDialog = null;
+	}}
 >
 	<Dialog.Content>
 		<Dialog.Header>
-			<Dialog.Title>Upgrade to {confirmDialog?.planName}</Dialog.Title>
+			<Dialog.Title>
+				{confirmDialog
+					? `${confirmDialog.card.cta} to ${confirmDialog.card.displayName}`
+					: ''}
+			</Dialog.Title>
 			<Dialog.Description>
 				{#if previewMutation.isPending}
 					Calculating cost...
-				{:else if previewData?.prorationAmount !== undefined}
-					You'll be charged ${(previewData.prorationAmount / 100).toFixed(2)}
-					today (prorated).
+				{:else if previewSummary}
+					{previewSummary}
 				{:else}
 					Confirm your plan change.
 				{/if}
@@ -251,30 +174,35 @@
 			</Button>
 			<Button
 				onclick={() => {
-					if (confirmDialog) {
-						upgradeMutation.mutate(
-							{ planId: confirmDialog.planId, successUrl: window.location.href },
-							{
-								onSuccess: (data) => {
-									if (data.paymentUrl) {
-										window.location.href = data.paymentUrl;
-									} else {
-										toast.success('Plan updated successfully');
-										confirmDialog = null;
-										queryClient.invalidateQueries({ queryKey: billingKeys.all });
-									}
-								},
-							onError: (error) => toast.error('Upgrade failed', { description: extractErrorMessage(error) }),
+					if (!confirmDialog) return;
+					checkoutMutation.mutate(
+						{
+							planId: confirmDialog.card.id,
+							successUrl: window.location.href,
+						},
+						{
+							onSuccess: (data) => {
+								if (data.checkoutUrl) {
+									window.location.href = data.checkoutUrl;
+								} else {
+									toast.success('Plan updated successfully');
+									confirmDialog = null;
+									queryClient.invalidateQueries({ queryKey: billingKeys.all });
+								}
 							},
-						);
-					}
+							onError: (error) =>
+								toast.error('Upgrade failed', {
+									description: extractErrorMessage(error),
+								}),
+						},
+					);
 				}}
-				disabled={upgradeMutation.isPending}
+				disabled={checkoutMutation.isPending}
 			>
-				{#if upgradeMutation.isPending}
+				{#if checkoutMutation.isPending}
 					<Spinner class="size-3.5" />
 				{:else}
-					Confirm upgrade
+					Confirm
 				{/if}
 			</Button>
 		</Dialog.Footer>

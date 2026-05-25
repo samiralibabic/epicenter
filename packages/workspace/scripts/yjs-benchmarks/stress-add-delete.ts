@@ -9,9 +9,8 @@
  */
 
 import { unlinkSync } from 'node:fs';
-import { type } from 'arktype';
 import * as Y from 'yjs';
-import { attachTable, defineTable } from '../../src/index.js';
+import { attachTable, column, defineTable } from '../../src/index.js';
 import { formatBytes, measureTime } from './helpers.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -26,16 +25,13 @@ const OUTPUT_PATH = './stress-test-output.yjs';
 // Schema — simulates a command/event log
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const eventDefinition = defineTable(
-	type({
-		id: 'string',
-		_v: '1',
-		type: "'command' | 'event'",
-		name: 'string',
-		payload: 'string',
-		timestamp: 'number',
-	}),
-);
+const eventDefinition = defineTable({
+	id: column.string(),
+	type: column.enum(['command', 'event']),
+	name: column.string(),
+	payload: column.string(),
+	timestamp: column.number(),
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -77,7 +73,6 @@ async function main() {
 			for (let i = 0; i < EVENTS_PER_CYCLE; i++) {
 				tables.events.set({
 					id: generateId(i),
-					_v: 1,
 					type: i % 2 === 0 ? 'command' : 'event',
 					name: `action_${i}`,
 					payload: samplePayload,

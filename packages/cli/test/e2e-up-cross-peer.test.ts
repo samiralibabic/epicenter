@@ -52,7 +52,6 @@ import {
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { machineAuthFilePath } from '@epicenter/auth/node';
 
@@ -60,20 +59,23 @@ const FIXTURE_DIR = join(import.meta.dir, 'fixtures/inline-actions');
 const BIN_PATH = join(import.meta.dir, '..', 'src', 'bin.ts');
 
 type EnvOverrides = Disposable & {
-	/** Stable `epicenterEnv.runtimeDir` root: $XDG_RUNTIME_DIR/epicenter. */
-	xdgRoot: string;
-	/** Stable home; user logs resolve from this HOME via env-paths. */
+	/** Stable home; logs and other HOME-derived paths resolve from this. */
 	home: string;
+	/** Stable runtime dir for the daemon's socket, metadata, and lease. */
+	runtimeDir: string;
 	/** Stable auth data dir for machine auth. */
 	dataDir: string;
 };
 
 function makeEnv(): EnvOverrides {
-	const xdgRoot = mkdtempSync('/tmp/ep-e2e-xdg-');
-	const home = mkdtempSync(join(tmpdir(), 'ep-e2e-home-'));
-	const dataDir = mkdtempSync(join(tmpdir(), 'ep-e2e-data-'));
+	// `/tmp/...` is short on every POSIX platform; needed because socketPathFor
+	// enforces a strict path-length guard that macOS's `os.tmpdir()` would
+	// blow.
+	const home = mkdtempSync('/tmp/eps-e2e-home-');
+	const runtimeDir = mkdtempSync('/tmp/eps-e2e-rt-');
+	const dataDir = mkdtempSync('/tmp/eps-e2e-data-');
 	const authPath = machineAuthFilePath({ dataDir });
-	mkdirSync(join(xdgRoot, 'epicenter'), { recursive: true });
+	mkdirSync(runtimeDir, { recursive: true });
 	mkdirSync(dirname(authPath), { recursive: true, mode: 0o700 });
 	writeFileSync(
 		authPath,
@@ -83,25 +85,24 @@ function makeEnv(): EnvOverrides {
 				refreshToken: 'refresh-stored',
 				accessTokenExpiresAt: Date.now() + 3_600_000,
 			},
-			localIdentity: {
-				subject: 'user-1',
-				keyring: [
-					{
-						version: 1,
-						subjectKeyBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
-					},
-				],
-			},
+			userId: 'user-1',
+			ownerId: 'user-1',
+			keyring: [
+				{
+					version: 1,
+					keyBytesBase64: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=',
+				},
+			],
 		}),
 		{ mode: 0o600 },
 	);
 	return {
-		xdgRoot,
 		home,
+		runtimeDir,
 		dataDir,
 		[Symbol.dispose]: () => {
-			rmSync(xdgRoot, { recursive: true, force: true });
 			rmSync(home, { recursive: true, force: true });
+			rmSync(runtimeDir, { recursive: true, force: true });
 			rmSync(dataDir, { recursive: true, force: true });
 		},
 	};
@@ -110,9 +111,9 @@ function makeEnv(): EnvOverrides {
 function childEnv(env: EnvOverrides): NodeJS.ProcessEnv {
 	return {
 		...process.env,
-		XDG_RUNTIME_DIR: env.xdgRoot,
 		HOME: env.home,
 		EPICENTER_DATA_DIR: env.dataDir,
+		EPICENTER_RUNTIME_DIR: env.runtimeDir,
 	};
 }
 
@@ -217,7 +218,7 @@ describe('daemon up lifecycle (scaled down, no real cross-peer)', () => {
 			expect(code).toBe(0);
 
 			// Runtime dir should be empty: no orphan .sock or .meta.json.
-			const runtimeRoot = join(env.xdgRoot, 'epicenter');
+			const runtimeRoot = env.runtimeDir;
 			const leftovers = runtimeLeftovers(runtimeRoot);
 			expect(leftovers).toEqual([]);
 		} finally {
@@ -254,7 +255,7 @@ describe('daemon up lifecycle (scaled down, no real cross-peer)', () => {
 			expect(code).toBe(0);
 
 			// Socket and metadata should both be gone.
-			const runtimeRoot = join(env.xdgRoot, 'epicenter');
+			const runtimeRoot = env.runtimeDir;
 			const leftovers = existsSync(runtimeRoot)
 				? runtimeLeftovers(runtimeRoot)
 				: [];

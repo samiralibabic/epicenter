@@ -2,7 +2,7 @@ import { BEARER_SUBPROTOCOL_PREFIX, parseSubprotocols } from '@epicenter/sync';
 import { getSessionCookie } from 'better-auth/cookies';
 import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
-import { parseBearer } from '../auth/resource-boundary.js';
+import { parseBearer } from '../auth/parse-bearer.js';
 
 /**
  * Reject requests that carry more than one authentication credential and lift

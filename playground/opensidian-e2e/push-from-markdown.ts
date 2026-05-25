@@ -70,7 +70,6 @@ export async function pushFromMarkdown(ctx: {
 				updatedAt: Number(frontmatter.updatedAt ?? Date.now()),
 				trashedAt:
 					frontmatter.trashedAt != null ? Number(frontmatter.trashedAt) : null,
-				_v: 1,
 			});
 		} catch (error) {
 			errors.push(

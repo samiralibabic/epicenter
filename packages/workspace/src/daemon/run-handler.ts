@@ -4,15 +4,15 @@
  *
  * `epicenter run` is a shell shortcut for one daemon runtime primitive:
  *
- *   request.peerTarget === undefined        ->  invokeAction(...)
- *   request.peerTarget === <installationId> ->  collab.dispatch({ to, action, input, signal })
+ *   request.peerTarget === undefined  ->  invokeAction(...)
+ *   request.peerTarget === <deviceId>  ->  collab.dispatch({ to, action, input, signal })
  *
  * The dispatch endpoint is HTTP-backed and addresses devices by
- * `installationId` directly; the relay routes to the most-recently-
- * connected socket for that install. If the relay has no live socket
- * for the target, the dispatch resolves with `RecipientOffline`, which
- * the `/run` route surfaces as `PeerNotFound`; any other dispatch error
- * is forwarded under `RemoteCallFailed`.
+ * `deviceId` directly; the relay routes to the most-recently-connected
+ * socket for that device. If the relay has no live socket for the target,
+ * the dispatch resolves with `RecipientOffline`, which the `/run` route
+ * surfaces as `PeerNotFound`; any other dispatch error is forwarded under
+ * `RemoteCallFailed`.
  *
  * Power-user automation (loops, fan-out across peers, conditional dispatch)
  * lives in vault-style TypeScript scripts that load the workspace library

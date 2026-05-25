@@ -2,37 +2,9 @@
 	import { Skeleton } from '@epicenter/ui/skeleton';
 	import * as Table from '@epicenter/ui/table';
 	import { createQuery } from '@tanstack/svelte-query';
-	import { billing } from '$lib/query/billing';
+	import { billing } from '$lib/billing/queries';
 
 	const models = createQuery(() => billing.models.options);
-
-	/** Sorted model entries: cheapest first, then alphabetical. */
-	const sortedModels = $derived(
-		Object.entries((models.data?.credits ?? {}) as Record<string, number>).sort(
-			([aName, aCost], [bName, bCost]) =>
-				aCost - bCost || aName.localeCompare(bName),
-		),
-	);
-
-	/**
-	 * Extract provider from model name heuristic.
-	 * Models starting with 'gpt'/'o' are OpenAI, 'gemini' is Google, 'grok' is xAI.
-	 */
-	function getProvider(model: string): string {
-		if (
-			model.startsWith('gpt') ||
-			model.startsWith('o1') ||
-			model.startsWith('o3') ||
-			model.startsWith('o4') ||
-			model.startsWith('computer-use') ||
-			model.startsWith('chatgpt') ||
-			model.startsWith('codex')
-		)
-			return 'OpenAI';
-		if (model.startsWith('gemini')) return 'Google';
-		if (model.startsWith('grok')) return 'xAI';
-		return 'Unknown';
-	}
 </script>
 
 {#if models.isPending}
@@ -53,13 +25,13 @@
 			</Table.Row>
 		</Table.Header>
 		<Table.Body>
-			{#each sortedModels as [ model, credits ]}
+			{#each models.data?.models ?? [] as row (row.model)}
 				<Table.Row>
-					<Table.Cell class="font-mono text-xs">{model}</Table.Cell>
-					<Table.Cell class="text-muted-foreground text-xs"
-						>{getProvider(model)}</Table.Cell
-					>
-					<Table.Cell class="text-right tabular-nums">{credits}</Table.Cell>
+					<Table.Cell class="font-mono text-xs">{row.model}</Table.Cell>
+					<Table.Cell class="text-muted-foreground text-xs">
+						{row.provider}
+					</Table.Cell>
+					<Table.Cell class="text-right tabular-nums">{row.credits}</Table.Cell>
 				</Table.Row>
 			{/each}
 		</Table.Body>

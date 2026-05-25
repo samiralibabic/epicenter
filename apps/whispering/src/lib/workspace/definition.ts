@@ -1,65 +1,92 @@
 import {
+	column,
 	defineKv,
 	defineTable,
 	type InferTableRow,
 } from '@epicenter/workspace';
-import { type } from 'arktype';
+import { type Static, Type } from 'typebox';
 
 // ── Constant imports ─────────────────────────────────────────────────────────
 
 import { RECORDING_MODES } from '$lib/constants/audio/recording-modes';
-import { INFERENCE_PROVIDER_IDS } from '$lib/constants/inference';
+import {
+	INFERENCE_PROVIDER_IDS,
+	type InferenceProviderId,
+} from '$lib/constants/inference';
 import {
 	TRANSCRIPTION,
 	TRANSCRIPTION_SERVICE_IDS,
+	type TranscriptionServiceId,
 } from '$lib/constants/transcription';
 import { ALWAYS_ON_TOP_MODES } from '$lib/constants/ui/always-on-top';
 import { FFMPEG_DEFAULT_COMPRESSION_OPTIONS } from '$lib/services/desktop/recorder/ffmpeg';
 
 /**
+ * The constants files type `*_IDS` as plain mutable arrays for ergonomics in
+ * UI code. `column.enum` needs a const-typed tuple to derive literal members,
+ * so we re-narrow at the schema boundary without touching the constants.
+ */
+const TRANSCRIPTION_SERVICE_ID_TUPLE =
+	TRANSCRIPTION_SERVICE_IDS as unknown as readonly [
+		TranscriptionServiceId,
+		...TranscriptionServiceId[],
+	];
+const INFERENCE_PROVIDER_ID_TUPLE =
+	INFERENCE_PROVIDER_IDS as unknown as readonly [
+		InferenceProviderId,
+		...InferenceProviderId[],
+	];
+
+/**
  * Tables store normalized domain entities. Each row is replaced atomically via
- * `table.set()` — there's no field-level merging. Schemas validate on read, so old
+ * `table.set()`, there's no field-level merging. Schemas validate on read, so old
  * data stays in storage until explicitly rewritten.
  */
 /** Audio recordings captured by the user. One row per recording session. */
 const recordings = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		subtitle: 'string',
-		timestamp: 'string',
-		createdAt: 'string',
-		updatedAt: 'string',
-		transcribedText: 'string',
-		transcriptionStatus: "'UNPROCESSED' | 'TRANSCRIBING' | 'DONE' | 'FAILED'",
-		_v: '1',
-	}),
-	type({
-		id: 'string',
-		title: 'string',
-		recordedAt: 'string',
-		updatedAt: 'string',
-		transcript: 'string',
-		transcriptionStatus: "'UNPROCESSED' | 'TRANSCRIBING' | 'DONE' | 'FAILED'",
-		'duration?': 'number | undefined',
-		_v: '2',
-	}),
-).migrate((row) => {
-	switch (row._v) {
-		case 1: {
+	{
+		id: column.string(),
+		title: column.string(),
+		subtitle: column.string(),
+		timestamp: column.string(),
+		createdAt: column.string(),
+		updatedAt: column.string(),
+		transcribedText: column.string(),
+		transcriptionStatus: column.enum([
+			'UNPROCESSED',
+			'TRANSCRIBING',
+			'DONE',
+			'FAILED',
+		]),
+	},
+	{
+		id: column.string(),
+		title: column.string(),
+		recordedAt: column.string(),
+		updatedAt: column.string(),
+		transcript: column.string(),
+		transcriptionStatus: column.enum([
+			'UNPROCESSED',
+			'TRANSCRIBING',
+			'DONE',
+			'FAILED',
+		]),
+		duration: column.nullable(column.number()),
+	},
+).migrate(({ value, version }) => {
+	switch (version) {
+		case 1:
 			return {
-				id: row.id,
-				title: row.title,
-				recordedAt: row.timestamp,
-				updatedAt: row.updatedAt,
-				transcript: row.transcribedText,
-				transcriptionStatus: row.transcriptionStatus,
-				duration: undefined,
-				_v: 2,
+				id: value.id,
+				title: value.title,
+				recordedAt: value.timestamp,
+				updatedAt: value.updatedAt,
+				transcript: value.transcribedText,
+				transcriptionStatus: value.transcriptionStatus,
+				duration: null,
 			};
-		}
 		case 2:
-			return row;
+			return value;
 	}
 });
 
@@ -67,16 +94,13 @@ const recordings = defineTable(
 export type Recording = InferTableRow<typeof recordings>;
 
 /** User-defined transformation pipelines. Each transformation has ordered steps. */
-const transformations = defineTable(
-	type({
-		id: 'string',
-		title: 'string',
-		description: 'string',
-		createdAt: 'string',
-		updatedAt: 'string',
-		_v: '1',
-	}),
-);
+const transformations = defineTable({
+	id: column.string(),
+	title: column.string(),
+	description: column.string(),
+	createdAt: column.string(),
+	updatedAt: column.string(),
+});
 
 /** Transformation row type inferred from the latest workspace table schema version. */
 export type Transformation = InferTableRow<typeof transformations>;
@@ -84,7 +108,7 @@ export type Transformation = InferTableRow<typeof transformations>;
 /**
  * Individual steps within a transformation pipeline.
  *
- * Uses a flat row schema — all `prompt_transform` and `find_replace` fields are
+ * Uses a flat row schema: all `prompt_transform` and `find_replace` fields are
  * present on every row, discriminated by the `type` field. This is intentional:
  *
  * - `table.set()` replaces the entire row. A discriminated union would lose the
@@ -94,101 +118,114 @@ export type Transformation = InferTableRow<typeof transformations>;
  *
  * @see {@link https://github.com/EpicenterHQ/epicenter/blob/main/specs/20260312T170000-whispering-workspace-polish-and-migration.md | Spec Decision 1}
  */
-const transformationSteps = defineTable(
-	type({
-		id: 'string',
-		transformationId: 'string',
-		order: 'number',
-		type: "'prompt_transform' | 'find_replace'",
+const transformationSteps = defineTable({
+	id: column.string(),
+	transformationId: column.string(),
+	order: column.number(),
+	type: column.enum(['prompt_transform', 'find_replace']),
 
-		// Prompt transform: active provider
-		inferenceProvider: type.enumerated(...INFERENCE_PROVIDER_IDS),
+	// Prompt transform: active provider
+	inferenceProvider: column.enum(INFERENCE_PROVIDER_ID_TUPLE),
 
-		// Prompt transform: per-provider model memory
-		openaiModel: 'string',
-		groqModel: 'string',
-		anthropicModel: 'string',
-		googleModel: 'string',
-		openrouterModel: 'string',
-		customModel: 'string',
-		customBaseUrl: 'string',
+	// Prompt transform: per-provider model memory
+	openaiModel: column.string(),
+	groqModel: column.string(),
+	anthropicModel: column.string(),
+	googleModel: column.string(),
+	openrouterModel: column.string(),
+	customModel: column.string(),
+	customBaseUrl: column.string(),
 
-		// Prompt transform: prompt templates
-		systemPromptTemplate: 'string',
-		userPromptTemplate: 'string',
+	// Prompt transform: prompt templates
+	systemPromptTemplate: column.string(),
+	userPromptTemplate: column.string(),
 
-		// Find & replace
-		findText: 'string',
-		replaceText: 'string',
-		useRegex: 'boolean',
-
-		_v: '1',
-	}),
-);
+	// Find & replace
+	findText: column.string(),
+	replaceText: column.string(),
+	useRegex: column.boolean(),
+});
 
 /** Transformation step row type inferred from the latest workspace table schema version. */
 export type TransformationStep = InferTableRow<typeof transformationSteps>;
 
 /**
- * Execution records for transformation pipelines. One run per invocation.
+ * Per-variant result shapes for a transformation run or step run. Each
+ * variant has a single source of truth (one schema, one shadowed type) and
+ * higher-level unions compose them.
  *
- * Uses a discriminated union on `status`—unlike `transformationSteps` (which uses
- * flat rows to preserve per-provider model memory across type switches), runs have
- * one-way state transitions (running → completed | failed) with no data to preserve
- * across states. The union ensures `output` exists only on completed runs and `error`
- * exists only on failed runs, eliminating null checks after status narrowing.
+ * Storage is one JSON-encoded TEXT column (`result`) on the row; nothing in
+ * the read path filters or sorts on these fields, so the JSON envelope is
+ * cheaper than the loss of per-status invariants a flat nullable layout
+ * would cause.
  *
- * @see {@link https://github.com/EpicenterHQ/epicenter/blob/main/specs/20260312T170000-whispering-workspace-polish-and-migration.md | Spec Decision 1}
+ * Run and step run share the same result schema.
  */
-const TransformationRunBase = type({
-	id: 'string',
-	transformationId: 'string',
-	recordingId: 'string | null',
-	input: 'string',
-	startedAt: 'string',
-	completedAt: 'string | null',
-	_v: '1',
-});
+const RunningResult = Type.Object({ status: Type.Literal('running') });
+export type RunningResult = Static<typeof RunningResult>;
 
-const transformationRuns = defineTable(
-	TransformationRunBase.merge(
-		type.or(
-			{ status: "'running'" },
-			{ status: "'completed'", output: 'string' },
-			{ status: "'failed'", error: 'string' },
-		),
-	),
-);
+const CompletedResult = Type.Object({
+	status: Type.Literal('completed'),
+	completedAt: Type.String(),
+	output: Type.String(),
+});
+export type CompletedResult = Static<typeof CompletedResult>;
+
+const FailedResult = Type.Object({
+	status: Type.Literal('failed'),
+	completedAt: Type.String(),
+	error: Type.String(),
+});
+export type FailedResult = Static<typeof FailedResult>;
+
+/** Every possible result a run or step run can carry. */
+const TransformationRunResult = Type.Union([
+	RunningResult,
+	CompletedResult,
+	FailedResult,
+]);
+export type TransformationRunResult = Static<typeof TransformationRunResult>;
+
+/**
+ * Results from runs that have reached a terminal state. Enumerated, not
+ * negated: adding a new non-terminal status (e.g. `pending`) means adding
+ * a variant above, not silently widening this union.
+ */
+const TerminalTransformationRunResult = Type.Union([
+	CompletedResult,
+	FailedResult,
+]);
+export type TerminalTransformationRunResult = Static<
+	typeof TerminalTransformationRunResult
+>;
+
+/**
+ * Execution records for transformation pipelines. One run per invocation.
+ * State queries filter by top-level `recordingId` / `transformationId` and
+ * sort by `startedAt`; status-dependent fields live inside `result`.
+ */
+const transformationRuns = defineTable({
+	id: column.string(),
+	transformationId: column.string(),
+	recordingId: column.nullable(column.string()),
+	input: column.string(),
+	startedAt: column.string(),
+	result: column.json(TransformationRunResult),
+});
 
 /** Transformation run row type inferred from the latest workspace table schema version. */
 export type TransformationRun = InferTableRow<typeof transformationRuns>;
 
-/**
- * Per-step execution records within a transformation run.
- *
- * Same discriminated union pattern as `transformationRuns`—`output` and `error`
- * are only present on the relevant status variant.
- */
-const TransformationStepRunBase = type({
-	id: 'string',
-	transformationRunId: 'string',
-	stepId: 'string',
-	order: 'number',
-	input: 'string',
-	startedAt: 'string',
-	completedAt: 'string | null',
-	_v: '1',
+/** Per-step execution records within a transformation run. */
+const transformationStepRuns = defineTable({
+	id: column.string(),
+	transformationRunId: column.string(),
+	stepId: column.string(),
+	order: column.number(),
+	input: column.string(),
+	startedAt: column.string(),
+	result: column.json(TransformationRunResult),
 });
-
-const transformationStepRuns = defineTable(
-	TransformationStepRunBase.merge(
-		type.or(
-			{ status: "'running'" },
-			{ status: "'completed'", output: 'string' },
-			{ status: "'failed'", error: 'string' },
-		),
-	),
-);
 
 /** Transformation step run row type inferred from the latest workspace table schema version. */
 export type TransformationStepRun = InferTableRow<
@@ -198,7 +235,7 @@ export type TransformationStepRun = InferTableRow<
 /**
  * Synced settings stored as individual KV entries with last-write-wins resolution.
  *
- * Each key is independently resolved — two devices can change different settings
+ * Each key is independently resolved: two devices can change different settings
  * simultaneously without one overwriting the other. Dot-notation keys create a
  * natural namespace hierarchy and give per-key LWW granularity (unlike table rows
  * which are replaced atomically).
@@ -211,14 +248,14 @@ export type TransformationStepRun = InferTableRow<
  * Manual = user-initiated recording. VAD = voice activity detection.
  */
 const sound = {
-	'sound.manualStart': defineKv(type('boolean'), true),
-	'sound.manualStop': defineKv(type('boolean'), true),
-	'sound.manualCancel': defineKv(type('boolean'), true),
-	'sound.vadStart': defineKv(type('boolean'), true),
-	'sound.vadCapture': defineKv(type('boolean'), true),
-	'sound.vadStop': defineKv(type('boolean'), true),
-	'sound.transcriptionComplete': defineKv(type('boolean'), true),
-	'sound.transformationComplete': defineKv(type('boolean'), true),
+	'sound.manualStart': defineKv(column.boolean(), () => true),
+	'sound.manualStop': defineKv(column.boolean(), () => true),
+	'sound.manualCancel': defineKv(column.boolean(), () => true),
+	'sound.vadStart': defineKv(column.boolean(), () => true),
+	'sound.vadCapture': defineKv(column.boolean(), () => true),
+	'sound.vadStop': defineKv(column.boolean(), () => true),
+	'sound.transcriptionComplete': defineKv(column.boolean(), () => true),
+	'sound.transformationComplete': defineKv(column.boolean(), () => true),
 } as const;
 
 /**
@@ -226,82 +263,91 @@ const sound = {
  * Controls clipboard, cursor paste, and simulated Enter key per pipeline stage.
  *
  * Uses `output.*` prefix to separate post-processing behavior from service
- * configuration—avoids polluting `transcription.*` and `transformation.*`
+ * configuration: avoids polluting `transcription.*` and `transformation.*`
  * namespaces with unrelated concerns.
  */
 const output = {
-	'output.transcription.clipboard': defineKv(type('boolean'), true),
-	'output.transcription.cursor': defineKv(type('boolean'), true),
-	'output.transcription.enter': defineKv(type('boolean'), false),
-	'output.transformation.clipboard': defineKv(type('boolean'), true),
-	'output.transformation.cursor': defineKv(type('boolean'), false),
-	'output.transformation.enter': defineKv(type('boolean'), false),
+	'output.transcription.clipboard': defineKv(column.boolean(), () => true),
+	'output.transcription.cursor': defineKv(column.boolean(), () => true),
+	'output.transcription.enter': defineKv(column.boolean(), () => false),
+	'output.transformation.clipboard': defineKv(column.boolean(), () => true),
+	'output.transformation.cursor': defineKv(column.boolean(), () => false),
+	'output.transformation.enter': defineKv(column.boolean(), () => false),
 } as const;
 
 /** Window behavior and navigation layout preferences. */
 const ui = {
-	'ui.alwaysOnTop': defineKv(type.enumerated(...ALWAYS_ON_TOP_MODES), 'Never'),
+	'ui.alwaysOnTop': defineKv(
+		column.enum(ALWAYS_ON_TOP_MODES),
+		() => 'Never' as const,
+	),
 } as const;
 
 /**
- * Recording retention policy. `maxCount` is stored as an integer — the old
+ * Recording retention policy. `maxCount` is stored as an integer: the old
  * settings schema used `string.digits` for localStorage; the workspace uses
  * the semantically correct numeric type.
  */
 const dataRetention = {
 	'retention.strategy': defineKv(
-		type("'keep-forever' | 'limit-count'"),
-		'keep-forever',
+		column.enum(['keep-forever', 'limit-count']),
+		() => 'keep-forever' as const,
 	),
-	'retention.maxCount': defineKv(type('number.integer >= 1'), 100),
+	'retention.maxCount': defineKv(column.integer({ minimum: 1 }), () => 100),
 } as const;
 
-/** User's preferred recording mode — manual trigger vs voice activity detection. */
+/** User's preferred recording mode: manual trigger vs voice activity detection. */
 const recording = {
-	'recording.mode': defineKv(type.enumerated(...RECORDING_MODES), 'manual'),
+	'recording.mode': defineKv(
+		column.enum(RECORDING_MODES),
+		() => 'manual' as const,
+	),
 } as const;
 
 /**
  * Transcription service and per-service model selections.
  *
- * Each service's model is its own KV entry so switching from OpenAI → Groq and
+ * Each service's model is its own KV entry so switching from OpenAI to Groq and
  * back preserves your OpenAI model choice. `temperature` is stored as a number
- * (0–1) — the old settings schema used a string for localStorage.
+ * (0 to 1): the old settings schema used a string for localStorage.
  *
  * @see {@link https://github.com/EpicenterHQ/epicenter/blob/main/specs/20260312T170000-whispering-workspace-polish-and-migration.md | Spec Decision 2}
  */
 const transcription = {
 	'transcription.service': defineKv(
-		type.enumerated(...TRANSCRIPTION_SERVICE_IDS),
-		'moonshine',
+		column.enum(TRANSCRIPTION_SERVICE_ID_TUPLE),
+		() => 'moonshine' as const,
 	),
 	'transcription.openai.model': defineKv(
-		type('string'),
-		TRANSCRIPTION.OpenAI.defaultModel,
+		column.string(),
+		() => TRANSCRIPTION.OpenAI.defaultModel as string,
 	),
 	'transcription.groq.model': defineKv(
-		type('string'),
-		TRANSCRIPTION.Groq.defaultModel,
+		column.string(),
+		() => TRANSCRIPTION.Groq.defaultModel as string,
 	),
 	'transcription.elevenlabs.model': defineKv(
-		type('string'),
-		TRANSCRIPTION.ElevenLabs.defaultModel,
+		column.string(),
+		() => TRANSCRIPTION.ElevenLabs.defaultModel as string,
 	),
 	'transcription.deepgram.model': defineKv(
-		type('string'),
-		TRANSCRIPTION.Deepgram.defaultModel,
+		column.string(),
+		() => TRANSCRIPTION.Deepgram.defaultModel as string,
 	),
 	'transcription.mistral.model': defineKv(
-		type('string'),
-		TRANSCRIPTION.Mistral.defaultModel,
+		column.string(),
+		() => TRANSCRIPTION.Mistral.defaultModel as string,
 	),
-	'transcription.language': defineKv(type('string'), 'auto'),
-	'transcription.prompt': defineKv(type('string'), ''),
-	'transcription.temperature': defineKv(type('0 <= number <= 1'), 0),
-	'transcription.compressionEnabled': defineKv(type('boolean'), false),
+	'transcription.language': defineKv(column.string(), () => 'auto'),
+	'transcription.prompt': defineKv(column.string(), () => ''),
+	'transcription.temperature': defineKv(
+		column.number({ minimum: 0, maximum: 1 }),
+		() => 0,
+	),
+	'transcription.compressionEnabled': defineKv(column.boolean(), () => false),
 	'transcription.compressionOptions': defineKv(
-		type('string'),
-		FFMPEG_DEFAULT_COMPRESSION_OPTIONS,
+		column.string(),
+		() => FFMPEG_DEFAULT_COMPRESSION_OPTIONS,
 	),
 } as const;
 
@@ -310,41 +356,74 @@ const transcription = {
  *
  * `selectedId`: FK to `transformations` table. `null` = no transformation selected.
  * `openrouterModel`: Default OpenRouter model for new transformation steps.
- * Merged from `completion.*` — this is transformation pipeline config, not a separate domain.
+ * Merged from `completion.*`: this is transformation pipeline config, not a separate domain.
  */
 const transformation = {
-	'transformation.selectedId': defineKv(type('string | null'), null),
+	'transformation.selectedId': defineKv(
+		column.nullable(column.string()),
+		(): string | null => null,
+	),
 	'transformation.openrouterModel': defineKv(
-		type('string'),
-		'mistralai/mixtral-8x7b',
+		column.string(),
+		() => 'mistralai/mixtral-8x7b',
 	),
 } as const;
 
 /** Anonymized event logging toggle (Aptabase). */
 const analytics = {
-	'analytics.enabled': defineKv(type('boolean'), true),
+	'analytics.enabled': defineKv(column.boolean(), () => true),
 } as const;
 
 /**
  * In-app keyboard shortcuts. System-global shortcuts are device-specific and stay
- * in localStorage — these are only the shortcuts within the Whispering window.
+ * in localStorage: these are only the shortcuts within the Whispering window.
  * `null` = unbound.
  */
 const shortcuts = {
-	'shortcut.toggleManualRecording': defineKv(type('string | null'), ' '),
-	'shortcut.startManualRecording': defineKv(type('string | null'), null),
-	'shortcut.stopManualRecording': defineKv(type('string | null'), null),
-	'shortcut.cancelManualRecording': defineKv(type('string | null'), 'c'),
-	'shortcut.toggleVadRecording': defineKv(type('string | null'), 'v'),
-	'shortcut.startVadRecording': defineKv(type('string | null'), null),
-	'shortcut.stopVadRecording': defineKv(type('string | null'), null),
-	'shortcut.pushToTalk': defineKv(type('string | null'), 'p'),
-	'shortcut.openTransformationPicker': defineKv(type('string | null'), 't'),
-	'shortcut.runTransformationOnClipboard': defineKv(type('string | null'), 'r'),
+	'shortcut.toggleManualRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => ' ',
+	),
+	'shortcut.startManualRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => null,
+	),
+	'shortcut.stopManualRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => null,
+	),
+	'shortcut.cancelManualRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => 'c',
+	),
+	'shortcut.toggleVadRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => 'v',
+	),
+	'shortcut.startVadRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => null,
+	),
+	'shortcut.stopVadRecording': defineKv(
+		column.nullable(column.string()),
+		(): string | null => null,
+	),
+	'shortcut.pushToTalk': defineKv(
+		column.nullable(column.string()),
+		(): string | null => 'p',
+	),
+	'shortcut.openTransformationPicker': defineKv(
+		column.nullable(column.string()),
+		(): string | null => 't',
+	),
+	'shortcut.runTransformationOnClipboard': defineKv(
+		column.nullable(column.string()),
+		(): string | null => 'r',
+	),
 } as const;
 
 /**
- * Whispering table schemas — 5 normalized tables for domain data.
+ * Whispering table schemas: 5 normalized tables for domain data.
  * Consumed by `attachTables` in `client.ts`.
  */
 export const whisperingTables = {
@@ -356,7 +435,7 @@ export const whisperingTables = {
 };
 
 /**
- * Whispering KV schemas — ~40 entries for synced preferences.
+ * Whispering KV schemas: ~40 entries for synced preferences.
  * Consumed by `attachKv` in `client.ts`.
  */
 export const whisperingKv = {

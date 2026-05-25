@@ -98,11 +98,15 @@
 								</Button>
 							</Table.Cell>
 							<Table.Cell>
-								<Badge variant={`status.${run.status}`}> {run.status} </Badge>
+								<Badge variant={`status.${run.result.status}`}>
+									{run.result.status}
+								</Badge>
 							</Table.Cell>
 							<Table.Cell> {formatDate(run.startedAt)} </Table.Cell>
 							<Table.Cell>
-								{run.completedAt ? formatDate(run.completedAt) : '-'}
+								{run.result.status === 'running'
+									? '-'
+									: formatDate(run.result.completedAt)}
 							</Table.Cell>
 							<Table.Cell class="text-right">
 								<Button
@@ -139,12 +143,12 @@
 									<Label class="text-sm font-medium">Input</Label>
 									<CopyablePre variant="text" copyableText={run.input} />
 
-									{#if run.status === 'completed'}
+									{#if run.result.status === 'completed'}
 										<Label class="text-sm font-medium">Output</Label>
-										<CopyablePre variant="text" copyableText={run.output} />
-									{:else if run.status === 'failed'}
+										<CopyablePre variant="text" copyableText={run.result.output} />
+									{:else if run.result.status === 'failed'}
 										<Label class="text-sm font-medium">Error</Label>
-										<CopyablePre variant="error" copyableText={run.error} />
+										<CopyablePre variant="error" copyableText={run.result.error} />
 									{/if}
 									{#if stepRuns.length > 0}
 										<div class="flex flex-col gap-2">
@@ -164,17 +168,17 @@
 														{#each stepRuns as stepRun}
 															<Table.Row>
 																<Table.Cell>
-																	<Badge variant={`status.${stepRun.status}`}>
-																		{stepRun.status}
+																	<Badge variant={`status.${stepRun.result.status}`}>
+																		{stepRun.result.status}
 																	</Badge>
 																</Table.Cell>
 																<Table.Cell>
 																	{formatDate(stepRun.startedAt)}
 																</Table.Cell>
 																<Table.Cell>
-																	{stepRun.completedAt
-																		? formatDate(stepRun.completedAt)
-																		: '-'}
+																	{stepRun.result.status === 'running'
+																		? '-'
+																		: formatDate(stepRun.result.completedAt)}
 																</Table.Cell>
 																<Table.Cell>
 																	<TextPreviewDialog
@@ -186,21 +190,21 @@
 																	/>
 																</Table.Cell>
 																<Table.Cell>
-																	{#if stepRun.status === 'completed'}
+																	{#if stepRun.result.status === 'completed'}
 																		<TextPreviewDialog
 																			id={viewTransition.stepRun(stepRun.id)
 																				.output}
 																			title="Step Output"
 																			label="step output"
-																			text={stepRun.output}
+																			text={stepRun.result.output}
 																		/>
-																	{:else if stepRun.status === 'failed'}
+																	{:else if stepRun.result.status === 'failed'}
 																		<TextPreviewDialog
 																			id={viewTransition.stepRun(stepRun.id)
 																				.error}
 																			title="Step Error"
 																			label="step error"
-																			text={stepRun.error}
+																			text={stepRun.result.error}
 																		/>
 																	{/if}
 																</Table.Cell>

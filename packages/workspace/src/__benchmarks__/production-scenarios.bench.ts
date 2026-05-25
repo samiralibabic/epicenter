@@ -41,7 +41,6 @@ describe('autosave scenario', () => {
 				tags: ['work', 'notes'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1 as const,
 			};
 		}
 
@@ -148,7 +147,6 @@ describe('all-day editing scenario', () => {
 				tags: ['active'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1 as const,
 			};
 		}
 

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { autocompletion } from '@codemirror/autocomplete';
-	import type { FileId } from '@epicenter/filesystem';
+	import { asFileId, type FileId } from '@epicenter/filesystem';
 	import { fromDisposableCache } from '@epicenter/svelte';
 	import { Loading } from '@epicenter/ui/loading';
 	import { requireOpensidian } from '$lib/session';
@@ -25,9 +25,9 @@
 	const doc = fromDisposableCache(opensidian.fileContentDocs, () => fileId);
 
 	const sharedLinkDecorations = linkDecorations({
-		onNavigate: (ref) => opensidian.state.files.selectFile(ref.id as FileId),
+		onNavigate: (ref) => opensidian.state.files.selectFile(asFileId(ref.id)),
 		resolveTitle: (ref) =>
-			opensidian.state.files.getFile(ref.id as FileId)?.name ?? null,
+			opensidian.state.files.getFile(asFileId(ref.id))?.name ?? null,
 	});
 
 	const extensions = $derived(

@@ -36,7 +36,6 @@ describe('cold start: load from binary', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 			const binary = Y.encodeStateAsUpdate(sourceDoc);
@@ -65,7 +64,6 @@ describe('cold start: load from binary', () => {
 				tags: ['tag1'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1,
 			});
 		}
 		const binary = Y.encodeStateAsUpdate(sourceDoc);
@@ -115,7 +113,6 @@ describe('snapshot encoding time', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 
@@ -145,7 +142,6 @@ describe('incremental update size', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1,
 			});
 		}
 
@@ -157,7 +153,6 @@ describe('incremental update size', () => {
 			id: generateId(0),
 			title: 'Updated Post 0',
 			views: 999,
-			_v: 1,
 		});
 
 		// Delta = only the changes since the state vector

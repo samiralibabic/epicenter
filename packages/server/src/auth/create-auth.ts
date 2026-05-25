@@ -1,10 +1,11 @@
+import { asOwnerId } from '@epicenter/constants/identity';
 import { type BetterAuthOptions, betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '../db/schema/index.js';
+import { assetKey } from '../owner.js';
 import { TRUSTED_ORIGINS } from '../trusted-origins.js';
-import type { SignUpPolicy } from '../types.js';
 import { BASE_AUTH_CONFIG } from './base-config.js';
 import { createCookieAdvancedConfig } from './cookie-config.js';
 import { authPlugins } from './plugins.js';
@@ -24,7 +25,6 @@ type Db = NodePgDatabase<typeof schema>;
  * - Plugins: JWT (ES256), OAuth provider (PKCE)
  * - Optional cleanup hook for R2 assets when a user is deleted
  * - Cloudflare KV secondary storage for session caching
- * - {@link SignUpPolicy} gating via a Better Auth `before` hook
  *
  * `/api/session` is the single Epicenter session surface; this builder no longer
  * enriches `/auth/get-session` with encryption keys.
@@ -33,12 +33,10 @@ export function createAuth({
 	db,
 	env,
 	baseURL,
-	signUpPolicy = 'open',
 }: {
 	db: Db;
 	env: Cloudflare.Env;
 	baseURL: string;
-	signUpPolicy?: SignUpPolicy;
 }) {
 	return betterAuth({
 		...BASE_AUTH_CONFIG,
@@ -100,25 +98,31 @@ export function createAuth({
 		advanced: createCookieAdvancedConfig(baseURL),
 		databaseHooks: {
 			user: {
-				create: {
-					// Sign-up gate. When policy is 'disabled', Better Auth aborts
-					// the create operation by returning `false`. Out-of-band
-					// provisioning (Better Auth admin API or a CLI) bypasses this
-					// hook because it operates on the adapter directly.
-					before: signUpPolicy === 'disabled' ? async () => false : undefined,
-				},
 				delete: {
 					before: async (user) => {
-						// Clean up R2 assets before CASCADE deletes Postgres rows
-						const assets = await db
-							.select({ id: schema.asset.id })
-							.from(schema.asset)
-							.where(eq(schema.asset.userId, user.id));
+						// Partition cleanup. In personal mode `owner_id === user.id`
+						// so this deletes the user's R2 blobs, asset rows, and
+						// DOI rows. In team mode `owner_id === 'team' !== user.id`
+						// so every query no-ops and team data survives member
+						// churn. Without an FK + cascade, the row deletes are
+						// explicit here.
+						const ownerId = asOwnerId(user.id);
 
+						const assets = await db.query.asset.findMany({
+							columns: { id: true },
+							where: eq(schema.asset.ownerId, ownerId),
+						});
 						if (assets.length > 0) {
-							const keys = assets.map((a) => a.id);
+							const keys = assets.map((a) => assetKey(ownerId, a.id));
 							await env.ASSETS_BUCKET.delete(keys);
+							await db
+								.delete(schema.asset)
+								.where(eq(schema.asset.ownerId, ownerId));
 						}
+
+						await db
+							.delete(schema.durableObjectInstance)
+							.where(eq(schema.durableObjectInstance.ownerId, ownerId));
 					},
 				},
 			},
