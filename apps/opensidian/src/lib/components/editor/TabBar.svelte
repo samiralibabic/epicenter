@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FileId } from '@epicenter/filesystem';
+	import { asFileId } from '@epicenter/filesystem';
 	import { AccountPopover } from '@epicenter/svelte/account-popover';
 	import { Button, buttonVariants } from '@epicenter/ui/button';
 	import * as Tabs from '@epicenter/ui/tabs';
@@ -15,7 +15,7 @@
 	{#if opensidian.state.files.hasOpenFiles}
 		<Tabs.Root
 			value={opensidian.state.files.activeFileId ?? ''}
-			onValueChange={(value) => opensidian.state.files.selectFile(value as FileId)}
+			onValueChange={(value) => opensidian.state.files.selectFile(asFileId(value))}
 			class="flex-1 min-w-0"
 		>
 			<Tabs.List

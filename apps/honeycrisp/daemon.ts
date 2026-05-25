@@ -21,11 +21,10 @@ import {
 	attachMarkdownMaterializer,
 	slugFilename,
 } from '@epicenter/workspace/document/materializer/markdown';
-import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
+import { attachBunSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
 import {
 	attachDaemonInfrastructure,
 	markdownPath,
-	openWriterSqlite,
 	sqlitePath,
 } from '@epicenter/workspace/node';
 import { createLogger } from 'wellcrafted/logger';
@@ -40,8 +39,8 @@ export function openHoneycrispDaemon({
 	projectDir,
 	route,
 	yDocClientId,
-	installationId,
-	owner,
+	deviceId,
+	ownerId,
 	keyring,
 	openWebSocket,
 	onReconnectSignal,
@@ -53,13 +52,10 @@ export function openHoneycrispDaemon({
 	encryption.attachKv({});
 	const actions = createHoneycrispActions(tables);
 
-	const sqliteDb = openWriterSqlite({
+	const sqlite = attachBunSqliteMaterializer(ydoc, {
 		filePath: sqlitePath(projectDir, ydoc.guid),
 		log: createLogger(`${route}-sqlite`),
 	});
-	ydoc.once('destroy', () => sqliteDb.close());
-
-	const sqlite = attachSqliteMaterializer(ydoc, { db: sqliteDb });
 	sqlite.table(tables.folders);
 	sqlite.table(tables.notes);
 
@@ -69,8 +65,8 @@ export function openHoneycrispDaemon({
 
 	return attachDaemonInfrastructure(ydoc, {
 		projectDir,
-		owner,
-		installationId,
+		ownerId,
+		deviceId,
 		openWebSocket,
 		onReconnectSignal,
 		actions,

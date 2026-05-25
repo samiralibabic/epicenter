@@ -9,7 +9,7 @@
  * schema.
  *
  * Composition lives elsewhere:
- *  - `apps/opensidian/src/lib/opensidian/browser.ts` -> `openOpensidianBrowser({ signedIn, installationId })`
+ *  - `apps/opensidian/src/lib/opensidian/browser.ts` -> `openOpensidianBrowser({ signedIn, deviceId })`
  *  - `apps/opensidian/daemon.ts`                     -> `openOpensidianDaemon(ctx)`
  */
 
@@ -19,13 +19,14 @@ import {
 	filesTable,
 } from '@epicenter/filesystem';
 import {
+	column,
 	defineTable,
 	generateId,
 	type Id,
 	type InferTableRow,
 	type Tables,
 } from '@epicenter/workspace';
-import { type } from 'arktype';
+import { Type } from 'typebox';
 import type { Brand } from 'wellcrafted/brand';
 import type { JsonValue } from 'wellcrafted/json';
 
@@ -39,7 +40,14 @@ export const OPENSIDIAN_ID = 'epicenter.opensidian';
  * with message IDs or other plain strings.
  */
 export type ConversationId = Id & Brand<'ConversationId'>;
-export const ConversationId = type('string').as<ConversationId>();
+
+/**
+ * Syntactic sugar for `value as ConversationId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as ConversationId` should appear.
+ */
+export const asConversationId = (value: string): ConversationId =>
+	value as ConversationId;
 
 /**
  * Generate a unique {@link ConversationId} for a new conversation row.
@@ -57,7 +65,14 @@ export const generateConversationId = (): ConversationId =>
  * stay type-safe across joins and edits.
  */
 export type ChatMessageId = Id & Brand<'ChatMessageId'>;
-export const ChatMessageId = type('string').as<ChatMessageId>();
+
+/**
+ * Syntactic sugar for `value as ChatMessageId`. The constrained `string` parameter
+ * is what earns it over a raw `as` cast (callers can't widen to `unknown`).
+ * The only place in the codebase where `as ChatMessageId` should appear.
+ */
+export const asChatMessageId = (value: string): ChatMessageId =>
+	value as ChatMessageId;
 
 /**
  * Generate a unique {@link ChatMessageId} for a new chat message.
@@ -75,20 +90,17 @@ export const generateChatMessageId = (): ChatMessageId =>
  * message linkage, and the model/provider metadata needed to resume or audit
  * the conversation later.
  */
-const conversationsTable = defineTable(
-	type({
-		id: ConversationId,
-		title: 'string',
-		'parentId?': ConversationId.or('undefined'),
-		'sourceMessageId?': ChatMessageId.or('undefined'),
-		'systemPrompt?': 'string | undefined',
-		provider: 'string',
-		model: 'string',
-		createdAt: 'number',
-		updatedAt: 'number',
-		_v: '1',
-	}),
-);
+const conversationsTable = defineTable({
+	id: column.string<ConversationId>(),
+	title: column.string(),
+	parentId: column.nullable(column.string<ConversationId>()),
+	sourceMessageId: column.nullable(column.string<ChatMessageId>()),
+	systemPrompt: column.nullable(column.string()),
+	provider: column.string(),
+	model: column.string(),
+	createdAt: column.number(),
+	updatedAt: column.number(),
+});
 export type Conversation = InferTableRow<typeof conversationsTable>;
 
 /**
@@ -97,16 +109,13 @@ export type Conversation = InferTableRow<typeof conversationsTable>;
  * Stores the role, structured content parts, and creation timestamp so the UI
  * can replay the exact chat history without depending on live model state.
  */
-const chatMessagesTable = defineTable(
-	type({
-		id: ChatMessageId,
-		conversationId: ConversationId,
-		role: "'user' | 'assistant' | 'system'",
-		parts: type({} as type.cast<JsonValue[]>),
-		createdAt: 'number',
-		_v: '1',
-	}),
-);
+const chatMessagesTable = defineTable({
+	id: column.string<ChatMessageId>(),
+	conversationId: column.string<ConversationId>(),
+	role: column.enum(['user', 'assistant', 'system']),
+	parts: column.json(Type.Array(Type.Unsafe<JsonValue>(Type.Any()))),
+	createdAt: column.number(),
+});
 export type ChatMessage = InferTableRow<typeof chatMessagesTable>;
 
 /**
@@ -115,13 +124,10 @@ export type ChatMessage = InferTableRow<typeof chatMessagesTable>;
  * Tracks whether a tool should keep asking for approval or be auto-approved,
  * which lets Opensidian remember the user's trust decisions across sessions.
  */
-const toolTrustTable = defineTable(
-	type({
-		id: 'string',
-		trust: "'ask' | 'always'",
-		_v: '1',
-	}),
-);
+const toolTrustTable = defineTable({
+	id: column.string(),
+	trust: column.enum(['ask', 'always']),
+});
 export type ToolTrust = InferTableRow<typeof toolTrustTable>;
 
 /**

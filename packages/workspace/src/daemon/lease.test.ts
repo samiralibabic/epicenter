@@ -13,23 +13,26 @@
 
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expectErr, expectOk } from 'wellcrafted/testing';
 
 import { claimDaemonLease } from './lease.js';
 
 function setup() {
-	const oldXdg = process.env.XDG_RUNTIME_DIR;
-	const runtimeRoot = mkdtempSync(join(tmpdir(), 'ep-lease-runtime-'));
-	const workDir = mkdtempSync(join(tmpdir(), 'ep-lease-dir-'));
-	process.env.XDG_RUNTIME_DIR = runtimeRoot;
+	const oldRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
+	// `/tmp/...` is short on every POSIX platform; needed because socketPathFor
+	// enforces a strict path-length guard that macOS's `os.tmpdir()` would
+	// blow. `EPICENTER_RUNTIME_DIR` is the workspace test seam read on every
+	// `runtimeDir()` call.
+	const runtimeRoot = mkdtempSync('/tmp/eps-lease-rt-');
+	const workDir = mkdtempSync('/tmp/eps-lease-dir-');
+	process.env.EPICENTER_RUNTIME_DIR = runtimeRoot;
 
 	return {
 		workDir,
 		cleanup() {
-			if (oldXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
-			else process.env.XDG_RUNTIME_DIR = oldXdg;
+			if (oldRuntimeDir === undefined) delete process.env.EPICENTER_RUNTIME_DIR;
+			else process.env.EPICENTER_RUNTIME_DIR = oldRuntimeDir;
 			rmSync(runtimeRoot, { recursive: true, force: true });
 			rmSync(workDir, { recursive: true, force: true });
 		},
@@ -84,24 +87,27 @@ describe('claimDaemonLease', () => {
 	});
 
 	test('runtime directory setup failure returns LeaseFailed', () => {
-		const oldXdg = process.env.XDG_RUNTIME_DIR;
-		const runtimeRootFile = join(
-			tmpdir(),
-			`ep-lease-runtime-file-${Date.now()}-${Math.random()
+		const oldRuntimeDir = process.env.EPICENTER_RUNTIME_DIR;
+		// Point EPICENTER_RUNTIME_DIR at a regular file. The lease setup runs
+		// `mkdirSync(dirname(leasePath), { recursive: true })`; with the file
+		// as its parent, mkdir hits ENOTDIR and surfaces as LeaseFailed.
+		const runtimeFile = join(
+			'/tmp',
+			`eps-lease-rt-file-${Date.now()}-${Math.random()
 				.toString(36)
 				.slice(2, 8)}`,
 		);
-		const workDir = mkdtempSync(join(tmpdir(), 'ep-lease-dir-'));
-		writeFileSync(runtimeRootFile, 'not a directory');
-		process.env.XDG_RUNTIME_DIR = runtimeRootFile;
+		const workDir = mkdtempSync('/tmp/eps-lease-dir-');
+		writeFileSync(runtimeFile, 'not a directory');
+		process.env.EPICENTER_RUNTIME_DIR = `${runtimeFile}/subdir`;
 
 		try {
 			const error = expectErr(claimDaemonLease(workDir));
 			expect(error.name).toBe('LeaseFailed');
 		} finally {
-			if (oldXdg === undefined) delete process.env.XDG_RUNTIME_DIR;
-			else process.env.XDG_RUNTIME_DIR = oldXdg;
-			rmSync(runtimeRootFile, { force: true });
+			if (oldRuntimeDir === undefined) delete process.env.EPICENTER_RUNTIME_DIR;
+			else process.env.EPICENTER_RUNTIME_DIR = oldRuntimeDir;
+			rmSync(runtimeFile, { force: true });
 			rmSync(workDir, { recursive: true, force: true });
 		}
 	});

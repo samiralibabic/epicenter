@@ -10,27 +10,19 @@
 	import UserIcon from '@lucide/svelte/icons/user';
 	import { createQuery } from '@tanstack/svelte-query';
 	import { mode, toggleMode } from 'mode-watcher';
-	import { api } from '$lib/api';
-	import { billing } from '$lib/query/billing';
-	import { capitalize } from '$lib/utils';
+	import { billingApi } from '$lib/billing/api';
+	import { billing } from '$lib/billing/queries';
 	import { auth } from '$platform/auth';
 
-	const balance = createQuery(() => billing.balance.options);
+	const overview = createQuery(() => billing.overview.options);
 
-	const subscription = $derived(
-		balance.data?.subscriptions?.find((s) => !s.addOn) ?? null,
-	);
-	const planName = $derived(
-		subscription?.plan?.name ??
-			(subscription?.planId ? capitalize(subscription.planId) : 'Free'),
-	);
-	const isOnTrial = $derived(subscription?.trialEndsAt != null);
+	const planName = $derived(overview.data?.planDisplayName ?? 'Free');
+	const isOnTrial = $derived(overview.data?.trial != null);
 
-	/** Open Stripe billing portal via the API. */
 	async function openBillingPortal() {
-		const { data, error } = await api.billing.portal();
+		const { data, error } = await billingApi.portal();
 		if (error) return toastOnError(error, 'Could not open billing portal');
-		if (data.url) window.location.href = data.url;
+		if (data.portalUrl) window.location.href = data.portalUrl;
 	}
 
 	async function signOut() {

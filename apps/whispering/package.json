@@ -90,6 +90,7 @@
 		"openai": "^5.7.0",
 		"tailwind-variants": "catalog:",
 		"tauri-plugin-macos-permissions-api": "^2.3.0",
+		"typebox": "catalog:",
 		"wellcrafted": "catalog:",
 		"yjs": "catalog:"
 	}

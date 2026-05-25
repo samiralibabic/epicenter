@@ -1,27 +1,22 @@
 /**
- * Generate SQLite DDL from workspace JSON Schema descriptors.
+ * Generate SQLite DDL from a workspace table's latest-version row schema.
  *
- * The SQLite materializer only needs the latest materialized row shape. When a table
- * schema has multiple versions, this module picks the highest `_v` variant and
- * generates a `CREATE TABLE IF NOT EXISTS` statement that preserves the exact
- * workspace field names.
+ * Callers pass `definition.schema` (a TypeBox `TObject` which is itself a
+ * JSON Schema). Column storage class and nullability come from
+ * `deriveStorage` / `isNullable`, so `column.nullable(column.X())` rows map
+ * cleanly to nullable SQLite columns.
  *
- * Complex values like arrays and objects are stored as JSON-serialized `TEXT`
- * columns because the materializer is a read cache, not the source-of-truth schema.
+ * Since `_v` is library-managed and stripped from the user-facing row schema,
+ * the generated DDL never contains a `_v` column. SQLite projects only what
+ * the user declared.
  *
  * @module
  */
 
-type JsonSchema = Record<string, unknown>;
+import type { TSchema } from 'typebox';
+import { deriveStorage, isNullable } from '../../column/derive.js';
 
-const SQLITE_TYPE_BY_JSON_TYPE: Record<string, string> = {
-	string: 'TEXT',
-	number: 'REAL',
-	integer: 'INTEGER',
-	boolean: 'INTEGER',
-	object: 'TEXT',
-	array: 'TEXT',
-};
+type JsonSchema = Record<string, unknown>;
 
 // ════════════════════════════════════════════════════════════════════════════
 // PUBLIC API
@@ -30,10 +25,9 @@ const SQLITE_TYPE_BY_JSON_TYPE: Record<string, string> = {
 /**
  * Generate a `CREATE TABLE IF NOT EXISTS` statement for a workspace table.
  *
- * Maps a table's JSON Schema (from its `defineTable(...)` definition) into a
- * SQLite table definition. Required scalar fields become `NOT NULL`, `id`
- * becomes the primary key, version discriminants use `INTEGER NOT NULL`, and
- * complex values are stored as JSON text.
+ * Maps the table's latest-version row JSON Schema into a SQLite table
+ * definition. Required scalar fields become `NOT NULL`, `id` becomes the
+ * primary key, and complex values are stored as JSON text.
  *
  * @param tableName - The SQLite table name to create
  * @param jsonSchema - The JSON Schema for the table's row type
@@ -45,21 +39,17 @@ const SQLITE_TYPE_BY_JSON_TYPE: Record<string, string> = {
  *   type: 'object',
  *   properties: {
  *     id: { type: 'string' },
- *     _v: { const: 2 },
  *     title: { type: 'string' },
  *     published: { type: 'boolean' },
  *   },
- *   required: ['id', '_v', 'title'],
+ *   required: ['id', 'title'],
  * });
  *
- * // CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "_v" INTEGER NOT NULL, "title" TEXT NOT NULL, "published" INTEGER)
+ * // CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "title" TEXT NOT NULL, "published" INTEGER)
  * ```
  */
-export function generateDdl(
-	tableName: string,
-	jsonSchema: Record<string, unknown>,
-): string {
-	const resolved = resolveSchema(jsonSchema);
+export function generateDdl(tableName: string, jsonSchema: TSchema): string {
+	const resolved = jsonSchema as unknown as JsonSchema;
 
 	if (!isRecord(resolved.properties)) {
 		throw new Error(
@@ -82,62 +72,10 @@ export function generateDdl(
 				`SQLite DDL generation requires property "${name}" schema to be an object.`,
 			);
 		}
-		return columnDef(name, propSchema, required.has(name));
+		return columnDef(name, propSchema as TSchema, required.has(name));
 	});
 
 	return `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(tableName)} (${columns.join(', ')})`;
-}
-
-/**
- * Resolve the concrete schema variant used for SQLite DDL generation.
- *
- * Multi-version workspace tables expose a `oneOf` where each entry represents a
- * versioned row shape. The workspace read path migrates rows to the latest
- * version before materialization, so the SQLite materializer should generate columns
- * from the schema whose `_v.const` is highest.
- *
- * If the schema is not versioned, this returns the original object unchanged.
- *
- * @param schema - A JSON Schema object for a table row
- * @returns The highest-version object schema when `oneOf` is present, otherwise the original schema
- *
- * @example
- * ```typescript
- * const resolved = resolveSchema({
- *   oneOf: [
- *     { type: 'object', properties: { _v: { const: 1 }, id: { type: 'string' } } },
- *     { type: 'object', properties: { _v: { const: 2 }, id: { type: 'string' }, title: { type: 'string' } } },
- *   ],
- * });
- *
- * // Picks the `_v: 2` schema, including its `title` property.
- * ```
- */
-function resolveSchema(schema: JsonSchema): JsonSchema {
-	const candidates = Array.isArray(schema.oneOf)
-		? schema.oneOf.filter(isRecord)
-		: undefined;
-
-	if (candidates === undefined || candidates.length === 0) {
-		return schema;
-	}
-
-	let resolved: JsonSchema | undefined;
-	let highestVersion = Number.NEGATIVE_INFINITY;
-
-	for (const candidate of candidates) {
-		const version = getSchemaVersion(candidate);
-		if (resolved === undefined || version > highestVersion) {
-			resolved = candidate;
-			highestVersion = version;
-		}
-	}
-
-	if (resolved === undefined) {
-		return schema;
-	}
-
-	return resolved;
 }
 
 /** Double-quote a SQL identifier, escaping embedded quotes. */
@@ -149,23 +87,9 @@ export function quoteIdentifier(identifier: string) {
 // PRIVATE HELPERS
 // ════════════════════════════════════════════════════════════════════════════
 
-function getSchemaVersion(schema: JsonSchema) {
-	const properties = schema.properties;
-	if (!isRecord(properties)) {
-		return Number.NEGATIVE_INFINITY;
-	}
-
-	const versionSchema = properties._v;
-	if (!isRecord(versionSchema) || typeof versionSchema.const !== 'number') {
-		return Number.NEGATIVE_INFINITY;
-	}
-
-	return versionSchema.const;
-}
-
 function columnDef(
 	name: string,
-	propSchema: JsonSchema,
+	propSchema: TSchema,
 	isRequired: boolean,
 ): string {
 	const quotedName = quoteIdentifier(name);
@@ -174,28 +98,12 @@ function columnDef(
 		return `${quotedName} TEXT PRIMARY KEY`;
 	}
 
-	if (name === '_v' && typeof propSchema.const === 'number') {
-		return `${quotedName} INTEGER NOT NULL`;
-	}
+	const storage = deriveStorage(propSchema);
+	const nullable = !isRequired || isNullable(propSchema);
 
-	if (Array.isArray(propSchema.enum)) {
-		return appendNullability(`${quotedName} TEXT`, isRequired);
-	}
-
-	const jsonType =
-		typeof propSchema.type === 'string' ? propSchema.type : undefined;
-	const sqliteType =
-		jsonType === undefined ? undefined : SQLITE_TYPE_BY_JSON_TYPE[jsonType];
-
-	return appendNullability(`${quotedName} ${sqliteType ?? 'TEXT'}`, isRequired);
-}
-
-function appendNullability(column: string, isRequired: boolean) {
-	if (!isRequired) {
-		return column;
-	}
-
-	return `${column} NOT NULL`;
+	return nullable
+		? `${quotedName} ${storage}`
+		: `${quotedName} ${storage} NOT NULL`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

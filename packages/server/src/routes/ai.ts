@@ -2,16 +2,20 @@
  * `/api/ai` sub-app: SSE streaming chat across OpenAI and Gemini.
  *
  * Library-side, billing-free. The deployment composes any plan or credit
- * gating in front of this app via Hono middleware. apps/api wraps this
- * with `autumnPlanGate`; a self-hosted team deployment mounts the sub-app
- * directly with no gate.
+ * gating in front of this app via `mountAiApp`'s `policies`. apps/api
+ * passes `chargeAiCreditsWithAutumn`; a self-hosted team deployment
+ * passes no policies.
  *
  * BYOK: callers may pass `apiKey` in the request body, in which case the
  * deployment's provider key is ignored. No billing implications; the
  * library treats BYOK and house-key the same.
  */
 
-import { AiChatError } from '@epicenter/constants/ai-chat-errors';
+import {
+	AiChatError,
+	AiChatErrorStatus,
+} from '@epicenter/constants/ai-chat-errors';
+import { API_ROUTES } from '@epicenter/constants/api-routes';
 import { sValidator } from '@hono/standard-validator';
 import {
 	type AnyTextAdapter,
@@ -23,7 +27,7 @@ import {
 import { createGeminiChat, GeminiTextModels } from '@tanstack/ai-gemini';
 import { createOpenaiChat, OPENAI_CHAT_MODELS } from '@tanstack/ai-openai';
 import { type } from 'arktype';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { describeRoute } from 'hono-openapi';
 import type { Env } from '../types.js';
 
@@ -50,53 +54,86 @@ const aiChatBody = type({
 });
 
 /**
- * Build the `/api/ai` sub-app.
- *
- * Mounts `POST /chat` only; auth is supplied by the parent composition
- * (cloud's bearer-only middleware, team's cookie-or-bearer middleware).
+ * `/api/ai/chat` sub-app. Auth and credit policies are supplied by the
+ * deployment via {@link mountAiApp}.
  */
-export function createAiApp(): Hono<Env> {
-	return new Hono<Env>().post(
-		'/chat',
-		describeRoute({
-			description: 'Stream AI chat completions via SSE',
-			tags: ['ai'],
-		}),
-		sValidator('json', aiChatBody),
-		async (c) => {
-			const { messages, data, apiKey: userApiKey } = c.req.valid('json');
-			const { provider, tools, ...options } = data;
+const aiApp = new Hono<Env>().post(
+	API_ROUTES.ai.chat.pattern,
+	describeRoute({
+		description: 'Stream AI chat completions via SSE',
+		tags: ['ai'],
+	}),
+	sValidator('json', aiChatBody),
+	async (c) => {
+		const { messages, data, apiKey: userApiKey } = c.req.valid('json');
+		const { provider, tools, ...options } = data;
 
-			let adapter: AnyTextAdapter;
-			switch (data.provider) {
-				case 'openai': {
-					const apiKey = userApiKey ?? c.env.OPENAI_API_KEY;
-					if (!apiKey)
-						return c.json(AiChatError.ProviderNotConfigured({ provider }), 503);
-					adapter = createOpenaiChat(data.model, apiKey);
-					break;
+		let adapter: AnyTextAdapter;
+		switch (data.provider) {
+			case 'openai': {
+				const apiKey = userApiKey ?? c.env.OPENAI_API_KEY;
+				if (!apiKey) {
+					return c.json(
+						AiChatError.ProviderNotConfigured({ provider }),
+						AiChatErrorStatus.ProviderNotConfigured,
+					);
 				}
-				case 'gemini': {
-					const apiKey = userApiKey ?? c.env.GEMINI_API_KEY;
-					if (!apiKey)
-						return c.json(AiChatError.ProviderNotConfigured({ provider }), 503);
-					adapter = createGeminiChat(data.model, apiKey);
-					break;
-				}
-				default:
-					return data satisfies never;
+				adapter = createOpenaiChat(data.model, apiKey);
+				break;
 			}
+			case 'gemini': {
+				const apiKey = userApiKey ?? c.env.GEMINI_API_KEY;
+				if (!apiKey) {
+					return c.json(
+						AiChatError.ProviderNotConfigured({ provider }),
+						AiChatErrorStatus.ProviderNotConfigured,
+					);
+				}
+				adapter = createGeminiChat(data.model, apiKey);
+				break;
+			}
+			default:
+				return data satisfies never;
+		}
 
-			const abortController = new AbortController();
-			const stream = chat({
-				adapter,
-				messages: messages as Array<ModelMessage>,
-				...options,
-				tools: tools as Array<Tool> | undefined,
-				abortController,
-			});
+		const abortController = new AbortController();
+		const stream = chat({
+			adapter,
+			messages: messages as Array<ModelMessage>,
+			...options,
+			tools: tools as Array<Tool> | undefined,
+			abortController,
+		});
 
-			return toServerSentEventsResponse(stream, { abortController });
-		},
-	);
+		return toServerSentEventsResponse(stream, { abortController });
+	},
+);
+
+/**
+ * Mount the AI surface on a deployment's server app.
+ *
+ * Bundles the deployment's chosen auth middleware (cloud uses
+ * `requireBearerUser`; AI chat is for external clients only), any
+ * deployment policies (cloud passes `[chargeAiCreditsWithAutumn]`), and
+ * the route mount into one call.
+ *
+ * The library remains billing-agnostic: policies are opaque middleware
+ * that run after auth and may short-circuit the request (e.g. 402
+ * insufficient credits) before the AI handler streams.
+ *
+ * Policies are typed loosely (`MiddlewareHandler`) so deployments that
+ * extend the library `Env` with their own `Variables` can pass policies
+ * without an unsafe cast. At runtime they execute against the deployment's
+ * wider Context, so they are safe regardless of declared Env shape.
+ */
+export function mountAiApp(
+	app: Hono<Env>,
+	opts: {
+		auth: MiddlewareHandler;
+		policies?: MiddlewareHandler[];
+	},
+): void {
+	const policies = opts.policies ?? [];
+	app.use(API_ROUTES.ai.chat.prefixPattern, opts.auth, ...policies);
+	app.route('/', aiApp);
 }

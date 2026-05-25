@@ -95,7 +95,7 @@ describe('scaling ceiling: small rows (posts)', () => {
 
 	test('insert, encode, decode, read at increasing row counts', () => {
 		console.log('\n=== SCALING CEILING: SMALL ROWS (~75 bytes/row) ===');
-		console.log('Table: posts { id, title, views, _v }');
+		console.log('Table: posts { id, title, views }');
 
 		const results: ScalingRow[] = [];
 
@@ -110,7 +110,6 @@ describe('scaling ceiling: small rows (posts)', () => {
 						id: generateId(i),
 						title: `Post ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 			});
@@ -152,7 +151,6 @@ describe('scaling ceiling: small rows (posts)', () => {
 						id: generateId(idx),
 						title: `Updated ${idx}`,
 						views: idx + 1,
-						_v: 1,
 					});
 				}
 			});
@@ -187,7 +185,7 @@ describe('scaling ceiling: realistic rows (notes)', () => {
 	test('insert, encode, decode, read at increasing row counts', () => {
 		console.log('\n=== SCALING CEILING: REALISTIC ROWS (~700 bytes/row) ===');
 		console.log(
-			'Table: notes { id, title, content (~500 chars), tags, createdAt, updatedAt, _v }',
+			'Table: notes { id, title, content (~500 chars), tags, createdAt, updatedAt }',
 		);
 
 		const sampleContent =
@@ -208,7 +206,6 @@ describe('scaling ceiling: realistic rows (notes)', () => {
 						tags: ['tag1', 'tag2'],
 						createdAt: Date.now(),
 						updatedAt: Date.now(),
-						_v: 1,
 					});
 				}
 			});
@@ -247,7 +244,6 @@ describe('scaling ceiling: realistic rows (notes)', () => {
 						tags: ['tag1', 'tag2'],
 						createdAt: Date.now(),
 						updatedAt: Date.now(),
-						_v: 1,
 					});
 				}
 			});
@@ -319,19 +315,16 @@ describe('scaling ceiling: multi-table write strategies', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1 as const,
 			}));
 			const bookmarkRows = Array.from({ length: perTable }, (_, i) => ({
 				id: generateId(i),
 				title: `Bookmark ${i}`,
 				views: i,
-				_v: 1 as const,
 			}));
 			const eventRows = Array.from({ length: perTable }, (_, i) => ({
 				id: generateId(i),
 				title: `Event ${i}`,
 				views: i,
-				_v: 1 as const,
 			}));
 
 			const { durationMs: bulkMs } = measureTime(() => {
@@ -355,7 +348,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 						id: generateId(i),
 						title: `Post ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 				for (let i = 0; i < perTable; i++) {
@@ -363,7 +355,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 						id: generateId(i),
 						title: `Bookmark ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 				for (let i = 0; i < perTable; i++) {
@@ -371,7 +362,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 						id: generateId(i),
 						title: `Event ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 			});
@@ -391,19 +381,16 @@ describe('scaling ceiling: multi-table write strategies', () => {
 						id: generateId(i),
 						title: `Post ${i}`,
 						views: i,
-						_v: 1,
 					});
 					intTables.bookmarks.set({
 						id: generateId(i),
 						title: `Bookmark ${i}`,
 						views: i,
-						_v: 1,
 					});
 					intTables.events.set({
 						id: generateId(i),
 						title: `Event ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 			});
@@ -443,7 +430,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1 as const,
 				})),
 			);
 			tables.bookmarks.bulkSet(
@@ -451,7 +437,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 					id: generateId(i),
 					title: `Bookmark ${i}`,
 					views: i,
-					_v: 1 as const,
 				})),
 			);
 			tables.events.bulkSet(
@@ -459,7 +444,6 @@ describe('scaling ceiling: multi-table write strategies', () => {
 					id: generateId(i),
 					title: `Event ${i}`,
 					views: i,
-					_v: 1 as const,
 				})),
 			);
 
@@ -474,21 +458,18 @@ describe('scaling ceiling: multi-table write strategies', () => {
 							id: generateId(idx),
 							title: `Updated ${idx}`,
 							views: idx,
-							_v: 1,
 						});
 					} else if (pick === 1) {
 						tables.bookmarks.set({
 							id: generateId(idx),
 							title: `Updated ${idx}`,
 							views: idx,
-							_v: 1,
 						});
 					} else {
 						tables.events.set({
 							id: generateId(idx),
 							title: `Updated ${idx}`,
 							views: idx,
-							_v: 1,
 						});
 					}
 				}
@@ -535,7 +516,6 @@ describe('scaling ceiling: per-operation degradation', () => {
 					id: generateId(totalInserted),
 					title: `Post ${totalInserted}`,
 					views: totalInserted,
-					_v: 1,
 				});
 				totalInserted++;
 			}
@@ -548,7 +528,6 @@ describe('scaling ceiling: per-operation degradation', () => {
 						id: generateId(batchStart + i),
 						title: `Post ${batchStart + i}`,
 						views: batchStart + i,
-						_v: 1,
 					});
 				}
 			});

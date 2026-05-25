@@ -2,42 +2,32 @@
  * DDL Generation Tests
  *
  * Verifies JSON Schema → CREATE TABLE SQL conversion for the SQLite materializer.
- * Covers single-version tables, multi-version tables (oneOf resolution),
- * all JSON Schema type mappings, nullable vs NOT NULL, and edge cases.
+ * Covers JSON Schema type mappings, nullable vs NOT NULL, and edge cases.
  *
  * Key behaviors:
- * - generateDdl picks highest _v.const from oneOf array
  * - generateDdl maps JSON Schema types to correct SQLite types
  * - id field always becomes TEXT PRIMARY KEY
- * - _v field with const always becomes INTEGER NOT NULL
  * - required fields get NOT NULL, optional fields allow NULL
  * - object/array types serialize to TEXT (JSON)
  * - enum types map to TEXT
+ *
+ * Note: `_v` is library-managed and stripped from the user-facing row schema,
+ * so it never appears in generated DDL.
  */
 
 import { describe, expect, test } from 'bun:test';
+import type { TSchema } from 'typebox';
 import { generateDdl } from './ddl.js';
 
 function objectSchema(
 	properties: Record<string, Record<string, unknown>>,
 	required: string[] = [],
 ) {
-	return { type: 'object' as const, properties, required };
-}
-
-function versionedSchema(
-	version: number,
-	properties: Record<string, Record<string, unknown>> = {},
-	required: string[] = [],
-) {
-	return objectSchema(
-		{
-			id: { type: 'string' },
-			_v: { const: version },
-			...properties,
-		},
-		['id', '_v', ...required],
-	);
+	return {
+		type: 'object' as const,
+		properties,
+		required,
+	} as unknown as TSchema;
 }
 
 describe('generateDdl', () => {
@@ -46,17 +36,16 @@ describe('generateDdl', () => {
 			type: 'object',
 			properties: {
 				id: { type: 'string' },
-				_v: { const: 1 },
 				title: { type: 'string' },
 				published: { type: 'boolean' },
 			},
-			required: ['id', '_v', 'title'],
-		};
+			required: ['id', 'title'],
+		} as unknown as TSchema;
 
 		const sql = generateDdl('posts', schema);
 
 		expect(sql).toBe(
-			'CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "_v" INTEGER NOT NULL, "title" TEXT NOT NULL, "published" INTEGER)',
+			'CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "title" TEXT NOT NULL, "published" INTEGER)',
 		);
 	});
 
@@ -151,26 +140,6 @@ describe('generateDdl', () => {
 
 		expect(sql).toBe(
 			'CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY)',
-		);
-	});
-
-	test('handles out-of-order multi-version schema via oneOf', () => {
-		const v1Schema = versionedSchema(1, { title: { type: 'string' } }, [
-			'title',
-		]);
-		const v2Schema = versionedSchema(
-			2,
-			{
-				title: { type: 'string' },
-				published: { type: 'boolean' },
-			},
-			['title'],
-		);
-
-		const sql = generateDdl('posts', { oneOf: [v2Schema, v1Schema] });
-
-		expect(sql).toBe(
-			'CREATE TABLE IF NOT EXISTS "posts" ("id" TEXT PRIMARY KEY, "_v" INTEGER NOT NULL, "title" TEXT NOT NULL, "published" INTEGER)',
 		);
 	});
 

@@ -25,7 +25,7 @@
 	} = $props();
 
 	/** Derive deleted status from the note itself, no need to check view mode. */
-	const isDeleted = $derived(note.deletedAt !== undefined);
+	const isDeleted = $derived(note.deletedAt !== null);
 
 	let confirmingPermanentDelete = $state(false);
 </script>
@@ -48,7 +48,7 @@
 					{note.title || 'Untitled'}
 				</span>
 				<span class="shrink-0 text-xs text-muted-foreground">
-					{format(DateTimeString.toDate(note.updatedAt), 'h:mm a')}
+					{format(new Date(note.updatedAt), 'h:mm a')}
 				</span>
 			</div>
 			<p class="line-clamp-2 text-xs text-muted-foreground">
@@ -148,7 +148,7 @@
 				</ContextMenu.SubTrigger>
 				<ContextMenu.SubContent class="w-48">
 					<ContextMenu.Item
-						onclick={() => honeycrisp.state.notes.moveToFolder(note.id, undefined)}
+						onclick={() => honeycrisp.state.notes.moveToFolder(note.id, null)}
 					>
 						<FileTextIcon class="mr-2 size-4" />
 						Unfiled

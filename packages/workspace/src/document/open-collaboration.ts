@@ -84,7 +84,7 @@ export type OpenCollaborationConfig<TActions extends ActionRegistry> = {
 	/**
 	 * WebSocket URL the supervisor connects to, used verbatim. Callers
 	 * build it via {@link roomWsUrl} (or any custom builder); the wire
-	 * `?installationId=` query that the relay routes by lives in this URL.
+	 * `?deviceId=` query that the relay routes by lives in this URL.
 	 * `openCollaboration` does not parse, mutate, or augment it.
 	 */
 	url: string;
@@ -183,11 +183,11 @@ export function openCollaboration<TActions extends ActionRegistry>(
 
 	// Server-owned presence: the relay pushes the full device list as a
 	// `presence` text frame on every membership or manifest change. Each entry
-	// carries the device's installationId, connectedAt, and published action
+	// carries the device's deviceId, connectedAt, and published action
 	// manifest. The client stores the latest list and notifies subscribers;
 	// there is no delta protocol and no client-side reassembly. The relay
-	// dedupes multi-tab same-install (newest-wins by connectedAt) and excludes
-	// the receiver's own install, so the client stores `devices` verbatim.
+	// dedupes multi-tab same-device (newest-wins by connectedAt) and excludes
+	// the receiver's own device, so the client stores `devices` verbatim.
 	let remoteDevices: PresenceDevice[] = [];
 	const presenceListeners = new Set<(devices: PresenceDevice[]) => void>();
 

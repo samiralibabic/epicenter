@@ -13,8 +13,9 @@
  * See `specs/20260522T220000-workspace-project-layout.md`.
  */
 
-import type { Owner } from '@epicenter/auth';
-import type { SubjectKeyring } from '@epicenter/encryption';
+import type { OwnerId } from '@epicenter/constants/identity';
+import type { Keyring } from '@epicenter/encryption';
+import type { DeviceId } from '../document/device-id.js';
 import type {
 	OnReconnectSignal,
 	OpenWebSocketFn,
@@ -39,13 +40,13 @@ import type { DaemonRuntime } from './types.js';
  *   daemon (derived from `projectDir` so two daemons in different projects
  *   produce distinct update streams). Pin it on the Y.Doc with
  *   `ydoc.clientID = ctx.yDocClientId` right after construction.
- * - `installationId` is the conventional collaboration WebSocket client id for
+ * - `deviceId` is the conventional collaboration WebSocket device id for
  *   the daemon side of this route (`<route>-daemon`). Pass it through
- *   `roomWsUrl` so it shows up in the upgrade URL as `?installationId=...`.
- * - `owner` is the workspace owner snapshotted at startup. The host refuses
- *   to start when auth is signed-out, so this value is stable for the
+ *   `roomWsUrl` so it shows up in the upgrade URL as `?deviceId=...`.
+ * - `ownerId` is the workspace owner id snapshotted at startup. The host
+ *   refuses to start when auth is signed-out, so this value is stable for the
  *   lifetime of the daemon process; routes use it for partitioned URLs.
- * - `keyring` is the lazy reader for the current subject keyring. Pass it to
+ * - `keyring` is the lazy reader for the current owner keyring. Pass it to
  *   `attachEncryption(ydoc, { keyring })`. The host's closure throws when
  *   auth is signed-out, so a late sign-out turns into a thrown error at the
  *   next encrypted-write or registration site rather than silent ciphertext
@@ -61,9 +62,9 @@ export type DaemonWorkspaceContext = {
 	projectDir: ProjectDir;
 	route: string;
 	yDocClientId: number;
-	installationId: string;
-	owner: Owner;
-	keyring: () => SubjectKeyring;
+	deviceId: DeviceId;
+	ownerId: OwnerId;
+	keyring: () => Keyring;
 	openWebSocket: OpenWebSocketFn;
 	onReconnectSignal: OnReconnectSignal;
 };

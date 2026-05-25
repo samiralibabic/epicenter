@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { Value } from 'typebox/value';
 import {
 	defineErrors,
 	extractErrorMessage,
@@ -13,7 +14,11 @@ import { assembleMarkdown } from '../../../markdown/assemble-markdown.js';
 import { parseMarkdownFile } from '../../../markdown/parse-markdown-file.js';
 import type { MaybePromise } from '../../../shared/types.js';
 import type { Kv } from '../../attach-kv.js';
-import type { BaseRow, Table, TableParseError } from '../../attach-table.js';
+import {
+	type BaseRow,
+	type Table,
+	TableParseError,
+} from '../../attach-table.js';
 
 // ════════════════════════════════════════════════════════════════════════════
 // PUSH ERROR + EVENT TYPES
@@ -448,19 +453,33 @@ export function attachMarkdownMaterializer(
 				// tryAsync invariant: row is non-null once error is null; satisfies TS.
 				if (row == null) continue;
 
-				// 4. Validate the returned row against the table's schema
-				const { data: validRow, error: parseError } = entry.table.parse(
-					row.id,
-					row,
-				);
-				if (parseError) {
-					events.push({ kind: 'error', path, tableName, error: parseError });
+				// 4. Validate the returned row against the latest schema.
+				//    `fromMarkdown` returns a user-facing row (no `_v`); validate
+				//    directly against the latest version's TObject.
+				const rowId = row.id;
+				const latestSchema = entry.table.schema;
+				if (!Value.Check(latestSchema, row)) {
+					const errors = [...Value.Errors(latestSchema, row)].map((e) => ({
+						path: e.instancePath,
+						message: e.message,
+					}));
+					const { error: validationError } = TableParseError.ValidationFailed({
+						id: rowId,
+						errors,
+						row,
+					});
+					events.push({
+						kind: 'error',
+						path,
+						tableName,
+						error: validationError,
+					});
 					continue;
 				}
 
 				// 5. Commit
-				entry.table.set(validRow);
-				events.push({ kind: 'imported', path, tableName, id: validRow.id });
+				entry.table.set(row);
+				events.push({ kind: 'imported', path, tableName, id: rowId });
 			}
 		}
 

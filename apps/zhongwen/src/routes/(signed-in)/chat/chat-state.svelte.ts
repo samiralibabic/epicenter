@@ -9,7 +9,8 @@
 import { APP_URLS } from '@epicenter/constants/vite';
 import { createAiChatFetch, fromTable } from '@epicenter/svelte';
 import {
-	type ChatMessageId,
+	asChatMessageId,
+	asConversationId,
 	type Conversation,
 	type ConversationId,
 	generateChatMessageId,
@@ -28,8 +29,6 @@ import {
 } from './providers';
 import { ZHONGWEN_SYSTEM_PROMPT } from './system-prompt';
 import { toUiMessage } from './ui-message';
-
-const asChatMessageId = (id: string) => id as ChatMessageId;
 
 // ─── State Factory ───────────────────────────────────────────────────────────
 
@@ -57,7 +56,6 @@ export function createChatState() {
 			model: DEFAULT_MODEL,
 			createdAt: now,
 			updatedAt: now,
-			_v: 1,
 		});
 		return id;
 	}
@@ -83,7 +81,7 @@ export function createChatState() {
 
 	// ── Handle Registry ──
 
-	let activeConversationId = $state<ConversationId>('' as ConversationId);
+	let activeConversationId = $state<ConversationId>(asConversationId(''));
 
 	const handles = new SvelteMap<
 		ConversationId,
@@ -124,7 +122,6 @@ export function createChatState() {
 					role: 'assistant',
 					parts: message.parts as JsonValue[],
 					createdAt: message.createdAt?.getTime() ?? Date.now(),
-					_v: 1,
 				});
 				zhongwen.tables.conversations.update(conversationId, {
 					updatedAt: Date.now(),
@@ -196,7 +193,6 @@ export function createChatState() {
 					role: 'user',
 					parts: [{ type: 'text', content }],
 					createdAt: Date.now(),
-					_v: 1,
 				});
 
 				updateConversation(conversationId, {
@@ -236,7 +232,7 @@ export function createChatState() {
 		}
 
 		for (const id of conversationsMap.keys()) {
-			const convId = id as ConversationId;
+			const convId = asConversationId(id);
 			if (!handles.has(convId)) {
 				handles.set(convId, createConversationHandle(convId));
 			}
@@ -276,7 +272,6 @@ export function createChatState() {
 			model: current?.model ?? DEFAULT_MODEL,
 			createdAt: now,
 			updatedAt: now,
-			_v: 1,
 		});
 
 		switchConversation(id);

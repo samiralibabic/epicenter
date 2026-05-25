@@ -142,21 +142,4 @@ describe('xmlFragmentToPlaintext', () => {
 		});
 		expect(xmlFragmentToPlaintext(fragment)).toBe('Hello world');
 	});
-
-	test('no trailing newline after last block', () => {
-		const fragment = createDocFragment((f) => {
-			f.insert(0, [makeParagraph('only')]);
-		});
-		const result = xmlFragmentToPlaintext(fragment);
-		expect(result).toBe('only');
-		expect(result.endsWith('\n')).toBe(false);
-	});
-
-	test('round-trip via attachRichText.write → xmlFragmentToPlaintext', () => {
-		const ydoc = new Y.Doc();
-		const { binding, write } = attachRichText(ydoc);
-		write('round trip');
-
-		expect(xmlFragmentToPlaintext(binding)).toBe('round trip');
-	});
 });

@@ -52,7 +52,6 @@ describe('CRDT overhead vs raw JSON', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1,
 			});
 		}
 
@@ -101,7 +100,6 @@ Let's add a bit more to make it realistic. The quick brown fox jumps over the la
 				tags: ['tag1', 'tag2'],
 				createdAt: Date.now(),
 				updatedAt: Date.now(),
-				_v: 1,
 			});
 		}
 
@@ -136,7 +134,6 @@ Let's add a bit more to make it realistic. The quick brown fox jumps over the la
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 			const smallMs = performance.now() - smallStart;
@@ -155,7 +152,6 @@ Let's add a bit more to make it realistic. The quick brown fox jumps over the la
 					tags: ['tag1', 'tag2'],
 					createdAt: Date.now(),
 					updatedAt: Date.now(),
-					_v: 1,
 				});
 			}
 			const noteSize = Y.encodeStateAsUpdate(noteDoc).byteLength;
@@ -181,7 +177,6 @@ describe('update growth', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: 0,
-				_v: 1,
 			});
 		}
 		const initialSize = Y.encodeStateAsUpdate(ydoc).byteLength;
@@ -192,7 +187,6 @@ describe('update growth', () => {
 					id: generateId(i),
 					title: `Post ${i} v${update}`,
 					views: update,
-					_v: 1,
 				});
 			}
 		}

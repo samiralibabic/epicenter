@@ -2,6 +2,8 @@
 
 When two sibling functions share the same first argument, they're telling you they belong together. The repeated parameter is a dependency that should be closed over once, not threaded through every call.
 
+> How I articulated it: When you see two functions that share the same first argument, it is usually a sign that the functions want to be grouped. Pass that shared argument into a service or factory function once, then return methods that only take the values that change per call. If the methods need lifecycle or cached state, put that mutable state in the closure between the factory declaration and the returned object.
+
 ```typescript
 //                          ↓ repeated
 async function requestDeviceCode(serverUrl: string) {

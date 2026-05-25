@@ -3,18 +3,23 @@
  */
 
 import { expect, test } from 'bun:test';
-import { type } from 'arktype';
+import { Type } from 'typebox';
 import * as Y from 'yjs';
 import { createEncryptedYkvLww } from '../shared/y-keyvalue/y-keyvalue-lww-encrypted.js';
 import { createKv } from './attach-kv.js';
 import { defineKv } from './define-kv.js';
 import { KV_KEY } from './keys.js';
 
+const themeSchema = Type.Object({
+	mode: Type.Union([Type.Literal('light'), Type.Literal('dark')]),
+});
+const themeDefault = () => ({ mode: 'light' as const });
+
 test('set stores a value that get returns', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	kv.set('theme', { mode: 'dark' });
@@ -25,7 +30,7 @@ test('get returns defaultValue for unset key', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	expect(kv.get('theme')).toEqual({ mode: 'light' });
@@ -35,7 +40,7 @@ test('delete causes get to return defaultValue', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	kv.set('theme', { mode: 'dark' });
@@ -49,7 +54,7 @@ test('get returns defaultValue for invalid stored data', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		count: defineKv(type('number'), 0),
+		count: defineKv(Type.Number(), () => 0),
 	});
 
 	// Write garbage directly to the Y.Array
@@ -62,7 +67,7 @@ test('observeAll fires for set changes with correct key and value', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	const changes: Array<Map<string, any>> = [];
@@ -87,7 +92,7 @@ test('observeAll fires for delete changes', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	kv.set('theme', { mode: 'dark' });
@@ -113,8 +118,8 @@ test('observeAll batches multiple changes in a single callback', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
-		fontSize: defineKv(type('number'), 14),
+		theme: defineKv(themeSchema, themeDefault),
+		fontSize: defineKv(Type.Number(), () => 14),
 	});
 
 	const changes: Array<Map<string, any>> = [];
@@ -151,8 +156,8 @@ test('observeAll skips invalid values', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		count: defineKv(type('number'), 0),
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		count: defineKv(Type.Number(), () => 0),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	const changes: Array<Map<string, any>> = [];
@@ -181,7 +186,7 @@ test('observeAll skips unknown keys', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	const changes: Array<Map<string, any>> = [];
@@ -210,7 +215,7 @@ test('observeAll returns an unsubscribe function that works', () => {
 	const ydoc = new Y.Doc();
 	const ykv = createEncryptedYkvLww<unknown>(ydoc, KV_KEY);
 	const kv = createKv(ykv, {
-		theme: defineKv(type({ mode: "'light' | 'dark'" }), { mode: 'light' }),
+		theme: defineKv(themeSchema, themeDefault),
 	});
 
 	const changes: Array<Map<string, any>> = [];

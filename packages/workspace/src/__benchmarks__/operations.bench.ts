@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { type } from 'arktype';
+import { Type } from 'typebox';
 import * as Y from 'yjs';
 import { createKv } from '../document/attach-kv.js';
 import { defineKv } from '../document/define-kv.js';
@@ -31,7 +31,6 @@ describe('table operations', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 		});
@@ -53,7 +52,6 @@ describe('table operations', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 		});
@@ -74,7 +72,6 @@ describe('table operations', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1,
 			});
 		}
 
@@ -97,7 +94,6 @@ describe('table operations', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1,
 			});
 		}
 
@@ -123,7 +119,6 @@ describe('table operations', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: i,
-				_v: 1,
 			});
 		}
 
@@ -148,7 +143,6 @@ describe('table operations', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 		});
@@ -163,7 +157,6 @@ describe('table operations', () => {
 						id: generateId(i),
 						title: `Post ${i}`,
 						views: i,
-						_v: 1,
 					});
 				}
 			});
@@ -184,7 +177,9 @@ describe('KV operations', () => {
 		const ydoc = new Y.Doc();
 		const ykv = createEncryptedYkvLww<unknown>(ydoc, 'kv');
 		const kv = createKv(ykv, {
-			counter: defineKv(type({ value: 'number' }), { value: 0 }),
+			counter: defineKv(Type.Object({ value: Type.Number() }), () => ({
+				value: 0,
+			})),
 		});
 
 		const { durationMs } = measureTime(() => {
@@ -204,7 +199,9 @@ describe('KV operations', () => {
 		const ydoc = new Y.Doc();
 		const ykv = createEncryptedYkvLww<unknown>(ydoc, 'kv');
 		const kv = createKv(ykv, {
-			counter: defineKv(type({ value: 'number' }), { value: 0 }),
+			counter: defineKv(Type.Object({ value: Type.Number() }), () => ({
+				value: 0,
+			})),
 		});
 
 		const { durationMs } = measureTime(() => {
@@ -222,7 +219,9 @@ describe('KV operations', () => {
 		const ydoc = new Y.Doc();
 		const ykv = createEncryptedYkvLww<unknown>(ydoc, 'kv');
 		const kv = createKv(ykv, {
-			counter: defineKv(type({ value: 'number' }), { value: 0 }),
+			counter: defineKv(Type.Object({ value: Type.Number() }), () => ({
+				value: 0,
+			})),
 		});
 
 		const { durationMs } = measureTime(() => {

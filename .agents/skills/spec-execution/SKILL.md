@@ -25,30 +25,55 @@ Use this pattern when you need to:
 ## The Execution Loop
 
 ```
-READ SPEC
-    ↓
+PREFLIGHT SPEC
+    |
+    v
+READ ACTIVE PATH
+    |
+    v
 PLAN WAVES (which tasks are parallel vs sequential?)
-    ↓
-┌─── WAVE N ──────────────────────────────────────┐
-│  1. Execute tasks (sub-agents when useful)       │
-│  2. Verify (type-check, tests if applicable)     │
-│  3. Update spec (check off items, add notes)     │
-│  4. Commit or checkpoint, based on review shape  │
-└──────────────────────────────────────────────────┘
-    ↓
+    |
+    v
+WAVE N
+  1. Execute tasks (sub-agents when useful)
+  2. Verify (type-check, tests if applicable)
+  3. Update spec (check off items, add notes)
+  4. Commit or checkpoint, based on review shape
+    |
+    v
 REPEAT until spec is complete
-    ↓
+    |
+    v
 FINAL REVIEW (run post-implementation-review, update spec status, add review section)
 ```
+
+## Phase 0: Preflight the Spec
+
+Before planning waves, make sure the spec has a current execution path.
+
+Check:
+
+- Status: Draft, In Progress, Implemented, Superseded, or Retrospective.
+- Supersession: whether the top of the spec points to a newer spec.
+- One Sentence: what the spec is actually about.
+- Current State and Target Shape: enough concrete code, routes, types, or file paths to start.
+- Implementation Plan: actionable tasks or waves.
+- Verification: commands, smoke tests, or grep checks that prove the work.
+- Open Questions: anything that blocks implementation.
+
+Large specs are fine. Do not split or reject a spec because it is long. Only stop to refresh the spec when the active path is unclear, stale, or mixed with unrelated reader jobs.
+
+If a spec is long but usable, write a short wave plan and proceed. If it is long and confusing, first add or update a "How to read this spec" or "Active execution path" section. That update is part of the work.
 
 ## Phase 1: Read and Understand
 
 Before touching any code:
 
-1. **Read the entire spec**: understand the full scope before planning
+1. **Read the active path first**: understand what is current before reading appendices, prompts, or historical notes
 2. **Identify the implementation phases** from the spec's Implementation Plan section
 3. **Map dependencies**: which tasks block others? Which are independent?
 4. **Check the spec's Open Questions**: resolve what you can, flag what needs human input
+5. **Scan the rest of the spec for constraints**: read decisions, rejected alternatives, and edge cases that could affect the implementation
 
 If the spec has unresolved Open Questions that block implementation, surface them immediately. Don't guess on architectural decisions.
 
@@ -245,6 +270,14 @@ Code diverges from spec but spec is never updated
 
 The spec is a living document. Every commit should leave the spec accurate to what was actually built.
 
+### Length Panic
+
+```
+This spec is long, so split it before reading it
+```
+
+No. Length is not the failure mode. Confusing reader jobs are the failure mode. A long spec with a clear first screen, current path, decisions, and verification can be easier to execute than five scattered short specs.
+
 ### Over-Parallel
 
 ```
@@ -257,7 +290,8 @@ More than 3-4 parallel sub-agents gets chaotic. Group related tasks and keep par
 
 Before starting:
 
-- [ ] Read entire spec
+- [ ] Preflight status, supersession, and active path
+- [ ] Read active sections first
 - [ ] Identify phases and dependencies
 - [ ] Plan waves (parallel vs sequential)
 - [ ] Surface blockers that need user input

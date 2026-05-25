@@ -15,6 +15,7 @@
 		"@sindresorhus/slugify": "catalog:",
 		"arktype": "catalog:",
 		"fflate": "catalog:",
+		"typebox": "catalog:",
 		"yjs": "catalog:"
 	},
 	"devDependencies": {

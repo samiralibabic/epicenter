@@ -4,7 +4,7 @@ import {
 	decryptBytes,
 	type EncryptedBlob,
 	encryptBytes,
-	type SubjectKeyring,
+	type Keyring,
 } from '@epicenter/encryption';
 import { debounce } from '@epicenter/util';
 import * as idb from 'lib0/indexeddb';
@@ -68,11 +68,11 @@ export type EncryptedIndexedDbError = InferErrors<
 type EncryptedIndexedDbOptions = {
 	databaseName: string;
 	/**
-	 * Lazy reader for the current subject keyring. Called once at attach
+	 * Lazy reader for the current owner keyring. Called once at attach
 	 * time to derive the per-`ydoc.guid` workspace keyring; the latest
 	 * version becomes the write key.
 	 */
-	keyring: () => SubjectKeyring;
+	keyring: () => Keyring;
 	/**
 	 * Logger for background failures (persistence write rejections, compaction
 	 * throws). Defaults to a console-backed logger with source

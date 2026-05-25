@@ -10,7 +10,7 @@ A document is owned by a user, addressed by the user's identity. There is no
 container between the user and the document.
 
 ```
-owner   = the user (subject)
+owner   = the user (in personal mode) or the deployment (in team mode)
 document = a Y.Doc, identified by its guid
 ```
 
@@ -30,8 +30,8 @@ LAYER 3  Tenancy / billing       acme.com, 40 seats, admin console     Google Wo
 LAYER 2  Shared-drive content    docs OWNED BY an org, so they         Google Shared Drives
            survive a departing employee                                (enterprise, future)
               |  alongside
-LAYER 1  Personal content        subject:userId owns the doc;          consumer Google Docs
-           an ACL grants other subjects access                          (TODAY)
+LAYER 1  Personal content        owners/<ownerId> owns the doc;        consumer Google Docs
+           an ACL grants other users access                             (TODAY)
 ```
 
 Layer 1 is what ships today: your documents are yours. Layer 1.5 is per-document
@@ -59,19 +59,20 @@ Layer 3. They never merge.
 
 ## Cloud sync addressing
 
-A cloud doc syncs through one route, keyed by the owning subject and the doc's
+A cloud doc syncs through one route, keyed by the owning user and the doc's
 guid.
 
 ```
-route     /rooms/:room
-DO name   subject:${userId}:rooms:${room}        room = ydoc.guid
-builder   roomWsUrl(apiUrl, ydoc.guid)
+route     /api/owners/:ownerId/rooms/:room   (both modes)
+DO name   owners/${ownerId}/rooms/${room}    (room = ydoc.guid)
+builder   roomWsUrl({ baseURL, ownerId, guid: ydoc.guid, installationId })
 ```
 
-`subject` is the authenticated user's id. It is named `subject:` to match the
-encryption key-derivation labels, which scope the per-user keyring the same way.
-The room id is the Y.Doc's guid: the document already carries its own identity,
-so nothing else is composed into the name.
+The DO partition is `owners/<ownerId>` in both modes. In personal mode
+`ownerId === user.id`, derived from the authenticated user's id. In team mode
+`ownerId === 'team'`, so every signed-in member of the deployment shares the
+same partition. The room id is the Y.Doc's guid: the document already carries
+its own identity, so nothing else is composed into the name.
 
 Browser apps and the daemon use the same route and the same builder. They sync
 the same document by using the same guid.
@@ -98,13 +99,14 @@ bug.
 
 Authorization for a Layer 1 document is identity, not membership. The route's
 auth middleware confirms the caller is a valid user; the DO name is derived from
-that same user id. A user reaching their own `subject:${userId}:rooms:*` space
-is, by construction, authorized. A membership query here would have exactly one
-possible denial: the system is broken.
+that same identity. A user reaching their own `owners/${ownerId}/rooms/*` space
+(where `ownerId === user.id` in personal mode) is, by construction, authorized.
+A membership query here would have exactly one possible denial: the system is
+broken.
 
 Layer 1.5 sharing changes this only for documents shared *to* you: the owner's
-DO name stays `subject:${ownerId}:rooms:${room}`, and an ACL table grants other
-subjects access. The auth check becomes "is the caller the owner, or in the
+DO name stays `owners/${ownerId}/rooms/${room}`, and an ACL table grants
+other users access. The auth check becomes "is the caller the owner, or in the
 ACL". Your own documents still need no lookup.
 
 ## Billing
@@ -119,4 +121,5 @@ require content to be owned by anything other than the user.
 - `docs/articles/20260522T170000-documents-belong-to-you-not-a-workspace.md` - the narrative
 - `specs/20260522T160000-revert-cloud-workspace-sync-layer.md` - the spec that reverted the code to this model
 - `packages/workspace/SYNC_ARCHITECTURE.md` - the sync transport, presence, and dispatch surfaces
-- `docs/encryption.md` - the per-subject keyring whose labels `subject:` mirrors
+- `docs/encryption.md` - the per-owner keyring; HKDF info-string is
+  `owner:{ownerId}` end to end (personal `userId` or the literal `team`)

@@ -55,12 +55,31 @@ export type ImportProgress = {
 // `openReddit()` instance.
 type RedditWorkspaceClient = RedditWorkspace;
 
+/**
+ * Coerce `undefined` fields to `null`.
+ *
+ * CSV schemas use arktype optionals (`'title?': 'string'`) which produce
+ * `undefined` for missing keys. Workspace tables use TypeBox
+ * `column.nullable(column.string())` which stores `null`. Normalize at the
+ * boundary so the stored row round-trips cleanly through validation on read.
+ */
+function nullifyUndefined(
+	row: Record<string, unknown>,
+): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const key in row) {
+		const value = row[key];
+		out[key] = value === undefined ? null : value;
+	}
+	return out;
+}
+
 /** Import rows for a single table with per-row error recovery */
 function importTableRows(
 	csvData: Record<string, string>[],
 	schema: (data: unknown) => unknown,
 	tableClient: {
-		set(row: { id: string; _v: 1 }): void;
+		set(row: { id: string }): void;
 	},
 	tableName: string,
 	errors: ImportError[],
@@ -79,7 +98,10 @@ function importTableRows(
 			skipped++;
 			continue;
 		}
-		tableClient.set({ ...(result as { id: string }), _v: 1 });
+		const row = nullifyUndefined(result as Record<string, unknown>) as {
+			id: string;
+		};
+		tableClient.set(row);
 		imported++;
 	}
 
@@ -192,7 +214,7 @@ export async function importRedditExport(
 			KvData[keyof KvData],
 		][]) {
 			if (value !== null) {
-				workspace.kv.set(key, value as string & Record<string, string>);
+				workspace.kv.set(key, value);
 				stats.kv++;
 			}
 		}

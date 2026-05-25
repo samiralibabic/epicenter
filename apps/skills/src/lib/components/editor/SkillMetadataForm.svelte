@@ -66,7 +66,7 @@
 				<Input
 					value={skill.license ?? ''}
 					onblur={(e) => {
-						const next = e.currentTarget.value || undefined;
+						const next = e.currentTarget.value || null;
 						if (next !== skill.license) updateSkill({ license: next });
 					}}
 					placeholder="MIT"
@@ -100,7 +100,7 @@
 			<Input
 				value={skill.compatibility ?? ''}
 				onblur={(e) => {
-					const next = e.currentTarget.value || undefined;
+					const next = e.currentTarget.value || null;
 					if (next !== skill.compatibility) updateSkill({ compatibility: next });
 				}}
 				placeholder="Claude Code, OpenCode, Cursor..."

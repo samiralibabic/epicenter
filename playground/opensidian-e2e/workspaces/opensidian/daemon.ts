@@ -9,9 +9,6 @@
  * ```
  */
 
-import { Database } from 'bun:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { fileContentDocGuid } from '@epicenter/filesystem';
 import {
 	attachEncryption,
@@ -25,7 +22,7 @@ import {
 } from '@epicenter/workspace';
 import type { DaemonWorkspaceContext } from '@epicenter/workspace/daemon';
 import { attachMarkdownMaterializer } from '@epicenter/workspace/document/materializer/markdown';
-import { attachSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
+import { attachBunSqliteMaterializer } from '@epicenter/workspace/document/materializer/sqlite';
 import { toSlugFilename } from '@epicenter/workspace/markdown';
 import {
 	attachYjsLog,
@@ -44,8 +41,8 @@ const WORKSPACE_ID = 'opensidian';
 async function openOpensidianPlayground({
 	projectDir,
 	yDocClientId,
-	installationId,
-	owner,
+	deviceId,
+	ownerId,
 	keyring,
 	openWebSocket,
 	onReconnectSignal,
@@ -102,9 +99,9 @@ async function openOpensidianPlayground({
 	const collaboration = openCollaboration(ydoc, {
 		url: roomWsUrl({
 			baseURL: SERVER_URL,
-			owner,
+			ownerId,
 			guid: ydoc.guid,
-			installationId,
+			deviceId,
 		}),
 		openWebSocket,
 		onReconnectSignal,
@@ -148,10 +145,8 @@ async function openOpensidianPlayground({
 		},
 	});
 
-	const sqliteFile = sqlitePath(projectDir, WORKSPACE_ID);
-	mkdirSync(dirname(sqliteFile), { recursive: true });
-	const sqlite = attachSqliteMaterializer(ydoc, {
-		db: new Database(sqliteFile),
+	const sqlite = attachBunSqliteMaterializer(ydoc, {
+		filePath: sqlitePath(projectDir, WORKSPACE_ID),
 		waitFor: whenReady,
 	}).table(tables.files, { fts: ['name'] });
 

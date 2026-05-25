@@ -24,8 +24,49 @@ Use this pattern when you need to:
 - **Formulaic openings**: Don't start every comment identically. Match the tone to the conversation.
 - **Restating what's obvious**: If someone asked a question, just answer it. Don't recap what they said.
 - **Corporate announcements**: "We are pleased to announce..."; just say what changed.
+- **Over-explaining closed-loop fixes**: If the issue is fixed and there is no action needed from the reporter, do not make them read release-process details.
 
 Follow [writing-voice](../writing-voice/SKILL.md) for tone.
+
+## Maintainer Respect Gate
+
+Assume issue reporters and maintainers are busy. The most respectful comment is usually the shortest one that closes the loop clearly.
+
+### Comment Compression Rule
+
+Before drafting, ask: what does the reader need to know or do next? Include only that.
+
+Most comments need this shape:
+
+1. Human acknowledgment.
+2. Current state or direct answer.
+3. Next action, only if there is one.
+4. Warm closing.
+
+Warmth should be visible but light. Prefer one exclamation point at the end of the opening or closing sentence. The closing is usually the best place: "Thanks again for catching it!"
+
+Do not add internal process details unless the reader needs them to verify the answer or take the next step.
+
+### Fixed Issues
+
+For fixed issues, use this order:
+
+1. Thank them for flagging it.
+2. Say the current state directly.
+3. Mention the concrete version, release, PR, or commit only if it helps them verify.
+4. Close with brief gratitude, usually with one exclamation point.
+
+Avoid validating the reporter's correctness unless it helps the reply. Usually, thank them and state the current status. Do not explain internal mechanics unless the issue is about those mechanics or the user needs them to verify the fix.
+
+Good:
+
+```
+Hey @username, thank you for flagging this.
+
+This has been fixed, and current releases now include npm provenance attestations.
+
+Thanks again for catching it!
+```
 
 ## Opening Pattern
 

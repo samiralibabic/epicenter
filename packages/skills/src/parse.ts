@@ -51,14 +51,14 @@ export function parseSkillMd(
 	name: string,
 	content: string,
 ): {
-	skill: Omit<Skill, 'id'> & { id: string | undefined };
+	skill: Omit<Skill, 'id'> & { id: string | null };
 	instructions: string;
 } {
 	const { frontmatter, body } = splitFrontmatter(content);
 
 	// Extract id from metadata.id, then strip it so it doesn't pollute the metadata column
-	let parsedId: string | undefined;
-	let metadataRecord: Record<string, unknown> | undefined;
+	let parsedId: string | null = null;
+	let metadataRecord: Record<string, unknown> | null = null;
 
 	if (
 		frontmatter.metadata != null &&
@@ -87,23 +87,17 @@ export function parseSkillMd(
 			name,
 			description: String(frontmatter.description ?? ''),
 			license:
-				typeof frontmatter.license === 'string'
-					? frontmatter.license
-					: undefined,
+				typeof frontmatter.license === 'string' ? frontmatter.license : null,
 			compatibility:
 				typeof frontmatter.compatibility === 'string'
 					? frontmatter.compatibility
-					: undefined,
-			metadata:
-				metadataRecord !== undefined
-					? JSON.stringify(metadataRecord)
-					: undefined,
+					: null,
+			metadata: metadataRecord !== null ? JSON.stringify(metadataRecord) : null,
 			allowedTools:
 				typeof frontmatter['allowed-tools'] === 'string'
 					? frontmatter['allowed-tools']
-					: undefined,
+					: null,
 			updatedAt: Date.now(),
-			_v: 1 as const,
 		},
 		instructions: body,
 	};

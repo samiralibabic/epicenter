@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FileId } from '@epicenter/filesystem';
+	import { asFileId } from '@epicenter/filesystem';
 	import { Badge } from '@epicenter/ui/badge';
 	import * as Collapsible from '@epicenter/ui/collapsible';
 	import { cn } from '@epicenter/ui/utils';
@@ -27,7 +27,7 @@
 	}
 
 	function handleMatchClick(fileId: string) {
-		opensidian.state.files.selectFile(fileId as FileId);
+		opensidian.state.files.selectFile(asFileId(fileId));
 	}
 
 	const displayPath = $derived(

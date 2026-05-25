@@ -20,9 +20,8 @@
  * ```
  */
 
-import type { FolderId } from '@epicenter/honeycrisp';
+import { type FolderId, generateFolderId } from '@epicenter/honeycrisp';
 import { fromTable } from '@epicenter/svelte';
-import { generateId } from '@epicenter/workspace';
 import type { HoneycrispBrowser } from '../../../../browser';
 import { searchParams } from './search-params.svelte';
 
@@ -64,12 +63,12 @@ export function createFolders(honeycrisp: HoneycrispBrowser) {
 		 * ```
 		 */
 		create() {
-			const id = generateId() as FolderId;
+			const id = generateFolderId();
 			honeycrisp.tables.folders.set({
 				id,
 				name: 'New Folder',
+				icon: null,
 				sortOrder: foldersMap.size,
-				_v: 1,
 			});
 		},
 

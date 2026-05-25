@@ -145,32 +145,38 @@ Epicenter chooses row-level LWW because:
 
 You don't have to choose one approach for everything.
 
-**Use row-level for structured data:**
+**Use row-level for structured metadata:**
 
 ```typescript
-// Settings, preferences, records with schemas
-const settings = defineKv('settings')
-  .version(schema1)
-  .version(schema2)
-  .migrate(...);
+// Posts, notes, records with schemas. Multi-version tables get a migrate;
+// `_v` is library-managed, so it never appears in column declarations or
+// in the rows you write.
+const posts = defineTable(
+  { id: column.string(), title: column.string() },
+  { id: column.string(), title: column.string(), authorId: column.string() },
+).migrate(({ value, version }) => {
+  switch (version) {
+    case 1: return { ...value, authorId: 'unknown' };
+    case 2: return value;
+  }
+});
 ```
 
 **Use cell-level for collaborative content:**
 
 ```typescript
-// Store rich text as Y.Text in a separate structure
-const content = doc.getText('content'); // Full CRDT merging
+// Store rich text in a separate per-row Y.Doc (via createDisposableCache)
+const content = ydoc.getText('content'); // Full CRDT merging
 ```
 
 **Reference between them:**
 
 ```typescript
-// Row references the collaborative content
+// Row holds the metadata; the editor opens a content Y.Doc keyed off the id.
 const post = {
-	id: 'post-1',
-	title: 'My Post', // Row-level LWW
-	contentId: 'content-123', // Points to Y.Text
-	_v: 2,
+  id: 'post-1',
+  title: 'My Post',     // Row-level LWW
+  contentDocId: 'post-1', // Keys into a createDisposableCache of content docs
 };
 ```
 

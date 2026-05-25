@@ -261,25 +261,36 @@ Typed errors are structured values, so they're also what the `wellcrafted/logger
 
 ### The canonical pattern
 
-Mint the typed error inside `catch:`, route through Result, and log at the boundary with `tapErr`. The caller picks the level (`.warn` for recoverable, `.error` for loud) at the pipeline site — matching Rust's `tracing::warn!(?err)` convention, where level lives at the call site and never on the error variant.
+Mint the typed error inside `catch:`, then branch on the Result and log inside the branch. The caller picks the level (`.warn` for recoverable, `.error` for loud) at the call site — matching Rust's `tracing::warn!(?err)` convention, where level lives at the call site and never on the error variant.
 
 ```ts
-import { createLogger, tapErr } from 'wellcrafted/logger';
-import { tryAsync } from 'wellcrafted/result';
+import { createLogger } from 'wellcrafted/logger';
+import { trySync } from 'wellcrafted/result';
 
-const log = createLogger('markdown-materializer');
+const log = createLogger('sqlite-writer');
 
-const result = await tryAsync({
-  try: () => writeTable(path),
-  catch: (cause) => MarkdownError.TableWrite({ path, cause }),
-}).then(tapErr(log.warn)); // Result unchanged; error logged on the Err branch.
+const walResult = trySync({
+  try: () => db.query('PRAGMA journal_mode = WAL').get(),
+  catch: (cause) => SqliteWriterError.PragmaSetupFailed({ pragma: 'WAL', cause }),
+});
+if (walResult.error !== null) {
+  log.warn(walResult.error);
+} else if (walResult.data !== 'wal') {
+  log.warn(SqliteWriterError.WalSilentFallback({ actualMode: walResult.data }));
+}
 ```
 
-For direct error logging (no Result in play), pass the factory call directly — `log.warn` / `log.error` unwrap the `Err` wrapper that `defineErrors` factories return:
+Most epicenter call sites need the Ok branch's data locally, so they branch first and log inside the branch. The mint-and-log shorthand works the same way inside a `.catch` tail when there's no Result to branch on:
 
 ```ts
-log.warn(MarkdownError.TableWrite({ path, cause }));
+}).catch((cause) => {
+  log.warn(MaterializerWriteError.TableWriteFailed({ tableName, cause }));
+});
 ```
+
+`log.warn` / `log.error` accept either the raw tagged error (`result.error` after narrowing) or the `Err`-wrapped factory output (`MyError.Variant({ ... })`) and unwrap structurally.
+
+For the rarer Result-chain shape (`tryAsync(...).then(...)` where the Result flows out of the function), `tapErr(log.warn)` from `wellcrafted/result` is the combinator — see the logging SKILL's See also section.
 
 ### Why no `log.error(message, error)`?
 

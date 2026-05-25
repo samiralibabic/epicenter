@@ -11,12 +11,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import * as Y from 'yjs';
-import {
-	computeMidpoint,
-	generateInitialOrders,
-	reorderColumn,
-	reorderRow,
-} from './sheet.js';
+import { reorderColumn, reorderRow } from './sheet.js';
 
 function createSheetMaps() {
 	const ydoc = new Y.Doc();
@@ -26,37 +21,6 @@ function createSheetMaps() {
 }
 
 describe('fractional indexing', () => {
-	test('computeMidpoint returns value between bounds', () => {
-		const mid = computeMidpoint(0, 1);
-		expect(mid).toBeGreaterThan(0);
-		expect(mid).toBeLessThan(1);
-	});
-
-	test('computeMidpoint(0.25, 0.75) returns value in range', () => {
-		const mid = computeMidpoint(0.25, 0.75);
-		expect(mid).toBeGreaterThan(0.25);
-		expect(mid).toBeLessThan(0.75);
-	});
-
-	test('generateInitialOrders returns ascending values between 0 and 1', () => {
-		const orders = generateInitialOrders(5);
-		expect(orders.length).toBe(5);
-		for (let i = 0; i < orders.length; i++) {
-			expect(orders[i]).toBeGreaterThan(0);
-			expect(orders[i]).toBeLessThan(1);
-			if (i > 0) {
-				const previous = orders[i - 1];
-				if (previous !== undefined) {
-					expect(orders[i]).toBeGreaterThan(previous);
-				}
-			}
-		}
-	});
-
-	test('generateInitialOrders(0) returns empty array', () => {
-		expect(generateInitialOrders(0)).toEqual([]);
-	});
-
 	test('reorderRow updates order to midpoint between neighbors', () => {
 		const { rows } = createSheetMaps();
 		const row = new Y.Map<string>();

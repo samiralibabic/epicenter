@@ -1,30 +1,24 @@
 /**
  * Tests for `openSqliteReader` (the script-side read-only handle on the
  * daemon's SQLite materializer file). The daemon side is exercised via a real
- * `attachSqliteMaterializer` writing to an on-disk WAL file in a tmpdir; the
- * mirror reads the same file and asserts FTS5 lookups + raw row reads work.
+ * `attachBunSqliteMaterializer` writing to an on-disk WAL file in a tmpdir;
+ * the mirror reads the same file and asserts FTS5 lookups + raw row reads work.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type } from 'arktype';
-import { createLogger } from 'wellcrafted/logger';
 import * as Y from 'yjs';
-import { attachTables, defineTable } from '../index.js';
-import { attachSqliteMaterializer } from './materializer/sqlite/sqlite.js';
+import { attachTables, column, defineTable } from '../index.js';
+import { attachBunSqliteMaterializer } from './materializer/sqlite/bun-sqlite.js';
 import { openSqliteReader } from './open-sqlite-reader.js';
-import { openWriterSqlite } from './sqlite-writer.js';
 
-const entriesTable = defineTable(
-	type({
-		id: 'string',
-		_v: '1',
-		title: 'string',
-		body: 'string',
-	}),
-);
+const entriesTable = defineTable({
+	id: column.string(),
+	title: column.string(),
+	body: column.string(),
+});
 
 let workDir: string;
 
@@ -43,16 +37,17 @@ async function seedMirrorFile(
 ) {
 	const ydoc = new Y.Doc({ guid: 'test-mirror' });
 	const tables = attachTables(ydoc, { entries: entriesTable });
-	const db = openWriterSqlite({ filePath, log: createLogger('test') });
-	ydoc.once('destroy', () => db.close());
 	// debounceMs: 0 so each set() flushes on the next microtask, matching the
 	// "seed then read" shape of these tests.
-	const builder = attachSqliteMaterializer(ydoc, { db, debounceMs: 0 });
+	const builder = attachBunSqliteMaterializer(ydoc, {
+		filePath,
+		debounceMs: 0,
+	});
 	const materializer = fts
 		? builder.table(tables.entries, { fts: ['title', 'body'] })
 		: builder.table(tables.entries);
 	await materializer.whenFlushed;
-	for (const row of rows) tables.entries.set({ ...row, _v: 1 });
+	for (const row of rows) tables.entries.set({ ...row });
 	// Yield once for the debounced flush, then once more for the awaited
 	// syncQueue chain inside flushPendingSync to settle.
 	await new Promise<void>((resolve) => setTimeout(resolve, 0));

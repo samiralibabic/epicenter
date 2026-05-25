@@ -43,7 +43,7 @@ const actions = {
 };
 
 const collaboration = {
-	installationId: 'fixture',
+	deviceId: 'fixture',
 	actions,
 	status: { phase: 'connected' as const },
 	whenConnected: Promise.resolve(),

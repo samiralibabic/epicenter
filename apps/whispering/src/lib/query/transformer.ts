@@ -16,37 +16,16 @@ import type { DeviceConfigKey } from '$lib/state/device-config.svelte';
 import { deviceConfig } from '$lib/state/device-config.svelte';
 import { recordings } from '$lib/state/recordings.svelte';
 import { transformationRuns } from '$lib/state/transformation-runs.svelte';
+import { transformationStepRuns } from '$lib/state/transformation-step-runs.svelte';
 import { transformationSteps } from '$lib/state/transformation-steps.svelte';
 import { asTemplateString, interpolateTemplate } from '$lib/utils/template';
-import { whispering } from '$lib/whispering/client';
 import type {
+	TerminalTransformationRunResult,
 	Transformation,
 	TransformationRun,
 	TransformationStep,
 	TransformationStepRun,
 } from '$lib/workspace';
-
-type TransformationRunRunning = Extract<
-	TransformationRun,
-	{ status: 'running' }
->;
-type TransformationRunCompleted = Extract<
-	TransformationRun,
-	{ status: 'completed' }
->;
-type TransformationRunFailed = Extract<TransformationRun, { status: 'failed' }>;
-type TransformationStepRunRunning = Extract<
-	TransformationStepRun,
-	{ status: 'running' }
->;
-type TransformationStepRunCompleted = Extract<
-	TransformationStepRun,
-	{ status: 'completed' }
->;
-type TransformationStepRunFailed = Extract<
-	TransformationStepRun,
-	{ status: 'failed' }
->;
 
 /**
  * Config map for standard completion providers that share the same
@@ -124,44 +103,28 @@ export const transformer = {
 			const steps = transformationSteps.getByTransformationId(
 				transformation.id,
 			);
-			const getTransformationOutput = async (): Promise<
-				Result<string, WhisperingError>
-			> => {
-				const { data: transformationRun, error: transformationRunError } =
-					await runTransformation({
-						input,
-						transformation,
-						steps,
-						recordingId: null,
-					});
 
-				if (transformationRunError)
-					return WhisperingErr({
-						title: '⚠️ Transformation failed',
-						serviceError: transformationRunError,
-					});
+			const { data: result, error: runError } = await runTransformation({
+				input,
+				transformation,
+				steps,
+				recordingId: null,
+			});
 
-				if (transformationRun.status === 'failed') {
-					return WhisperingErr({
-						title: '⚠️ Transformation failed',
-						description: transformationRun.error,
-						action: { type: 'more-details', error: transformationRun.error },
-					});
-				}
+			if (runError)
+				return WhisperingErr({
+					title: '⚠️ Transformation failed',
+					serviceError: runError,
+				});
 
-				if (!transformationRun.output) {
-					return WhisperingErr({
-						title: '⚠️ Transformation produced no output',
-						description: 'The transformation completed but produced no output.',
-					});
-				}
+			if (result.status === 'failed')
+				return WhisperingErr({
+					title: '⚠️ Transformation failed',
+					description: result.error,
+					action: { type: 'more-details', error: result.error },
+				});
 
-				return Ok(transformationRun.output);
-			};
-
-			const transformationOutputResult = await getTransformationOutput();
-
-			return transformationOutputResult;
+			return Ok(result.output);
 		},
 	}),
 
@@ -173,12 +136,7 @@ export const transformer = {
 		}: {
 			recordingId: string;
 			transformation: Transformation;
-		}): Promise<
-			Result<
-				TransformationRunCompleted | TransformationRunFailed,
-				WhisperingError
-			>
-		> => {
+		}): Promise<Result<TerminalTransformationRunResult, WhisperingError>> => {
 			const recording = recordings.get(recordingId);
 			if (!recording) {
 				return WhisperingErr({
@@ -191,21 +149,20 @@ export const transformer = {
 				transformation.id,
 			);
 
-			const { data: transformationRun, error: transformationRunError } =
-				await runTransformation({
-					input: recording.transcript,
-					transformation,
-					steps,
-					recordingId,
-				});
+			const { data: result, error: runError } = await runTransformation({
+				input: recording.transcript,
+				transformation,
+				steps,
+				recordingId,
+			});
 
-			if (transformationRunError)
+			if (runError)
 				return WhisperingErr({
 					title: '⚠️ Transformation failed',
-					serviceError: transformationRunError,
+					serviceError: runError,
 				});
 
-			return Ok(transformationRun);
+			return Ok(result);
 		},
 	}),
 };
@@ -294,9 +251,7 @@ async function runTransformation({
 	transformation: Transformation;
 	steps: TransformationStep[];
 	recordingId: string | null;
-}): Promise<
-	Result<TransformationRunCompleted | TransformationRunFailed, TransformError>
-> {
+}): Promise<Result<TerminalTransformationRunResult, TransformError>> {
 	if (!input.trim()) {
 		return TransformError.InvalidInput({
 			message: 'Empty input. Please enter some text to transform',
@@ -319,10 +274,8 @@ async function runTransformation({
 		recordingId,
 		input,
 		startedAt: now,
-		completedAt: null,
-		status: 'running',
-		_v: 1,
-	} satisfies TransformationRunRunning;
+		result: { status: 'running' },
+	} satisfies TransformationRun;
 
 	transformationRuns.set(transformationRun);
 
@@ -337,11 +290,9 @@ async function runTransformation({
 			order: stepIndex,
 			input: currentInput,
 			startedAt: new Date().toISOString(),
-			completedAt: null,
-			status: 'running',
-			_v: 1,
-		} satisfies TransformationStepRunRunning;
-		whispering.tables.transformationStepRuns.set(stepRun);
+			result: { status: 'running' },
+		} satisfies TransformationStepRun;
+		transformationStepRuns.set(stepRun);
 
 		const handleStepResult = await handleStep({
 			input: currentInput,
@@ -350,42 +301,48 @@ async function runTransformation({
 
 		if (isErr(handleStepResult)) {
 			const failedNow = new Date().toISOString();
-			const failedStepRun = {
+			transformationStepRuns.set({
 				...stepRun,
-				status: 'failed',
-				completedAt: failedNow,
-				error: handleStepResult.error,
-			} satisfies TransformationStepRunFailed;
-			whispering.tables.transformationStepRuns.set(failedStepRun);
+				result: {
+					status: 'failed',
+					completedAt: failedNow,
+					error: handleStepResult.error,
+				},
+			});
 			const failedRun = {
 				...transformationRun,
-				status: 'failed',
-				completedAt: failedNow,
-				error: handleStepResult.error,
-			} satisfies TransformationRunFailed;
+				result: {
+					status: 'failed',
+					completedAt: failedNow,
+					error: handleStepResult.error,
+				},
+			} satisfies TransformationRun;
 			transformationRuns.set(failedRun);
-			return Ok(failedRun);
+			return Ok(failedRun.result);
 		}
 
 		const handleStepOutput = handleStepResult.data;
 
-		const completedStepRun = {
+		transformationStepRuns.set({
 			...stepRun,
-			status: 'completed',
-			completedAt: new Date().toISOString(),
-			output: handleStepOutput,
-		} satisfies TransformationStepRunCompleted;
-		whispering.tables.transformationStepRuns.set(completedStepRun);
+			result: {
+				status: 'completed',
+				completedAt: new Date().toISOString(),
+				output: handleStepOutput,
+			},
+		});
 
 		currentInput = handleStepOutput;
 	}
 
 	const completedRun = {
 		...transformationRun,
-		status: 'completed',
-		completedAt: new Date().toISOString(),
-		output: currentInput,
-	} satisfies TransformationRunCompleted;
+		result: {
+			status: 'completed',
+			completedAt: new Date().toISOString(),
+			output: currentInput,
+		},
+	} satisfies TransformationRun;
 	transformationRuns.set(completedRun);
-	return Ok(completedRun);
+	return Ok(completedRun.result);
 }

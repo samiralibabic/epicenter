@@ -41,7 +41,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: 0,
-				_v: 1,
 			});
 		}
 		syncBoth(docA, docB);
@@ -54,7 +53,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i} (edited by A)`,
 				views: i * 10,
-				_v: 1,
 			});
 		}
 
@@ -84,7 +82,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: 0,
-				_v: 1,
 			});
 		}
 		syncBoth(docA, docB);
@@ -98,7 +95,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i} (A)`,
 				views: 100,
-				_v: 1,
 			});
 		}
 		for (let i = 50; i < 100; i++) {
@@ -106,7 +102,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i} (B)`,
 				views: 200,
-				_v: 1,
 			});
 		}
 
@@ -134,7 +129,6 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i}`,
 				views: 0,
-				_v: 1,
 			});
 		}
 		syncBoth(docA, docB);
@@ -145,13 +139,11 @@ describe('sync delta size', () => {
 				id: generateId(i),
 				title: `Post ${i} version A`,
 				views: 1,
-				_v: 1,
 			});
 			tablesB.posts.set({
 				id: generateId(i),
 				title: `Post ${i} version B`,
 				views: 2,
-				_v: 1,
 			});
 		}
 
@@ -192,7 +184,6 @@ describe('merge time at scale', () => {
 					id: generateId(i),
 					title: `Post ${i}`,
 					views: 0,
-					_v: 1,
 				});
 			}
 			syncBoth(docA, docB);
@@ -203,7 +194,6 @@ describe('merge time at scale', () => {
 					id: generateId(i % 1_000),
 					title: `Edited ${i}`,
 					views: i,
-					_v: 1,
 				});
 			}
 

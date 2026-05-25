@@ -35,6 +35,8 @@ import { toUiMessage } from '$lib/chat/ui-message';
 import type { SessionAiTools } from '$lib/session.svelte';
 import type { TabManagerBrowser } from '$lib/tab-manager/extension';
 import {
+	asChatMessageId,
+	asConversationId,
 	type ChatMessageId,
 	type Conversation,
 	type ConversationId,
@@ -71,11 +73,13 @@ export function createAiChatState({
 		tabManager.tables.conversations.set({
 			id,
 			title: 'New Chat',
+			parentId: null,
+			sourceMessageId: null,
+			systemPrompt: null,
 			provider: DEFAULT_PROVIDER,
 			model: DEFAULT_MODEL,
 			createdAt: now,
 			updatedAt: now,
-			_v: 1,
 		});
 		return id;
 	}
@@ -131,7 +135,7 @@ export function createAiChatState({
 			initialMessages: loadMessages(conversationId),
 			tools: sessionAiTools.tools,
 			connection: fetchServerSentEvents(`${APP_URLS.API}/ai/chat`, async () => {
-				const deviceId = tabManager.installationId;
+				const deviceId = tabManager.deviceId;
 				return {
 					fetchClient: createAiChatFetch(auth.fetch),
 					body: {
@@ -158,12 +162,11 @@ export function createAiChatState({
 			},
 			onFinish: (message) => {
 				tabManager.tables.chatMessages.set({
-					id: message.id as ChatMessageId,
+					id: asChatMessageId(message.id),
 					conversationId,
 					role: 'assistant',
 					parts: message.parts as JsonValue[],
 					createdAt: message.createdAt?.getTime() ?? Date.now(),
-					_v: 1,
 				});
 				updateConversation(conversationId, {});
 			},
@@ -321,7 +324,6 @@ export function createAiChatState({
 					role: 'user',
 					parts: [{ type: 'text', content }],
 					createdAt: Date.now(),
-					_v: 1,
 				});
 
 				updateConversation(conversationId, {
@@ -336,7 +338,7 @@ export function createAiChatState({
 				const lastMessage = chat.messages.at(-1);
 				if (lastMessage?.role === 'assistant') {
 					tabManager.tables.chatMessages.delete(
-						lastMessage.id as ChatMessageId,
+						asChatMessageId(lastMessage.id),
 					);
 				}
 				void chat.reload();
@@ -400,7 +402,7 @@ export function createAiChatState({
 		}
 
 		for (const id of conversationsMap.keys()) {
-			const convId = id as ConversationId;
+			const convId = asConversationId(id);
 			if (!handles.has(convId)) {
 				handles.set(convId, createConversationHandle(convId));
 			}
@@ -409,7 +411,7 @@ export function createAiChatState({
 
 	// ── Active Conversation ──────────────────────────────────────────
 
-	let activeConversationId = $state<ConversationId>('' as ConversationId);
+	let activeConversationId = $state<ConversationId>(asConversationId(''));
 
 	// ── Observers ────────────────────────────────────────────────────────────
 
@@ -454,14 +456,13 @@ export function createAiChatState({
 		tabManager.tables.conversations.set({
 			id,
 			title,
-			parentId,
-			sourceMessageId,
-			systemPrompt,
+			parentId: parentId ?? null,
+			sourceMessageId: sourceMessageId ?? null,
+			systemPrompt: systemPrompt ?? null,
 			provider: current?.provider ?? DEFAULT_PROVIDER,
 			model: current?.model ?? DEFAULT_MODEL,
 			createdAt: now,
 			updatedAt: now,
-			_v: 1,
 		});
 
 		switchConversation(id);

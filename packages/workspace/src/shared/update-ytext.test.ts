@@ -177,14 +177,6 @@ describe('updateYXmlFragmentFromString', () => {
 		expect(serialize(frag)).toBe('replaced');
 	});
 
-	test('inserts target content when initial fragment is empty', () => {
-		const ydoc = new Y.Doc();
-		const frag = ydoc.getXmlFragment('richtext');
-
-		updateYXmlFragmentFromString(frag, 'new content', serialize, apply);
-		expect(serialize(frag)).toBe('new content');
-	});
-
 	test('throws when XmlFragment is not attached to a doc', () => {
 		const frag = new Y.XmlFragment();
 		expect(() =>

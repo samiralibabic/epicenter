@@ -53,7 +53,6 @@ const row = (i: number) => ({
 	license: 'MIT',
 	compatibility: 'Claude Code',
 	updatedAt: Date.now(),
-	_v: '1',
 });
 
 // ═══════════════════════════════════════════════════════════════════════

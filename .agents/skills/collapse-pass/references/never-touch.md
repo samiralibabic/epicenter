@@ -9,27 +9,31 @@ These appear in encrypted blobs, on-disk paths, sync wire format, or schemas oth
 ### HKDF info labels
 
 ```
-"subject:{subject}"
-"workspace:{workspaceId}"
+"owner:{label}"        // packages/encryption/src/derivation.ts
+"workspace:{workspaceId}"  // packages/encryption/src/derivation.ts
 ```
 
-Used by the encryption package to derive workspace-scoped keys. Changing the label rotates every derived key.
+Used by the encryption package to derive per-owner keyrings and then per-workspace keys. Changing either label rotates every derived key in every deployment.
 
-### IndexedDB prefix
+History: the first label was `"subject:{subject}"` before commit `af31c870b` (Owner partition collapse) and `926ef1b37` (HKDF prefix rename). Do not revive that vocabulary.
 
-```
-"epicenter.owner.{ownerId}.yjs.{guid}"
-```
-
-Used by the browser-side workspace runtime. Changing the prefix detaches every existing IndexedDB store from its consumer.
-
-### Durable Object name format
+### IndexedDB and BroadcastChannel key
 
 ```
-"subject:{subject}:rooms:{room}"
+"epicenter/{server}/owners/{ownerId}/{ydocGuid}"
 ```
 
-Used by the sync hub to address rooms. Changing the format breaks the routing contract between client and hub.
+Used by the browser-side workspace runtime (`packages/workspace/src/document/local-yjs-key.ts`). Forward slashes, includes the API origin host as `{server}` so two team deployments on the same browser profile don't collide, and partition segment is `owners/{ownerId}/` to match the server's URL and R2 shape. Changing the format detaches every existing IndexedDB store from its consumer.
+
+### Durable Object name format and URL shape
+
+```
+"owners/{ownerId}/rooms/{roomId}"
+```
+
+Used by the sync hub to address rooms (`packages/server/src/owner.ts`, `doName()`). Same shape on the wire: `/api/owners/:ownerId/rooms/:roomId`. Changing the format breaks the routing contract between client and hub.
+
+In personal mode `ownerId` is the signed-in user's id; in team mode it is the literal `TEAM_OWNER_ID` (`'team'`). The path is uniform across modes.
 
 ### EncryptedBlob format bytes
 
@@ -42,20 +46,22 @@ Both bytes are part of the on-disk and on-wire encryption envelope. Bumping them
 
 Other apps validate inputs against these by name and shape. Renaming a field or changing a brand silently invalidates their parsers.
 
-- `PersistedAuth`
-- `ApiSessionResponse`
-- `SubjectKeyring`
-- `RootKeyring`
+- `PersistedAuth` (`packages/auth/src/auth-types.ts`)
+- `ApiSessionResponse` (`packages/auth/src/auth-types.ts`)
+- `Keyring` (`packages/encryption/src/keys.ts`, formerly `SubjectKeyring` before `af31c870b`)
+- `RootKeyring` (`packages/encryption/src/secrets.ts`)
+- `OwnerId`, `UserId`, `TEAM_OWNER_ID` (`packages/auth/src/ids.ts`)
+
+`OwnershipMode` is intentionally NOT in this list: it was moved to
+`packages/server/src/types.ts` in `eb85a0d9b` and dropped its arktype
+validator (it's a plain `'personal' | 'team'` literal now). It is
+server-internal deployment config, not a wire-validated schema.
 
 ### Identity strings inside documents
 
 - Y.Doc guid values (workspace identity for sync and persistence)
 - Sync room names
 - Child document GUIDs (deterministic per row, used by materializers and editors)
-
-### Migration shims
-
-- `LegacyPersistedAuth` (and any other `*Legacy*` validator). These carry the historic on-disk vocabulary by design. Even when no current writer produces the legacy shape, readers must still accept it. Do not delete legacy migration shims; their presence is the migration contract.
 
 ## Pause and ask before
 

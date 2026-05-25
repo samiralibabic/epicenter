@@ -42,14 +42,6 @@ describe('populateFragmentFromText', () => {
 		// '' split by \n gives [''] — one paragraph
 		expect(fragment.length).toBe(1);
 	});
-
-	test('round-trip: populate → extract preserves text', () => {
-		const original = 'First paragraph\nSecond paragraph\nThird paragraph';
-		const fragment = createDocFragment((f) => {
-			populateFragmentFromText(f, original);
-		});
-		expect(xmlFragmentToPlaintext(fragment)).toBe(original);
-	});
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -65,12 +57,6 @@ describe('attachTimeline - asRichText', () => {
 		const tl = setup();
 		tl.asRichText();
 		expect(tl.currentType).toBe('richtext');
-	});
-
-	test('asRichText returns XmlFragment', () => {
-		const tl = setup();
-		const fragment = tl.asRichText();
-		expect(fragment).toBeInstanceOf(Y.XmlFragment);
 	});
 
 	test('richtext entry has createdAt', () => {

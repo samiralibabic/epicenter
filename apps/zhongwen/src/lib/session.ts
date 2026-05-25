@@ -1,5 +1,5 @@
 import { createSession } from '@epicenter/svelte';
-import { createInstallationId } from '@epicenter/workspace';
+import { createDeviceId } from '@epicenter/workspace';
 import { auth } from '$platform/auth';
 import { openZhongwenBrowser } from '../routes/(signed-in)/zhongwen/browser';
 
@@ -8,7 +8,7 @@ export const session = createSession({
 	build: (signedIn) =>
 		openZhongwenBrowser({
 			signedIn,
-			installationId: createInstallationId({ storage: localStorage }),
+			deviceId: createDeviceId({ storage: localStorage }),
 		}),
 });
 

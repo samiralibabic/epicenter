@@ -12,10 +12,10 @@ import type { EntryId } from './workspace';
 export function createEntriesState(fuji: FujiBrowser) {
 	const entriesMap = fromTable(fuji.tables.entries);
 	const active = $derived(
-		[...entriesMap.values()].filter((e) => e.deletedAt === undefined),
+		[...entriesMap.values()].filter((e) => e.deletedAt === null),
 	);
 	const deleted = $derived(
-		[...entriesMap.values()].filter((e) => e.deletedAt !== undefined),
+		[...entriesMap.values()].filter((e) => e.deletedAt !== null),
 	);
 	return {
 		get: (id: EntryId) => entriesMap.get(id),

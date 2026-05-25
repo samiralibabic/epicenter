@@ -1,6 +1,6 @@
 import type { Table } from '@epicenter/workspace';
 import type * as Y from 'yjs';
-import type { FileId } from '../ids.js';
+import { asFileId, type FileId } from '../ids.js';
 import type { FileRow } from '../table.js';
 import { disambiguateNames } from './naming.js';
 
@@ -59,10 +59,11 @@ export function attachFileSystemIndex(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 	function buildInitialState() {
 		// getAllValid() returns fresh objects (parseRow spreads input), so we
 		// can safely mutate parentId on these locals to track fix-up changes
-		// without re-scanning the whole table.
-		const activeRows = filesTable
-			.getAllValid()
-			.filter((r) => r.trashedAt === null);
+		// without re-scanning the whole table. TypeBox's inferred row type
+		// marks union-typed columns (e.g. nullable) as readonly; the cast
+		// recovers mutability on the local copies.
+		const activeRows: Array<{ -readonly [K in keyof FileRow]: FileRow[K] }> =
+			filesTable.getAllValid().filter((r) => r.trashedAt === null);
 
 		for (const id of fixCircularReferences(activeRows)) {
 			const row = activeRows.find((r) => r.id === id);
@@ -105,7 +106,7 @@ export function attachFileSystemIndex(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 		const idsNeedingPaths = new Set<FileId>();
 
 		for (const rawId of changedIds) {
-			const id = rawId as FileId;
+			const id = asFileId(rawId);
 			const { data: row, error } = filesTable.get(id);
 			const prev = snapshot.get(id);
 
@@ -265,7 +266,7 @@ export function attachFileSystemIndex(ydoc: Y.Doc, filesTable: Table<FileRow>) {
 		const names = disambiguateNames(childRows);
 
 		for (const [id, newName] of names) {
-			const fid = id as FileId;
+			const fid = asFileId(id);
 			const oldName = displayName.get(fid);
 			displayName.set(fid, newName);
 			if (oldName !== undefined && oldName !== newName) {

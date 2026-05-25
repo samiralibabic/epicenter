@@ -33,7 +33,7 @@ function setup() {
 
 test('creates a file', () => {
 	const { files } = setup();
-	files.set({ id: '1', name: 'test.txt', _v: 1 });
+	files.set({ id: asFileId('1'), name: 'test.txt' });
 	expect(files.has('1')).toBe(true);
 });
 ```
@@ -125,17 +125,14 @@ function setup() {
 
 ## Shared Schemas at Module Level
 
-Schemas and table definitions used across multiple tests should be defined at module level, outside `setup()`:
+Table definitions used across multiple tests should be defined at module level, outside `setup()`:
 
 ```typescript
-const fileSchema = type({
-	id: 'string',
-	name: 'string',
-	updatedAt: 'number',
-	_v: '1',
+const filesTable = defineTable({
+	id: column.string<FileId>(),
+	name: column.string(),
+	updatedAt: column.integer(),
 });
-
-const filesTable = defineTable(fileSchema);
 
 function setup() {
 	const ydoc = new Y.Doc({ guid: 'test' });

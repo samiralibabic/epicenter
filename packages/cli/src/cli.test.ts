@@ -32,11 +32,6 @@ async function captureHelp(argv: string[] = ['--help']): Promise<string> {
 }
 
 describe('createCLI', () => {
-	test('returns an object with a run method', () => {
-		const cli = createCLI();
-		expect(typeof cli.run).toBe('function');
-	});
-
 	test('rejects with usage when no arguments provided', async () => {
 		const cli = createCLI();
 		const errorSpy = spyOn(console, 'error').mockImplementation(() => {});

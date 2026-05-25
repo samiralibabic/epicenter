@@ -69,52 +69,58 @@ If Alice edits `title` and Bob edits `views` at the same time, one of their chan
 Here's how it looks in practice:
 
 ```typescript
+import { column, defineTable } from '@epicenter/workspace';
+import Type from 'typebox';
+
 const posts = defineTable(
-	type({ id: 'string', title: 'string', _v: '1' }),
-	type({ id: 'string', title: 'string', views: 'number', _v: '2' }),
-	type({
-		id: 'string',
-		title: 'string',
-		views: 'number',
-		tags: 'string[]',
-		_v: '3',
-	}),
-)
-	.migrate((row) => {
-		switch (row._v) {
-			case 1:
-				return { ...row, views: 0, tags: [], _v: 3 };
-			case 2:
-				return { ...row, tags: [], _v: 3 };
-			case 3:
-				return row;
-		}
-	});
+	{ id: column.string(), title: column.string() },
+	{
+		id: column.string(),
+		title: column.string(),
+		views: column.number(),
+	},
+	{
+		id: column.string(),
+		title: column.string(),
+		views: column.number(),
+		tags: column.json(Type.Array(Type.String())),
+	},
+).migrate(({ value, version }) => {
+	switch (version) {
+		case 1: return { ...value, views: 0, tags: [] };
+		case 2: return { ...value, tags: [] };
+		case 3: return value;
+	}
+});
 ```
 
-The schema versions are declared directly in `defineTable(...)`. The `.migrate()` function receives any version and normalizes to the latest.
-
-Because the entire row is atomic, you're guaranteed that `row._v` tells you the exact schema of every field in that row. No ambiguity, no mixed versions.
+Each version is a positional argument to `defineTable(...)`. The `.migrate()` function receives `{ value, version }` and normalizes to the latest user-facing row. The library stamps a `_v` on each stored row, so the migrate router always knows which schema produced the bytes; `_v` itself is library-managed and never appears in user code.
 
 ## Same Pattern for KV
 
-The same principle applies to key-value storage, though KV values don't need a `_v` discriminator. KV values are small enough that field presence is unambiguous:
+The same principle applies to key-value storage, though KV values don't carry a stored version stamp. They're validate-or-default: if the stored value fails validation, the entry falls back to the factory default:
 
 ```typescript
+import { column, defineKv } from '@epicenter/workspace';
+import Type from 'typebox';
+
 const theme = defineKv(
-	type({ mode: "'light' | 'dark' | 'system'", accentColor: 'string' }),
-	{ mode: 'light', accentColor: '#3b82f6' },
-)
+	Type.Object({
+		mode: Type.Union([Type.Literal('light'), Type.Literal('dark'), Type.Literal('system')]),
+		accentColor: column.string(),
+	}),
+	() => ({ mode: 'light' as const, accentColor: '#3b82f6' }),
+);
 ```
 
-Each KV value is an atomic blob with a coherent shape. For small objects, field presence checks are simpler than version discriminators.
+Each KV value is an atomic blob with a coherent shape. For small objects, validate-or-default is simpler than maintaining a version discriminator.
 
 ## The Key Insight
 
 **Granularity match is what makes versioned schemas possible.**
 
-- Tables: Row-level writes → Row-level schema versions (requires `_v` number discriminator)
-- KV: Value-level writes → Field presence checks or `_v` (both work)
+- Tables: row-level writes → row-level schema versions (library stamps `_v` on every write, routes by it on read)
+- KV: value-level writes → validate-or-default (no version stamp; bad data resets to the factory default)
 
 If your writes are atomic at some boundary, your schemas can be versioned at that same boundary. Epicenter chooses row/value boundaries, which enables clean schema evolution at the cost of concurrent field editing.
 

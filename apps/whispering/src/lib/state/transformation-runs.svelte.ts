@@ -80,7 +80,6 @@ function createTransformationRuns() {
 		set(run: Omit<TransformationRun, '_v'>) {
 			whispering.tables.transformationRuns.set({
 				...run,
-				_v: 1,
 			} as TransformationRun);
 		},
 
