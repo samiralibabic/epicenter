@@ -90,6 +90,14 @@ const startManualRecording = defineMutation({
 			return Ok(undefined);
 		}
 
+		// Never let a voice activated session keep running alongside a manual
+		// recording. Switching the mode below hides the VAD controls, so a session
+		// left running would keep listening (and pasting) invisibly.
+		if (vadRecorder.state !== 'IDLE') {
+			console.info('Stopping voice activated capture before manual recording');
+			await stopVadRecording(undefined);
+		}
+
 		settings.set('recording.mode', 'manual');
 
 		const toastId = nanoid();

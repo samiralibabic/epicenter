@@ -89,6 +89,31 @@ export const LocalShortcutManagerLive = {
 		const activeShortcuts = new Set<CommandId>();
 
 		/**
+		 * Syncs modifier keys in pressedKeys with the event's modifier flags.
+		 *
+		 * Synthetic keystrokes (e.g. the Cmd+V that write_text posts to paste a
+		 * transcript) can arrive without a separate keydown for the modifier. Without
+		 * this, a Cmd+V landing in our own window is seen as a bare "v" and fires the
+		 * "v" shortcut (toggle voice activated recording). Also clears modifiers that
+		 * got stuck because their keyup never arrived.
+		 */
+		const syncModifierKeys = (e: KeyboardEvent) => {
+			const modifierFlags = [
+				['meta', e.metaKey],
+				['control', e.ctrlKey],
+				['alt', e.altKey],
+				['shift', e.shiftKey],
+			] as const;
+			for (const [modifier, isHeld] of modifierFlags) {
+				const isTracked = pressedKeys.includes(modifier);
+				if (isHeld && !isTracked) pressedKeys.push(modifier);
+				if (!isHeld && isTracked) {
+					pressedKeys = pressedKeys.filter((k) => k !== modifier);
+				}
+			}
+		};
+
+		/**
 		 * Handle keydown events - adds keys to pressed state and triggers 'Pressed' shortcuts.
 		 * Fires repeatedly while a key is held down (due to OS key repeat), but activeShortcuts
 		 * ensures callbacks only fire once per physical key press.
@@ -96,6 +121,8 @@ export const LocalShortcutManagerLive = {
 		const keydown = on(window, 'keydown', (e) => {
 			// Skip shortcut processing if user is typing in an input field
 			if (isTypingInInput()) return;
+
+			syncModifierKeys(e);
 
 			let key = e.key.toLowerCase() as KeyboardEventPossibleKey;
 

@@ -210,6 +210,25 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 /// the user's clipboard, making it ideal for inserting transcribed text.
 #[tauri::command]
 async fn write_text(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    // Never paste into Whispering itself. If one of our windows is focused (e.g. the
+    // paste was delayed until the user switched to Whispering), the simulated paste
+    // would land here and could trigger in-app shortcuts. Leave the text on the
+    // clipboard instead so the user can paste it where they want.
+    let whispering_is_focused = app
+        .webview_windows()
+        .values()
+        .any(|window| window.is_focused().unwrap_or(false));
+    if whispering_is_focused {
+        app.clipboard()
+            .write_text(&text)
+            .map_err(|e| format!("Failed to write to clipboard: {}", e))?;
+        warn!("[write_text] Whispering window is focused; copied text to clipboard instead of pasting");
+        return Err(
+            "Whispering was the active window, so the text was copied to the clipboard instead of pasted."
+                .to_string(),
+        );
+    }
+
     // 1. Save current clipboard content
     let original_clipboard = app.clipboard().read_text().ok();
 
