@@ -1,10 +1,5 @@
-> [!NOTE]
-> **This fork maintains Whispering 7, the push-to-talk dictation app.** Upstream Epicenter has rebuilt Whispering as a file-based voice-notes app without global shortcuts, push-to-talk, voice-activated recording, auto-paste, or on-device transcription. This fork keeps the 7.x line working. It is community-maintained and not affiliated with Epicenter.
->
-> - **Download:** [latest release](https://github.com/samiralibabic/epicenter/releases/latest) (macOS, Apple Silicon)
-> - **App source:** [`apps/whispering`](apps/whispering)
->
-> Everything below this note is the upstream README as of the fork point.
+> [!IMPORTANT]
+> **Whispering 7 has moved to [samiralibabic/whispering](https://github.com/samiralibabic/whispering).** Download new releases and report issues there. This repository is archived; installed copies of Whispering 7.12.0 update themselves to the new repository.
 
 <p align="center">
   <a href="https://epicenter.so">
