@@ -2,7 +2,7 @@
 	"name": "epicenter",
 	"type": "module",
 	"private": true,
-	"version": "7.11.0",
+	"version": "7.12.0",
 	"description": "Local-first PKM substrate. CRDT-powered tables that materialize to SQLite and markdown.",
 	"keywords": [
 		"local-first",

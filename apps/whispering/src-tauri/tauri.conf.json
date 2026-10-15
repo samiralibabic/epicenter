@@ -26,7 +26,7 @@
 			"entitlements": "entitlements.plist",
 			"hardenedRuntime": true,
 			"minimumSystemVersion": "10.15",
-			"signingIdentity": "Developer ID Application: Braden Wong (3C7J97QA5Z)"
+			"signingIdentity": "-"
 		},
 		"linux": {
 			"appimage": {
@@ -48,13 +48,13 @@
 		}
 	},
 	"productName": "Whispering",
-	"version": "7.11.0",
+	"version": "7.12.0",
 	"identifier": "com.bradenwong.whispering",
 	"plugins": {
 		"updater": {
-			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUwQzE1RjEyRThENzg0OEEKUldTS2hOZm9FbC9CVU1uZ1JLWlluMm1mOHd4N1RWUkNjME9PcHA3Nkg2ek5RMnZyVTVDS2k1QkwK",
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQzQzk3RjdCRTBFRkZFOEEKUldTSy91L2dlMy9KUTN4cGMrYXRyQ2dycjNVVHB4V3hHL0M5ZWZRbU1Sbm1MRGJ2QXEvTnlYUlMK",
 			"endpoints": [
-				"https://github.com/EpicenterHQ/epicenter/releases/latest/download/latest.json"
+				"https://github.com/samiralibabic/epicenter/releases/latest/download/latest.json"
 			]
 		}
 	},

@@ -76,7 +76,7 @@
 	import { rpc } from '$lib/query';
 
 	const GITHUB_RELEASES_URL =
-		'https://github.com/EpicenterHQ/epicenter/releases/tag';
+		'https://github.com/samiralibabic/epicenter/releases/tag';
 
 	function getGitHubReleaseUrl(version: string) {
 		const tag = version.startsWith('v') ? version : `v${version}`;

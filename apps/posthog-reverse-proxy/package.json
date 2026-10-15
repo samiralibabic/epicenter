@@ -1,6 +1,6 @@
 {
 	"name": "@epicenter/posthog-reverse-proxy",
-	"version": "0.0.1",
+	"version": "7.12.0",
 	"private": true,
 	"description": "PostHog reverse proxy for epicenter.so",
 	"type": "module",

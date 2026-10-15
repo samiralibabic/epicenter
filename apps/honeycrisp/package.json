@@ -2,7 +2,7 @@
 	"name": "@epicenter/honeycrisp",
 	"description": "Local-first notes app with collaborative rich-text editing",
 	"private": true,
-	"version": "0.0.1",
+	"version": "7.12.0",
 	"type": "module",
 	"exports": {
 		"./workspace": "./src/lib/workspace.ts"

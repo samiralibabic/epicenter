@@ -3,7 +3,7 @@
 	"description": "Public landing site for Epicenter",
 	"private": true,
 	"type": "module",
-	"version": "0.0.1",
+	"version": "7.12.0",
 	"scripts": {
 		"dev": "bun run dev:local",
 		"dev:local": "astro dev",

@@ -2,7 +2,7 @@
 	"name": "@epicenter/dashboard",
 	"description": "Billing and credits dashboard for Epicenter customers",
 	"private": true,
-	"version": "0.0.1",
+	"version": "7.12.0",
 	"type": "module",
 	"scripts": {
 		"dev": "bun run dev:local",

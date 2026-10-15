@@ -2,7 +2,7 @@
 	"name": "@epicenter/breddit",
 	"description": "Reddit GDPR data export importer for Epicenter workspaces",
 	"private": true,
-	"version": "0.0.1",
+	"version": "7.12.0",
 	"type": "module",
 	"exports": {
 		"./workspace": "./src/lib/workspace/ingest/index.ts"
